@@ -42,7 +42,7 @@ export default function HomeScreen() {
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
   const txnsQ = useTransactions(householdId, cycleId);
-  // Realtime dipasang sekali di app/(tabs)/_layout.tsx agar tetap hidup di semua tab.
+  // Realtime is mounted once in app/(tabs)/_layout.tsx so it stays alive on every tab.
 
   const live = !!householdId && !!cycleId && !!txnsQ.data;
   const txns = useMemo(() => (live ? txnsQ.data! : []), [live, txnsQ.data]);
@@ -61,9 +61,9 @@ export default function HomeScreen() {
   const cycleName = live ? (cycleQ.data!.name ?? 'Siklus Aktif') : mockCycle.name;
   const cycleRange = live
     ? `${cycleQ.data!.start_date} – ${cycleQ.data!.end_date}`
-    : mockCycle.dayInfo;
-  const kasRiil = live ? flow.kasRiil : mockCycle.kasRiil;
-  const estimasi = live ? flow.estimasiSisa : mockCycle.estimasiSisa;
+    : mockCycle.dayLabel;
+  const actualCash = live ? flow.actualCash : mockCycle.actualCash;
+  const projected = live ? flow.projectedRemaining : mockCycle.projectedRemaining;
   const pendingCount = live ? flow.pendingCount : mockCycle.pendingCount;
   const paidCount = live ? flow.paidCount : mockCycle.paidCount;
 
@@ -116,10 +116,10 @@ export default function HomeScreen() {
         )}
 
         <HeroSplitCard
-          kasRiil={kasRiil}
-          estimasiSisa={estimasi}
-          estimasiSub={`Setelah ${pendingCount} tanggungan`}
-          footLeft={`● Terproyeksi ${estimasi >= 0 ? 'aman' : 'minus'} • Buffer ${formatRupiahShort(Math.abs(estimasi))}`}
+          actualCash={actualCash}
+          projectedRemaining={projected}
+          projectedSub={`Setelah ${pendingCount} tanggungan`}
+          footLeft={`● Terproyeksi ${projected >= 0 ? 'aman' : 'minus'} • Buffer ${formatRupiahShort(Math.abs(projected))}`}
         />
 
         <SegmentedTabs

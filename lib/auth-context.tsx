@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHousehold(null);
       }
     } catch (e: any) {
-      // RLS / belum ada tabel saat pertama kali — jangan blokir login
+      // RLS / tables not created yet on first run — do not block sign-in
       setError(e?.message ?? 'Gagal memuat ruang keluarga.');
     }
   }, []);

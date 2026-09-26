@@ -8,7 +8,7 @@ import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useCategories, useQuickAdd } from '../lib/queries';
 import { PrimaryButton } from '../components/ui/Button';
 
-function parseRp(text: string): number {
+function parseAmount(text: string): number {
   const digits = text.replace(/[^0-9]/g, '');
   return digits ? parseInt(digits, 10) : 0;
 }
@@ -32,10 +32,10 @@ export default function QuickAddScreen() {
 
   const categories = useMemo(() => catsQ.data ?? [], [catsQ.data]);
   const accounts = useMemo(() => accsQ.data ?? [], [accsQ.data]);
-  const amount = parseRp(amountText);
+  const amount = parseAmount(amountText);
 
-  const selCat = categoryId ?? categories[0]?.id ?? null;
-  const selAcc = accountId ?? accounts[0]?.id ?? null;
+  const selectedCategoryId = categoryId ?? categories[0]?.id ?? null;
+  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
 
   async function save() {
     setErr(null);
@@ -52,8 +52,8 @@ export default function QuickAddScreen() {
         name: name.trim(),
         amount,
         direction: kind === 'out' ? 'EXPENSE' : 'INCOME',
-        categoryId: selCat,
-        accountId: selAcc,
+        categoryId: selectedCategoryId,
+        accountId: selectedAccountId,
         makeRecurring: recurring,
       });
       router.back();
@@ -101,7 +101,7 @@ export default function QuickAddScreen() {
         <Text style={styles.sectionLabel}>KATEGORI</Text>
         <View style={styles.grid}>
           {categories.map((c) => {
-            const active = (selCat ?? '') === c.id;
+            const active = (selectedCategoryId ?? '') === c.id;
             return (
               <Pressable key={c.id} onPress={() => setCategoryId(c.id)} style={[styles.chip, active && styles.chipActive]}>
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.name}</Text>
@@ -114,7 +114,7 @@ export default function QuickAddScreen() {
         <Text style={styles.sectionLabel}>AKUN</Text>
         <View style={styles.grid}>
           {accounts.map((a) => {
-            const active = (selAcc ?? '') === a.id;
+            const active = (selectedAccountId ?? '') === a.id;
             return (
               <Pressable key={a.id} onPress={() => setAccountId(a.id)} style={[styles.chip, active && styles.chipOutline]}>
                 <Text style={styles.chipText}>{a.name}</Text>

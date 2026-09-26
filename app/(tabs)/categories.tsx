@@ -8,7 +8,7 @@ import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useCategories, useTransactions } from '../../lib/queries';
 import { Badge } from '../../components/ui/Badge';
 
-export default function KategoriScreen() {
+export default function CategoriesScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;

@@ -6,7 +6,7 @@ import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useTransactions } from '../../lib/queries';
 
-export default function RiwayatScreen() {
+export default function HistoryScreen() {
   const { household } = useAuth();
   const householdId = household?.id;
   const cycleQ = useActiveCycle(householdId);

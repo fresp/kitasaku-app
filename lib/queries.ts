@@ -262,7 +262,7 @@ export function useCreateObligation() {
   });
 }
 
-export function calcCashflow(txns: Txn[]): { kasRiil: number; estimasiSisa: number; pendingCount: number; paidCount: number } {
+export function calcCashflow(txns: Txn[]): { actualCash: number; projectedRemaining: number; pendingCount: number; paidCount: number } {
   let cashIn = 0, cashOut = 0, pendingOut = 0, pendingCount = 0, paidCount = 0;
   for (const t of txns) {
     if (t.status === 'PAID') {
@@ -275,6 +275,6 @@ export function calcCashflow(txns: Txn[]): { kasRiil: number; estimasiSisa: numb
       else pendingOut -= t.planned_amount;
     }
   }
-  const kasRiil = cashIn - cashOut;
-  return { kasRiil, estimasiSisa: kasRiil - pendingOut, pendingCount, paidCount };
+  const actualCash = cashIn - cashOut;
+  return { actualCash, projectedRemaining: actualCash - pendingOut, pendingCount, paidCount };
 }

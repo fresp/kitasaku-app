@@ -18,9 +18,9 @@ export interface MockTransaction {
 export const activeCycle = {
   name: 'Siklus Okt 2026',
   range: '25 Sep – 24 Okt • Payday-to-Payday',
-  dayInfo: '25 Sep – 24 Okt • Hari ke-1',
-  kasRiil: 6034000,
-  estimasiSisa: 1390834,
+  dayLabel: '25 Sep – 24 Okt • Hari ke-1',
+  actualCash: 6034000,
+  projectedRemaining: 1390834,
   buffer: 890000,
   pendingCount: 18,
   paidCount: 5,

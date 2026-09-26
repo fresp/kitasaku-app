@@ -9,7 +9,7 @@ import { useActiveCycle, useAllocateObligation, useCategories, useAccounts, useC
 import { Badge } from '../../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
 
-export default function TanggunganScreen() {
+export default function ObligationsScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;
@@ -29,7 +29,7 @@ export default function TanggunganScreen() {
   const [err, setErr] = useState<string | null>(null);
 
   const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
-  const totalSisa = obligations.reduce((s, o) => s + (o.remaining_amount ?? 0), 0);
+  const totalRemaining = obligations.reduce((s, o) => s + (o.remaining_amount ?? 0), 0);
   const allocTarget = obligations.find((o) => o.id === allocId) ?? null;
 
   const historyByOb = useMemo(() => {
@@ -100,7 +100,7 @@ export default function TanggunganScreen() {
 
         <View style={styles.overview}>
           <Text style={styles.eyebrow}>TOTAL TANGGUNGAN BELUM LUNAS • {obligations.length} AKTIF</Text>
-          <Text style={styles.total}>{formatRupiah(totalSisa)}</Text>
+          <Text style={styles.total}>{formatRupiah(totalRemaining)}</Text>
           <Text style={styles.sub}>Kewajiban independen di luar rutinitas bulanan</Text>
         </View>
 

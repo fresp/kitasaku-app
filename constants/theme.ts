@@ -1,4 +1,4 @@
-// Kitasaku Design Tokens — dipetakan 1:1 dari design/design.pen (Design System - Foundations)
+// Kitasaku Design Tokens — mapped 1:1 from design/design.pen (Design System - Foundations)
 export const Colors = {
   canvas: '#F8FAFC',
   surface: '#FFFFFF',

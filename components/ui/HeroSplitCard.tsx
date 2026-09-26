@@ -3,14 +3,14 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 
 export function HeroSplitCard({
-  kasRiil,
-  estimasiSisa,
-  estimasiSub,
+  actualCash,
+  projectedRemaining,
+  projectedSub,
   footLeft,
 }: {
-  kasRiil: number;
-  estimasiSisa: number;
-  estimasiSub: string;
+  actualCash: number;
+  projectedRemaining: number;
+  projectedSub: string;
   footLeft: string;
 }) {
   return (
@@ -19,13 +19,13 @@ export function HeroSplitCard({
       <View style={styles.split}>
         <View style={styles.col}>
           <Text style={styles.label}>Saldo Kas Riil</Text>
-          <Text style={styles.value}>{formatRupiah(kasRiil)}</Text>
+          <Text style={styles.value}>{formatRupiah(actualCash)}</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.col}>
           <Text style={styles.label}>Estimasi Sisa Akhir</Text>
-          <Text style={styles.value}>{formatRupiah(estimasiSisa)}</Text>
-          <Text style={styles.sub}>{estimasiSub}</Text>
+          <Text style={styles.value}>{formatRupiah(projectedRemaining)}</Text>
+          <Text style={styles.sub}>{projectedSub}</Text>
         </View>
       </View>
       <View style={styles.footer}>

@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
-// Import per-ikon lewat subpath resmi (bukan barrel `lucide-react-native`)
-// supaya Metro tidak menarik 1800+ file ikon ke bundle — memangkas waktu
-// build & unduh, yang membuat Expo Go gagal "download remote update".
+// Import icons via the official per-icon subpath (not the `lucide-react-native`
+// barrel) so Metro doesn't pull 1800+ icon files into the bundle — this cuts
+// build & download time, which made Expo Go fail with "download remote update".
 import ChartPie from 'lucide-react-native/icons/chart-pie';
 import Clock3 from 'lucide-react-native/icons/clock-3';
 import House from 'lucide-react-native/icons/house';
@@ -11,8 +11,9 @@ import { useAuth } from '../../lib/auth-context';
 import { useHouseholdRealtime } from '../../lib/realtime';
 
 export default function TabsLayout() {
-  // Dipasang di level layout (bukan per-tab) supaya langganan realtime tetap hidup
-  // saat pengguna pindah tab. Kalau hanya di Home, tab lain tidak ikut ter-refresh.
+  // Mounted at the layout level (not per-tab) so the realtime subscription stays
+  // alive when the user switches tabs. If it lived only in Home, other tabs
+  // would not get refreshed.
   const { household } = useAuth();
   useHouseholdRealtime(household?.id);
 
@@ -38,21 +39,21 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="tanggungan"
+        name="obligations"
         options={{
           title: 'Tanggungan',
           tabBarIcon: ({ color, size }) => <Clock3 size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="kategori"
+        name="categories"
         options={{
           title: 'Kategori',
           tabBarIcon: ({ color, size }) => <ChartPie size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="riwayat"
+        name="history"
         options={{
           title: 'Riwayat',
           tabBarIcon: ({ color, size }) => <ReceiptText size={size} color={color} />,

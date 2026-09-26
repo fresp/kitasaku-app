@@ -9,7 +9,7 @@ import { useAccounts, useCategories, useCreateCycle, useTemplates } from '../lib
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
-function parseNum(t: string): number {
+function parseAmount(t: string): number {
   return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
 }
 
@@ -37,12 +37,12 @@ export default function NewCycleScreen() {
   const isChecked = (id: string, fallback = true) =>
     checked ? (checked[id] ?? fallback) : fallback;
   const amountFor = (id: string, fallback: number) =>
-    amounts[id] !== undefined ? parseNum(amounts[id]) : fallback;
+    amounts[id] !== undefined ? parseAmount(amounts[id]) : fallback;
 
   const selected = activeTemplates.filter((t) => isChecked(t.id));
-  const totalRutin = selected.reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
-  const income = parseNum(incomeText);
-  const sisa = income - totalRutin;
+  const totalRecurring = selected.reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+  const income = parseAmount(incomeText);
+  const remaining = income - totalRecurring;
 
   async function submit() {
     setErr(null);
@@ -121,8 +121,8 @@ export default function NewCycleScreen() {
         })}
 
         <View style={styles.projection}>
-          <Text style={styles.muted}>Pemasukan {formatRupiah(income)} − Rutin {formatRupiah(totalRutin)}</Text>
-          <Text style={styles.sisa}>Estimasi Sisa Bersih {formatRupiah(sisa)}</Text>
+          <Text style={styles.muted}>Pemasukan {formatRupiah(income)} − Rutin {formatRupiah(totalRecurring)}</Text>
+          <Text style={styles.remaining}>Estimasi Sisa Bersih {formatRupiah(remaining)}</Text>
         </View>
 
         {err && (
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   tplName: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
   amtInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.sm, paddingHorizontal: 10, height: 40, marginTop: 6, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.surface },
   projection: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.md, padding: 14, gap: 4 },
-  sisa: { color: Colors.white, fontWeight: '700', fontSize: 16, fontVariant: ['tabular-nums'] },
+  remaining: { color: Colors.white, fontWeight: '700', fontSize: 16, fontVariant: ['tabular-nums'] },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
 });

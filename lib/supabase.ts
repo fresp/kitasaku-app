@@ -5,8 +5,8 @@ import * as SecureStore from 'expo-secure-store';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-// expo-secure-store tidak punya implementasi web (stub-nya kosong), jadi di web
-// sesi disimpan di localStorage supaya login tetap bisa diuji lewat browser.
+// expo-secure-store has no web implementation (its stub is empty), so on web the
+// session is stored in localStorage to keep sign-in testable in a browser.
 function createStorageAdapter() {
   if (Platform.OS === 'web') {
     return {
@@ -21,7 +21,7 @@ function createStorageAdapter() {
         try {
           globalThis.localStorage?.setItem(key, value);
         } catch {
-          // localStorage bisa diblokir (private mode) — abaikan, sesi jadi tidak persisten
+          // localStorage may be blocked (private mode) — ignore it; the session just won't persist
         }
         return Promise.resolve();
       },
@@ -29,7 +29,7 @@ function createStorageAdapter() {
         try {
           globalThis.localStorage?.removeItem(key);
         } catch {
-          // diabaikan
+          // ignored
         }
         return Promise.resolve();
       },

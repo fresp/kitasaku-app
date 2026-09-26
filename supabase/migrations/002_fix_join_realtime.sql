@@ -1,7 +1,7 @@
--- Kitasaku 002: aman join via kode + realtime antar HP
--- Jalankan di Supabase SQL Editor setelah 001.
+-- Kitasaku 002: safe join via invite code + realtime between devices
+-- Run in the Supabase SQL Editor after 001.
 
--- ============ RPC: buat ruang keluarga (bypass RLS selektif) ============
+-- ============ RPC: create a household (selective RLS bypass) ============
 create or replace function public.create_household(p_name text, p_invite_code text)
 returns public.households
 language plpgsql
@@ -33,7 +33,7 @@ exception
 end;
 $$;
 
--- ============ RPC: preview pendaftar sebelum gabung (tanpa bocorkan semua) ============
+-- ============ RPC: preview a household before joining (without leaking everything) ============
 create or replace function public.lookup_household_by_code(p_code text)
 returns table (id uuid, name text, active_count bigint)
 language plpgsql
@@ -54,7 +54,7 @@ begin
 end;
 $$;
 
--- ============ RPC: gabung via kode ============
+-- ============ RPC: join via invite code ============
 create or replace function public.join_household_by_code(p_code text)
 returns public.households
 language plpgsql
@@ -89,7 +89,7 @@ grant execute on function public.create_household(text, text) to authenticated;
 grant execute on function public.lookup_household_by_code(text) to authenticated;
 grant execute on function public.join_household_by_code(text) to authenticated;
 
--- ============ Realtime: daftarkan tabel ke publication ============
+-- ============ Realtime: register tables with the publication ============
 do $$
 begin
   alter publication supabase_realtime add table

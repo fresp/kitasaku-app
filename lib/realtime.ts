@@ -2,15 +2,16 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 
-// Satu channel per household: setiap perubahan transaksi/obligasi/template/siklus
-// di HP pasangan langsung invalidate cache di HP ini → UI refresh otomatis.
+// One channel per household: any change to a transaction/obligation/template/cycle
+// on the partner's device immediately invalidates the cache on this device → the UI
+// refreshes automatically.
 export function useHouseholdRealtime(householdId: string | undefined) {
   const qc = useQueryClient();
 
   useEffect(() => {
     if (!supabase || !householdId) return;
 
-    // Bersihkan channel lama jika ada yang tertinggal untuk household ini
+    // Tear down any stale channels left behind for this household
     const existingChannels = supabase.getChannels().filter(
       (c) => c.topic.startsWith(`realtime:household:${householdId}`)
     );
@@ -18,8 +19,8 @@ export function useHouseholdRealtime(householdId: string | undefined) {
       supabase?.removeChannel(c);
     });
 
-    // Gunakan nama channel unik per lifecycle effect agar tidak terjadi collision
-    // pada Fast Refresh atau React 18/19 remount yang menyebabkan error:
+    // Use a unique channel name per effect lifecycle to avoid a collision on
+    // Fast Refresh or a React 18/19 remount, which caused the error:
     // "cannot add 'postgres_changes' callbacks ... after 'subscribe()'"
     const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const channel = supabase

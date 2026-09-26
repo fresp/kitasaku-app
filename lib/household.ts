@@ -63,7 +63,7 @@ export async function previewHouseholdByCode(code: string): Promise<HouseholdPre
     if (!row) return null;
     return { id: row.id, name: row.name, active_count: Number(row.active_count ?? 0) };
   } catch {
-    // Fallback saat RPC 002 belum dijalankan: direct select (hanya untuk member)
+    // Fallback for when migration 002 has not been run: direct select (members only)
     const { data: hh } = await sb
       .from('households')
       .select('*')
@@ -82,7 +82,7 @@ export async function createHousehold(name: string): Promise<Household> {
   if (!user) throw new Error('Belum login.');
 
   const invite_code = generateInviteCode(name);
-  // Jalur utama: RPC security-definer (anti RLS chicken-and-egg)
+  // Primary path: security-definer RPC (works around the RLS chicken-and-egg)
   try {
     const { data, error } = await sb.rpc('create_household', {
       p_name: name.trim(),
@@ -91,7 +91,7 @@ export async function createHousehold(name: string): Promise<Household> {
     if (error) throw error;
     if (data) return data as Household;
   } catch {
-    // Fallback: direct insert (bisa sukses bila policy insert sudah dibuka)
+    // Fallback: direct insert (succeeds if the insert policy has been opened)
   }
 
   const { data: hh, error: hhErr } = await sb
@@ -118,7 +118,7 @@ export async function joinHouseholdByCode(code: string): Promise<Household> {
   if (!user) throw new Error('Belum login.');
 
   const normalized = code.trim().toUpperCase();
-  // Jalur utama: RPC security-definer agar non-member bisa gabung via kode
+  // Primary path: security-definer RPC so a non-member can join via invite code
   try {
     const { data, error } = await sb.rpc('join_household_by_code', { p_code: normalized });
     if (error) throw error;
@@ -126,7 +126,7 @@ export async function joinHouseholdByCode(code: string): Promise<Household> {
   } catch (e: any) {
     const msg = e?.message ?? '';
     if (msg.includes('tidak ditemukan')) throw e;
-    // lanjut ke fallback direct bila RPC 002 belum dijalankan
+    // fall through to the direct fallback if migration 002 has not been run
   }
 
   const { data: hh, error: hhErr } = await sb

@@ -1,5 +1,5 @@
 -- Kitasaku initial schema: household-centric family spending
--- Jalankan di Supabase SQL Editor (atau via supabase CLI).
+-- Run in the Supabase SQL Editor (or via the supabase CLI).
 
 -- ============ Households ============
 create table if not exists public.households (
@@ -56,7 +56,7 @@ create table if not exists public.recurring_templates (
   notes text
 );
 
--- ============ Obligations (tanggungan & reimburse) ============
+-- ============ Obligations (payables & reimbursements) ============
 create table if not exists public.obligations (
   id uuid primary key default gen_random_uuid(),
   household_id uuid not null references public.households(id) on delete cascade,
