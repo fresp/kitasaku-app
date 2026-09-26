@@ -6,7 +6,6 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiahShort } from '../../lib/format';
 import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockData';
 import { useAuth } from '../../lib/auth-context';
-import { useHouseholdRealtime } from '../../lib/realtime';
 import { calcCashflow, useActiveCycle, useTransactions } from '../../lib/queries';
 import { HeroSplitCard } from '../../components/ui/HeroSplitCard';
 import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
@@ -42,7 +41,7 @@ export default function HomeScreen() {
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
   const txnsQ = useTransactions(householdId, cycleId);
-  useHouseholdRealtime(householdId);
+  // Realtime dipasang sekali di app/(tabs)/_layout.tsx agar tetap hidup di semua tab.
 
   const live = !!householdId && !!cycleId && !!txnsQ.data;
   const txns = useMemo(() => (live ? txnsQ.data! : []), [live, txnsQ.data]);
