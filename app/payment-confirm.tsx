@@ -1,0 +1,198 @@
+import { useMemo, useState } from 'react';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Colors, FontSize, Radius } from '../constants/theme';
+import { formatRupiah } from '../lib/format';
+import { pendingTransactions } from '../lib/mockData';
+import { useAuth } from '../lib/auth-context';
+import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
+import { Badge } from '../components/ui/Badge';
+import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+
+export default function PaymentConfirmScreen() {
+  const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { household } = useAuth();
+  const householdId = household?.id;
+
+  const cycleQ = useActiveCycle(householdId);
+  const txnsQ = useTransactions(householdId, cycleQ.data?.id);
+  const accsQ = useAccounts(householdId);
+  const markPaid = useMarkAsPaid();
+
+  const liveTxn = useMemo(
+    () => (txnsQ.data ?? []).find((t) => t.id === id),
+    [txnsQ.data, id]
+  );
+  const mock = pendingTransactions.find((t) => t.id === id) ?? pendingTransactions[1];
+
+  const name = liveTxn?.name ?? mock.name;
+  const category = liveTxn?.categories?.name ?? mock.category;
+  const accountName = liveTxn?.accounts?.name ?? mock.account;
+  const planned = liveTxn?.planned_amount ?? mock.amount;
+
+  const accountOptions = (accsQ.data ?? []).map((a) => ({ id: a.id, name: a.name }));
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [isFinal, setIsFinal] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const selectedAccountId = accountId ?? liveTxn?.account_id ?? null;
+  const selectedAccountName =
+    accountOptions.find((a) => a.id === selectedAccountId)?.name ?? accountName;
+
+  async function confirm() {
+    setErr(null);
+    if (!liveTxn || !householdId) {
+      router.back();
+      return;
+    }
+    try {
+      await markPaid.mutateAsync({
+        txn: liveTxn,
+        actualAmount: planned,
+        accountId: selectedAccountId,
+        isFinal,
+      });
+      router.back();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.handle} />
+        <Text style={styles.eyebrow}>KONFIRMASI PEMBAYARAN</Text>
+        <Text style={styles.title}>{name}</Text>
+        <Text style={styles.sub}>
+          {category} • {selectedAccountName}
+        </Text>
+
+        <View style={styles.amountBlock}>
+          <Text style={styles.amountLabel}>Nominal pembayaran</Text>
+          <Text style={styles.amountValue}>{formatRupiah(planned)}</Text>
+          <View style={styles.guideRow}>
+            <Badge label={`Rencana ${formatRupiah(planned)}`} />
+            {typeof mock.prevAmount === 'number' && !liveTxn && (
+              <Badge label={`↓ Bulan lalu ${formatRupiah(mock.prevAmount)}`} tone="paid" />
+            )}
+            {liveTxn?.obligation_id && <Badge label="Dari pool tanggungan" tone="alert" />}
+          </View>
+        </View>
+
+        <View style={styles.row}>
+          <View>
+            <Text style={styles.rowLabel}>Tanggal bayar</Text>
+            <Text style={styles.rowValue}>
+              {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </Text>
+          </View>
+          <Text style={styles.link}>Hari ini</Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>Bayar dari</Text>
+        <View style={styles.pills}>
+          {accountOptions.length === 0 ? (
+            <Badge label={selectedAccountName} />
+          ) : (
+            accountOptions.map((a) => {
+              const active = a.id === selectedAccountId;
+              return (
+                <Pressable
+                  key={a.id}
+                  onPress={() => setAccountId(a.id)}
+                  style={[styles.pill, active && styles.pillActive]}
+                >
+                  <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                    {active ? `✓ ${a.name}` : a.name}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+
+        {!!liveTxn?.recurring_template_id && (
+          <View style={styles.toggleCard}>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Ini Pembayaran Terakhir</Text>
+              <Switch
+                value={isFinal}
+                onValueChange={setIsFinal}
+                trackColor={{ true: Colors.paidText, false: Colors.borderStrong }}
+              />
+            </View>
+            <Text style={styles.toggleExplainer}>
+              Tandai selesai di master template rutin, tidak akan di-clone ke siklus bulan depan.
+            </Text>
+          </View>
+        )}
+
+        {err && (
+          <View style={styles.errBox}>
+            <Text style={styles.errText}>{err}</Text>
+          </View>
+        )}
+
+        <View style={styles.ctaRow}>
+          <View style={{ flex: 1 }}>
+            <SecondaryButton label="Batal" onPress={() => router.back()} />
+          </View>
+          <View style={{ flex: 2 }}>
+            <PrimaryButton
+              label={markPaid.isPending ? 'Menyimpan…' : 'Konfirmasi & Bayar'}
+              onPress={confirm}
+            />
+          </View>
+        </View>
+        {!householdId && (
+          <Text style={styles.note}>Mode offline — login untuk menyimpan ke Supabase.</Text>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: Colors.surface },
+  container: { padding: 20, gap: 12, paddingBottom: 32 },
+  handle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: Colors.borderStrong, alignSelf: 'center',
+  },
+  eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 1 },
+  title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
+  sub: { color: Colors.textSecondary, fontSize: FontSize.body },
+  amountBlock: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 6 },
+  amountLabel: { color: Colors.textSecondary, fontSize: FontSize.body },
+  amountValue: {
+    color: Colors.textPrimary, fontSize: FontSize.heroNumeral,
+    fontWeight: '700', fontVariant: ['tabular-nums'],
+  },
+  guideRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  row: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12,
+  },
+  rowLabel: { color: Colors.textMuted, fontSize: FontSize.body },
+  rowValue: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', marginTop: 2 },
+  link: { color: Colors.textPrimary, fontWeight: '600' },
+  sectionLabel: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
+  pills: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  pill: {
+    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.pill,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  pillActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  pillText: { color: Colors.textPrimary, fontWeight: '600' },
+  pillTextActive: { color: Colors.white },
+  toggleCard: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 6 },
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  toggleLabel: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
+  toggleExplainer: { color: Colors.textSecondary, fontSize: FontSize.body },
+  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
+  errText: { color: Colors.pendingText, fontSize: FontSize.body },
+  note: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
+  ctaRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+});
