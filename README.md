@@ -23,6 +23,8 @@ Scan QR dengan aplikasi **Expo Go** di HP Anda / HP istri.
 - `constants/theme.ts` — token warna 1:1 dari design.pen
 - `lib/` — formatRupiah, supabase client, mockData
 - `supabase/migrations/001_initial_schema.sql` — skema household-centric + RLS
+- `supabase/migrations/002_fix_join_realtime.sql` — RPC join aman + realtime
+- `supabase/migrations/003_fix_realtime_publication.sql` — pendaftaran publication per-tabel + `realtime_health()`
 
 ## Status
 
@@ -34,3 +36,15 @@ Screen 8 Alokasi Tanggungan (inline di tab Tanggungan), Screen 9 Template Rutin
 Screen 11–14 auth & pairing (`app/(auth)/sign-in.tsx`, `setup-choice.tsx`, `invite.tsx`)
 dengan auth-gate di `app/_layout.tsx` (OTP email + buat/gabung ruang keluarga via kode
 undangan + share WhatsApp teks biasa + seed otomatis kategori/akun/siklus).
+
+### Cek Realtime
+
+Jalankan di Supabase SQL Editor, lalu panggil RPC-nya untuk memastikan tabel benar-benar
+terdaftar di publication (status `SUBSCRIBED` di client tidak membuktikan apa pun):
+
+```sql
+select * from public.realtime_health();
+-- terdaftar harus true untuk: transactions, obligations, recurring_templates,
+-- cycles, categories, accounts, household_members
+-- (households sengaja false — tidak perlu disinkron antar HP)
+```
