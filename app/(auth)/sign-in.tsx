@@ -2,12 +2,12 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { Colors, FontSize, Radius } from '../../constants/theme';

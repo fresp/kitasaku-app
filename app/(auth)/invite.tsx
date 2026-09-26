@@ -1,4 +1,5 @@
-import { Pressable, SafeAreaView, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Colors, FontSize, Radius } from '../../constants/theme';

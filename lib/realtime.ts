@@ -10,8 +10,20 @@ export function useHouseholdRealtime(householdId: string | undefined) {
   useEffect(() => {
     if (!supabase || !householdId) return;
 
+    // Bersihkan channel lama jika ada yang tertinggal untuk household ini
+    const existingChannels = supabase.getChannels().filter(
+      (c) => c.topic.startsWith(`realtime:household:${householdId}`)
+    );
+    existingChannels.forEach((c) => {
+      supabase?.removeChannel(c);
+    });
+
+    // Gunakan nama channel unik per lifecycle effect agar tidak terjadi collision
+    // pada Fast Refresh atau React 18/19 remount yang menyebabkan error:
+    // "cannot add 'postgres_changes' callbacks ... after 'subscribe()'"
+    const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const channel = supabase
-      .channel(`household:${householdId}`)
+      .channel(`household:${householdId}:${uniqueSuffix}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${householdId}` },

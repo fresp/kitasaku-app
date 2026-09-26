@@ -1,8 +1,12 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../lib/auth-context';
+
+SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -14,6 +18,7 @@ function Gate() {
 
   useEffect(() => {
     if (loading) return;
+    SplashScreen.hideAsync().catch(() => {});
     const inAuth = segments[0] === '(auth)';
     if (!session) {
       if (!inAuth) router.replace('/(auth)/sign-in');
@@ -47,11 +52,13 @@ function Gate() {
 
 export default function RootLayout() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <StatusBar style="dark" />
-        <Gate />
-      </AuthProvider>
-    </QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <StatusBar style="dark" />
+          <Gate />
+        </AuthProvider>
+      </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }

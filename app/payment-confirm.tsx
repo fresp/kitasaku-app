@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';

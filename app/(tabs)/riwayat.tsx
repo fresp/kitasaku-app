@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';

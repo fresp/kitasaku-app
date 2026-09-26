@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
@@ -211,7 +212,19 @@ const styles = StyleSheet.create({
   tplLink: { paddingVertical: 8 },
   tplLinkText: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center' },
   fab: {
-    position: 'absolute', right: 16, bottom: 96, width: 56, height: 56, borderRadius: 28,
-    backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center',
+    position: 'absolute',
+    right: 16,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.brandPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
   },
 });
