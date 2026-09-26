@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { Check } from 'lucide-react-native';
+import Check from 'lucide-react-native/icons/check';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 
 export function PrimaryButton({

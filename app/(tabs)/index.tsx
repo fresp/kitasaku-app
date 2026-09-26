@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiahShort } from '../../lib/format';
 import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockData';

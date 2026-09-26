@@ -1,5 +1,11 @@
 import { Tabs } from 'expo-router';
-import { ChartPie, Clock3, House, ReceiptText } from 'lucide-react-native';
+// Import per-ikon lewat subpath resmi (bukan barrel `lucide-react-native`)
+// supaya Metro tidak menarik 1800+ file ikon ke bundle — memangkas waktu
+// build & unduh, yang membuat Expo Go gagal "download remote update".
+import ChartPie from 'lucide-react-native/icons/chart-pie';
+import Clock3 from 'lucide-react-native/icons/clock-3';
+import House from 'lucide-react-native/icons/house';
+import ReceiptText from 'lucide-react-native/icons/receipt-text';
 import { Colors } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import { useHouseholdRealtime } from '../../lib/realtime';
