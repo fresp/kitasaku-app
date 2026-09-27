@@ -18,6 +18,7 @@ import type { AllocationType, CycleAllocation } from '../lib/queries';
 import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 import { BrandIcon } from '../components/ui/BrandIcon';
+import { QueryError } from '../components/ui/QueryError';
 
 const ALLOCATION_LABELS: Record<AllocationType, string> = {
   EXPENSE: 'Belanja',
@@ -252,8 +253,19 @@ export default function AllocationScreen() {
           <PrimaryButton label="+ Alokasikan Dana" onPress={() => setShowForm(true)} />
         )}
 
+        {allocsQ.isError && householdId && (
+          <QueryError
+            onRetry={() => {
+              allocsQ.refetch();
+              summaryQ.refetch();
+            }}
+            retrying={allocsQ.isFetching}
+            message="Alokasi belum bisa dibaca, jadi total di bawah belum lengkap. Datamu tidak hilang."
+          />
+        )}
+
         {allocsQ.isLoading && <Text style={styles.muted}>Memuat alokasi…</Text>}
-        {!allocsQ.isLoading && allocations.length === 0 && (
+        {!allocsQ.isLoading && !allocsQ.isError && allocations.length === 0 && (
           <View style={styles.emptyBox}>
             <BrandIcon name="empty-belum-ada-tabungan" size={72} label="" />
             <Text style={styles.muted}>

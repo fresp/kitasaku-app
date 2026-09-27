@@ -76,6 +76,88 @@ export function memberCountLabel(count: number): string {
   return `${n} anggota`;
 }
 
+export interface CycleWindow {
+  name: string;
+  start: string;
+  end: string;
+}
+
+/**
+ * The payday-to-payday window a family is opening right now, from its payday
+ * day and today's date.
+ *
+ * The defaults this replaces were literal (`new-cycle.tsx` opened on
+ * "Siklus Nov 2026" with dates in it, `lib/seed.ts` seeded "Siklus Okt 2026"),
+ * so a family signing up in any other month met a form pre-filled with someone
+ * else's cycle — dated in the past. The dates are derivable, so they are
+ * derived.
+ *
+ * Rules, following the design's own naming (`lib/insight.ts` files a cycle
+ * under the month it *ends* in, so "Siklus Nov" runs 25 Oct – 24 Nov):
+ *
+ *   * If today is on or after this month's payday, the window opens on that
+ *     payday; otherwise it opened on last month's.
+ *   * It closes the day before the following payday.
+ *   * A payday of 29–31 clamps to the last day of a shorter month, so "tanggal
+ *     31" in February opens 28 Feb rather than sliding into March.
+ *
+ * An unset or invalid payday means the family has not told the app when they
+ * are paid (Ruang Keluarga leaves `payday_day` null by default). The window
+ * then runs one month from today rather than refusing to open — the dates are
+ * editable on this very form, and a blank date field is a worse start than a
+ * correct-length window anchored on today.
+ */
+export function cycleWindowFrom(
+  paydayDay: number | null | undefined,
+  todayISO: string
+): CycleWindow | null {
+  const [ty, tm, td] = todayISO.slice(0, 10).split('-').map((p) => parseInt(p, 10));
+  if (!Number.isFinite(ty) || !Number.isFinite(tm) || !Number.isFinite(td)) return null;
+  if (dayNumber(todayISO) === null) return null;
+
+  const hasPayday =
+    paydayDay !== null && paydayDay !== undefined && Number.isFinite(paydayDay) &&
+    paydayDay >= 1 && paydayDay <= 31;
+  // No payday on file: anchor the cycle on today instead of guessing one.
+  const day = hasPayday ? Math.floor(paydayDay!) : td;
+
+  // This month's payday, clamped to the month's real length.
+  const thisPayday = clampDay(ty, tm, day);
+  const opensThisMonth = td >= thisPayday;
+
+  const startYear = opensThisMonth ? ty : tm === 1 ? ty - 1 : ty;
+  // Rolling back from January lands on December — not month 0, which would
+  // format as "2027-00-25".
+  const startMonth = opensThisMonth ? tm : tm === 1 ? 12 : tm - 1;
+  const startDay = clampDay(startYear, startMonth, day);
+
+  const endYear = startMonth === 12 ? startYear + 1 : startYear;
+  const endMonth = startMonth === 12 ? 1 : startMonth + 1;
+  // A cycle ends the day before the next payday.
+  const end = new Date(Date.UTC(endYear, endMonth - 1, clampDay(endYear, endMonth, day)));
+  end.setUTCDate(end.getUTCDate() - 1);
+
+  const endISO = end.toISOString().slice(0, 10);
+  const endMonthIndex = parseInt(endISO.slice(5, 7), 10) - 1;
+  return {
+    name: `Siklus ${MONTHS_ID[endMonthIndex]} ${endISO.slice(0, 4)}`,
+    start: isoFrom(startYear, startMonth, startDay),
+    end: endISO,
+  };
+}
+
+/** Day `day`, clamped to the real length of `year`-`month` (1-based month). */
+function clampDay(year: number, month: number, day: number): number {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return Math.min(day, lastDay);
+}
+
+function isoFrom(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+
+
 /** "ANGGOTA KELUARGA (2 ORANG)" — the roster heading. */
 export function rosterLabel(count: number): string {
   const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
@@ -143,8 +225,7 @@ export function cycleDayIndex(
 }
 
 /** "25 Sep" — day and short month, no year (the cycle pill keeps it compact). */
-function shortDay(iso: string | null | undefined): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+function shortDay(iso: string | null | undefined): string | null {  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
   if (!m) return null;
   const month = MONTHS_ID[parseInt(m[2], 10) - 1];
   if (!month) return null;

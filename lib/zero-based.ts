@@ -151,6 +151,53 @@ export function calculateFundingGap(
   return Object.is(gap, -0) ? 0 : gap;
 }
 
+export interface CycleReadiness {
+  sourceFunds: number;
+  requiredAllocation: number;
+  unallocatedFunds: number;
+  fundingGap: number;
+  status: ZeroBasedStatus;
+  /**
+   * Whether the cycle may open. Exactly `fundingGap === 0`: a plan that needs
+   * more than it has cannot be opened, and one that is fully funded can —
+   * leftover unallocated funds are shown as a warning, not a blocker, matching
+   * the design's "Alokasi lengkap · N belum punya tujuan" banner.
+   */
+  canOpen: boolean;
+}
+
+/**
+ * The one readiness verdict for a cycle.
+ *
+ * Buka Siklus (`new-cycle.tsx`) and Funding Gap (`funding-gap.tsx`) are two
+ * views of one question — can this cycle open, and if not, by how much is it
+ * short? They used to answer it from different sides of the arithmetic: Buka
+ * Siklus summed only routine expenses and debt payments, Funding Gap also
+ * subtracted savings/asset allocations. The gate is defined once here so the
+ * two screens cannot disagree, and so a new allocation bucket cannot silently
+ * drop out of the total the way asset allocations once did.
+ *
+ * Both operands are normalized by `calculate*` below, so a `null` source or a
+ * negative row contributes 0 rather than poisoning the sum with `NaN`.
+ */
+export function cycleReadiness(
+  requiredAllocation: AmountInput,
+  sourceFunds: AmountInput
+): CycleReadiness {
+  const source = normalizeAmount(sourceFunds);
+  const required = normalizeAmount(requiredAllocation);
+  const fundingGap = calculateFundingGap(required, source);
+  const unallocatedFunds = calculateUnallocatedFunds(source, required);
+  return {
+    sourceFunds: source,
+    requiredAllocation: required,
+    unallocatedFunds,
+    fundingGap,
+    status: fundingGap > 0 ? 'FUNDING_GAP' : unallocatedFunds > 0 ? 'UNALLOCATED' : 'COMPLETE',
+    canOpen: fundingGap === 0,
+  };
+}
+
 export interface ZeroBasedSummaryArgs {
   source: {
     operatingIncome?: AmountInput;

@@ -186,7 +186,7 @@ export default function HouseholdScreen() {
               <TextInput
                 value={nameDraft}
                 onChangeText={setNameDraft}
-                placeholder="Keluarga Andra"
+                placeholder="mis. Keluarga Wijaya"
                 placeholderTextColor={Colors.textMuted}
                 style={styles.input}
               />

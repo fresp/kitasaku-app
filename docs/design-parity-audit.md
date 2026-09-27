@@ -183,7 +183,16 @@ Implementasi `app/(auth)/setup-choice.tsx`:
 
 ## 4. Temuan data & kualitas
 
-### 4.1 Aritmetika zero-based tidak konsisten (🟠)
+### 4.1 Aritmetika zero-based tidak konsisten (🟠) — ✅ SELESAI
+
+> **Status.** Ditutup oleh Tier 2. Kedua layar kini merender
+> `components/ui/ZeroBasedProjection.tsx` dan membaca satu objek keputusan dari
+> `cycleReadiness()` (`lib/zero-based.ts`), jadi baris yang tampil dan flag yang
+> mengaktifkan tombol adalah objek yang sama. `new-cycle.tsx` mendapat dua baris
+> yang hilang, dan keduanya memakai basis `requiredAllocation` yang identik.
+> `assets-insight`/`funding-gap` tetap punya baris `Alokasi lainnya` yang dulu
+> ikut dihitung tapi tidak pernah ditampilkan. Temuan di bawah adalah rekaman
+> aslinya.
 
 `app/new-cycle.tsx:237-259` merender proyeksi:
 
@@ -216,7 +225,11 @@ Catatan pendukung: `new-cycle.tsx` juga tidak menampilkan "31 hari" atau
 "terkonfirmasi" yang ada di design, dan tidak memuat kartu "Allocation complete
 · All funds have been assigned" (design `dgfIw`).
 
-### 4.2 Mock data bocor ke user nyata (🔴)
+### 4.2 Mock data bocor ke user nyata (🔴) — ✅ SELESAI
+
+> **Status.** Ditutup oleh Tier 1. `lib/mockData.ts` dihapus, kedua layar kini
+> menampilkan empty-state jujur saat `householdId` ada tapi siklus belum dibuka.
+> Tabel di bawah adalah rekaman aslinya.
 
 `app/(tabs)/index.tsx`:
 
@@ -245,14 +258,26 @@ fallback justru aktif pada kondisi yang **nyata dan umum**: user sudah punya
 household tapi siklus belum dibuka / query belum selesai. Saat itu, Home
 menampilkan "Rp 15.844.000" dan empat transaksi fiktif sebagai milik keluarga.
 
-### 4.3 Nol penanganan error (🔴)
+### 4.3 Nol penanganan error (🔴) — ✅ SELESAI
+
+> **Status.** Ditutup oleh Tier 1. `<QueryError>` sekarang terpasang di 8 layar
+> (Home, Riwayat, Tanggungan, Buka Siklus, Funding Gap, Alokasi, Konfirmasi
+> Pembayaran, Insight). Di Buka Siklus & Funding Gap kegagalan baca tidak cuma
+> diperingatkan — ia **memblokir** tombol buka, karena jumlah yang gagal dibaca
+> akan terbaca sebagai Rp 0 dan tampak "siap dibuka". Temuan di bawah adalah
+> rekaman aslinya.
 
 `grep -rn "isError" app components` → **0 kemunculan**. Setiap layar hanya
 menangani `isLoading` + empty-state. Konsekuensi: kegagalan jaringan / RLS /
 RPC memunculkan empty-state yang berbunyi "Belum ada transaksi di siklus ini" —
 pernyataan yang salah dan menenangkan, padahal datanya ada di server.
 
-### 4.4 Default personal ter-hardcode (⚪ risiko sedang)
+### 4.4 Default personal ter-hardcode (⚪ risiko sedang) — ✅ SELESAI
+
+> **Status.** Semua baris di bawah sudah diganti. Tanggal siklus kini diturunkan
+> oleh `cycleWindowFrom()` di `lib/profile.ts` (dari `household.payday_day` +
+> hari ini), nama keluarga mulai kosong dan memakai placeholder netral, dan
+> kolom gaji tidak lagi terisi `15844000`. Tabel di bawah adalah rekaman aslinya.
 
 | Lokasi | Nilai |
 | --- | --- |
@@ -279,7 +304,12 @@ Perlu dicatat: komentar `:92-94` **sengaja** membedakan `unpaidCount`
 labelnya jadi melenceng dari design. Perbaikan paling murah: pakai kata
 "tagihan" saat yang dihitung memang tagihan.
 
-### 4.6 Warning console web (⚪)
+### 4.6 Warning console web (⚪) — ✅ SELESAI
+
+> **Status.** Cabang `label === ''` (art dekoratif) tidak lagi mengirim props
+> a11y sama sekali, alih-alih `{ accessible: false }`. Keduanya sama-sama
+> membuat art tak terlihat oleh assistive tech, tapi hanya yang pertama tidak
+> memicu warning di web. Temuan di bawah adalah rekaman aslinya.
 
 `components/ui/BrandIcon.tsx:38-43` menyusun props a11y termasuk
 `{ accessible: false }` lalu menyebarnya ke `<Svg>`. Di web, React
@@ -386,14 +416,21 @@ release hygiene.
 
 ### Tier 2 — Selaraskan gate & aritmetika siklus (usaha sedang)
 
-5. **Ekstrak satu komponen proyeksi zero-based** yang dipakai bersama
-   `new-cycle.tsx` dan `funding-gap.tsx`. Hilangkan sumber angka berbeda
-   (§4.1). Tambahkan baris `+ Financing Inflow / Asset Release` dan
-   `− Alokasi Tabungan & Aset Likuid` yang hilang di `new-cycle.tsx`.
+5. ✅ **Ekstrak satu komponen proyeksi zero-based.** Selesai:
+   `components/ui/ZeroBasedProjection.tsx` dipakai bersama `new-cycle.tsx` dan
+   `funding-gap.tsx`, dan kedua layar membaca satu objek keputusan dari
+   `cycleReadiness()` di `lib/zero-based.ts` — bukan dua rumus yang mirip.
+   Baris `+ Financing Inflow / Asset Release` dan
+   `− Alokasi Tabungan & Aset Likuid` kini ada di Buka Siklus, plus baris
+   `− Alokasi lainnya` yang sebelumnya ikut dihitung tapi tidak pernah dirender
+   (§4.1). Dijaga oleh 5 tes baru untuk `cycleReadiness` di
+   `lib/__tests__/zero-based.test.ts`.
 6. **Putuskan bentuk Buka Siklus.** Satukan jadi satu layar ber-state (sesuai
    design), **atau** pertahankan dua route tapi bagikan satu hook perhitungan.
    Trade-off: satu layar lebih setia ke design tapi state-nya lebih rumit;
    dua route lebih mudah dirawat tapi harus dijamin tak bisa berbeda.
+   **Masih terbuka** — tapi risiko "bisa berbeda" sudah hilang lewat #5, jadi
+   ini sekarang murni keputusan UX, bukan keputusan kebenaran angka.
 
 ### Tier 3 — Lengkapi Quick Add ke Flow A/B — ✅ SELESAI
 
@@ -458,4 +495,11 @@ release hygiene.
 | `category-detail` | `budget-health.tsx:138` |
 | `templates` | **tidak ada** |
 
-**Tanpa penanganan `isError`** (`grep -c`): seluruh `app/` (0 kemunculan).
+**Tanpa penanganan `isError`** — ✅ **tidak lagi berlaku.** Per audit awal: 0
+kemunculan di seluruh `app/`. Sekarang 16 kemunculan di 8 layar, semuanya lewat
+`components/ui/QueryError.tsx`.
+
+**Catatan nomor baris.** Semua nomor baris di dokumen ini berasal dari commit
+`836a6af` dan **sudah bergeser** setelah Tier 1–2. Pakai nomor itu untuk
+menemukan *kode yang dimaksud*, bukan sebagai rujukan langsung — cari nama
+fungsi/komponennya, bukan barisnya.

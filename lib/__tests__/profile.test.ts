@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cycleDayIndex,
   cycleRangeLabel,
+  cycleWindowFrom,
   displayNameFromEmail,
   householdMeta,
   joinedMonthLabel,
@@ -126,5 +127,86 @@ describe('household presentation (phase 5a)', () => {
   it('49: realtime is described as on or off, never as "maybe"', () => {
     expect(realtimeLabel(true)).toBe('Real-time aktif');
     expect(realtimeLabel(false)).toBe('Real-time nonaktif');
+  });
+});
+
+// The window a family is opening right now. These replace the literals that
+// used to be hard-coded ('Siklus Nov 2026' with dates in it), so the cases that
+// matter are the month boundaries and the short months.
+describe('cycle window from payday', () => {
+  it('50: opens on this month\'s payday once the day arrives', () => {
+    expect(cycleWindowFrom(25, '2026-10-25')).toEqual({
+      name: 'Siklus Nov 2026',
+      start: '2026-10-25',
+      end: '2026-11-24',
+    });
+    // Mid-cycle: the window is already open, so it keeps its start date.
+    expect(cycleWindowFrom(25, '2026-11-02')).toEqual({
+      name: 'Siklus Nov 2026',
+      start: '2026-10-25',
+      end: '2026-11-24',
+    });
+  });
+
+  it('51: before payday it reports the window that opened last month', () => {
+    expect(cycleWindowFrom(25, '2026-10-24')).toEqual({
+      name: 'Siklus Okt 2026',
+      start: '2026-09-25',
+      end: '2026-10-24',
+    });
+  });
+
+  it('52: the name follows the month the cycle closes in, not the one it opens in', () => {
+    // lib/insight.ts files a cycle under the month it *ends* in, so the form
+    // must agree or the new cycle lands in the wrong column of the trend chart.
+    expect(cycleWindowFrom(25, '2026-10-25')!.name).toBe('Siklus Nov 2026');
+    expect(cycleWindowFrom(1, '2026-10-01')!.name).toBe('Siklus Okt 2026');
+  });
+
+  it('53: a payday of 29-31 clamps to the short month instead of sliding into the next', () => {
+    // 31 Jan -> the next payday is 28 Feb (2027 is not a leap year).
+    expect(cycleWindowFrom(31, '2027-01-31')).toEqual({
+      name: 'Siklus Feb 2027',
+      start: '2027-01-31',
+      end: '2027-02-27',
+    });
+    // A 29 payday survives a leap February...
+    expect(cycleWindowFrom(29, '2028-02-29')!.end).toBe('2028-03-28');
+    // ...and a payday that does not exist in February ends the window on the
+    // clamped date, one day before the payday it is standing in for.
+    expect(cycleWindowFrom(30, '2027-02-27')).toEqual({
+      name: 'Siklus Feb 2027',
+      start: '2027-01-30',
+      end: '2027-02-27',
+    });
+    expect(cycleWindowFrom(30, '2027-03-30')!.end).toBe('2027-04-29');
+  });
+
+  it('54: an unset payday anchors a one-month window on today rather than refusing', () => {
+    const w = cycleWindowFrom(null, '2026-10-10');
+    expect(w).toEqual({ name: 'Siklus Nov 2026', start: '2026-10-10', end: '2026-11-09' });
+    // Same window for an out-of-range day: 0 and 99 are not paydays.
+    expect(cycleWindowFrom(0, '2026-10-10')).toEqual(w);
+    expect(cycleWindowFrom(99, '2026-10-10')).toEqual(w);
+    expect(cycleWindowFrom(undefined, '2026-10-10')).toEqual(w);
+  });
+
+  it('55: an unparseable date yields null instead of an "Invalid Date" window', () => {
+    expect(cycleWindowFrom(25, 'besok')).toBeNull();
+    expect(cycleWindowFrom(25, '')).toBeNull();
+  });
+
+  it('56: December rolls the closing month into the next year', () => {
+    expect(cycleWindowFrom(25, '2026-12-25')).toEqual({
+      name: 'Siklus Jan 2027',
+      start: '2026-12-25',
+      end: '2027-01-24',
+    });
+    // ...and a January start before payday rolls the *opening* year back.
+    expect(cycleWindowFrom(25, '2027-01-10')).toEqual({
+      name: 'Siklus Jan 2027',
+      start: '2026-12-25',
+      end: '2027-01-24',
+    });
   });
 });

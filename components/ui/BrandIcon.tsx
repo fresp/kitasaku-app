@@ -159,11 +159,17 @@ export const BrandIcon = memo(function BrandIcon({
   const art = BRAND_ART[name];
   if (!art) return null;
 
+  // Decorative vector art gets no a11y props at all. `accessible: false` is not
+  // a valid DOM attribute, so spreading it onto the <Svg> that react-native-svg
+  // renders on web warns ("Received 'false' for a non-boolean attribute
+  // 'accessible'") on every such icon; the camelCase RN siblings warn for the
+  // same reason. Omitting is the one form both platforms agree on, and an
+  // unlabelled <Svg> is already invisible to assistive tech.
   const a11y =
     label === undefined
       ? { accessible: true, accessibilityRole: 'image' as const, accessibilityLabel: art.title }
       : label === ''
-        ? { accessible: false }
+        ? {}
         : { accessible: true, accessibilityRole: 'image' as const, accessibilityLabel: label };
 
   return (

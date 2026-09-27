@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -6,19 +6,26 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { Badge } from '../../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
 import { createHousehold, joinHouseholdByCode, previewHouseholdByCode, type HouseholdPreview } from '../../lib/household';
-import { seedHouseholdDefaults } from '../../lib/seed';
+import { seedCycleWindow, seedHouseholdDefaults } from '../../lib/seed';
 import { useAuth } from '../../lib/auth-context';
 
 export default function SetupChoiceScreen() {
   const router = useRouter();
   const { refresh } = useAuth();
   const [mode, setMode] = useState<'create' | 'join'>('create');
-  const [name, setName] = useState('Keluarga Andra');
+  // Starts empty. Pre-filling "Keluarga Andra" meant a family that tapped
+  // "Buat Baru" without reading the field created a household named after a
+  // stranger; the placeholder says what shape to type without becoming a value.
+  const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [preview, setPreview] = useState<HouseholdPreview | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // What `seedHouseholdDefaults` is about to create. The old hint promised
+  // "Siklus Okt 2026" — a month that was correct in October 2026 and a lie in
+  // every month after.
+  const seedWindow = useMemo(() => seedCycleWindow(), []);
 
   useEffect(() => {
     if (mode !== 'join') return;
@@ -102,12 +109,14 @@ export default function SetupChoiceScreen() {
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Keluarga Andra"
+              placeholder="mis. Keluarga Wijaya"
               placeholderTextColor={Colors.textMuted}
               style={styles.input}
             />
             <Text style={styles.hint}>
-              Siklus Okt 2026 + kategori & akun standar otomatis dibuatkan.
+              {seedWindow
+                ? `${seedWindow.name} + kategori & akun standar otomatis dibuatkan. Tanggal siklusnya bisa diubah di Ruang Keluarga.`
+                : 'Kategori & akun standar otomatis dibuatkan.'}
             </Text>
           </>
         ) : (

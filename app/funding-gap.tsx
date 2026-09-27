@@ -9,7 +9,6 @@ import CalendarRange from 'lucide-react-native/icons/calendar-range';
 import Landmark from 'lucide-react-native/icons/landmark';
 import Lock from 'lucide-react-native/icons/lock';
 import TrendingUp from 'lucide-react-native/icons/trending-up';
-import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import Wallet from 'lucide-react-native/icons/wallet';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { BrandIcon } from '../components/ui/BrandIcon';
@@ -24,10 +23,12 @@ import {
   useObligations,
   useTemplates,
 } from '../lib/queries';
-import { calculateFundingGap, calculateUnallocatedFunds } from '../lib/zero-based';
+import { cycleReadiness } from '../lib/zero-based';
 import { longDateFullLabel, shortDateLabel } from '../lib/obligation';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton } from '../components/ui/Button';
+import { QueryError } from '../components/ui/QueryError';
+import { ZeroBasedProjection } from '../components/ui/ZeroBasedProjection';
 
 /**
  * Screen 7B — Funding Gap.
@@ -68,14 +69,22 @@ export default function FundingGapScreen() {
     [allocations]
   );
   const totalSource = source?.total ?? 0;
-  const fundingGap = calculateFundingGap(requiredAllocation, totalSource);
-  const unallocated = calculateUnallocatedFunds(totalSource, requiredAllocation);
-  const canOpen = fundingGap <= 0;
+  // The same verdict Buka Siklus renders, from the same function — the two
+  // screens are one question, and they used to answer it with two different
+  // sums (§4.1 of the audit).
+  const readiness = cycleReadiness(requiredAllocation, totalSource);
+  const { fundingGap } = readiness;
+  // A failed read leaves both sides at zero, which makes the gap zero too —
+  // "ready to open". Never let an outage open a cycle.
+  const loadFailed = sourceQ.isError || allocQ.isError;
+  const canOpen = readiness.canOpen && !loadFailed;
 
   // The payroll amount, if the cycle has one — shown separately from financing
   // and asset release so the projection cannot be read as "we earned all this".
   const incomeInflow = source?.operatingIncome ?? 0;
-  const otherInflow = (source?.financingInflow ?? 0) + (source?.assetRelease ?? 0);
+  const financingInflow = source?.financingInflow ?? 0;
+  const assetRelease = source?.assetRelease ?? 0;
+  const otherInflow = financingInflow + assetRelease;
 
   const recurring = useMemo(
     () => allocations.filter((a) => a.allocation_type === 'EXPENSE'),
@@ -98,6 +107,14 @@ export default function FundingGapScreen() {
   const totalRecurring = recurring.reduce((s, a) => s + a.amount, 0);
   const totalDebt = debtAllocations.reduce((s, a) => s + a.amount, 0);
   const totalAsset = assetAllocations.reduce((s, a) => s + a.amount, 0);
+  // `requiredAllocation` sums every row above it, so the projection needs a
+  // line for each bucket `ALLOCATION_ORDER` allows. OTHER is the one that used
+  // to have no row.
+  const otherAllocations = useMemo(
+    () => allocations.filter((a) => a.allocation_type === 'OTHER'),
+    [allocations]
+  );
+  const totalOther = otherAllocations.reduce((s, a) => s + a.amount, 0);
 
   const activeTemplates = useMemo(
     () => (tmplQ.data ?? []).filter((t) => t.status === 'ACTIVE'),
@@ -153,6 +170,21 @@ export default function FundingGapScreen() {
             <Text style={styles.navTitle}>Buka Siklus Anggaran Baru</Text>
           </View>
         </View>
+
+        {/* Every number below is arithmetic on these reads, and a failed one
+            leaves the sums at zero — which reads as "no gap", the one verdict
+            this screen must never give by accident. */}
+        {(sourceQ.isError || allocQ.isError) && householdId && (
+          <QueryError
+            onRetry={() => {
+              sourceQ.refetch();
+              allocQ.refetch();
+              cycleQ.refetch();
+            }}
+            retrying={sourceQ.isFetching || allocQ.isFetching}
+            message="Sumber dana atau alokasi belum bisa dibaca, jadi proyeksi di bawah belum bisa dipercaya. Datamu tidak hilang."
+          />
+        )}
 
         <Text style={styles.navSub}>
           {canOpen
@@ -279,86 +311,69 @@ export default function FundingGapScreen() {
           </View>
         </View>
 
-        <View style={styles.projection}>
-          <Text style={styles.projLabel}>
-            ZERO-BASED ALLOCATION {cycleName.toUpperCase()}
-          </Text>
-          <ProjRow label="Total Sumber Dana (Income Operasional)" value={incomeInflow} />
-          <ProjRow label="+ Financing Inflow / Asset Release" value={otherInflow} />
-          <ProjRow
-            label={`− Pengeluaran rutin (${recurring.length} pos)`}
-            value={-totalRecurring}
-          />
-          <ProjRow
-            label={`− Pembayaran kewajiban (${debtAllocations.length})`}
-            value={-totalDebt}
-          />
-          <ProjRow
-            label={`− Alokasi Tabungan & Aset Likuid (${assetAllocations.length})`}
-            value={-totalAsset}
-          />
-          <View style={styles.divider} />
-          {canOpen ? (
-            <>
-              <ProjRow
-                label="= Dana belum dialokasikan"
-                value={unallocated}
-                tone={unallocated > 0 ? 'warn' : 'ok'}
-              />
-              <View style={styles.bannerOk}>
-                <Text style={styles.bannerOkText}>
-                  {unallocated > 0
-                    ? `Alokasi lengkap · ${formatRupiah(unallocated)} belum punya tujuan`
-                    : 'Alokasi lengkap · Unallocated Funds Rp 0'}
-                </Text>
-              </View>
-            </>
-          ) : (
-            <>
-              <ProjRow
-                label="= Funding Gap (Kebutuhan Pendanaan)"
-                value={fundingGap}
-                tone="gap"
-              />
-              <View style={styles.bannerGap}>
-                <TriangleAlert size={14} color={Colors.pendingText} />
-                <Text style={styles.bannerGapText}>
-                  Funding gap · {formatRupiah(fundingGap)} more is needed for this cycle
-                </Text>
-              </View>
-            </>
-          )}
-
-          {!canOpen && (
-            <View style={styles.strategies}>
-              <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
-              <StrategyRow
-                icon={<TrendingUp size={14} color={Colors.paidText} />}
-                text={`Tambah Pendapatan · +${formatRupiah(fundingGap)}`}
-                onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
-              />
-              {/* Asset release is a flow_type with no capture path yet: quick add
-                  writes OPERATING_INCOME for every income and the insert never
-                  sends ASSET_RELEASE. Shown as unavailable rather than routed to
-                  a form that would silently record the wrong flow type. */}
-              <StrategyRow
-                icon={<Wallet size={14} color={Colors.textMuted} />}
-                text="Pencairan Aset (Asset Release) · Dana Darurat"
-                note="Belum tersedia — catat lewat penyesuaian saldo akun"
-                disabled
-              />
-              <StrategyRow
-                icon={<Landmark size={14} color={Colors.loanText} />}
-                text="Pinjaman Baru (Financing Inflow) · +Liabilitas"
-                onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'loan' } })}
-              />
-            </View>
-          )}
-        </View>
+        <ZeroBasedProjection
+          title={`ZERO-BASED ALLOCATION ${cycleName.toUpperCase()}`}
+          source={{
+            incomeLines: [
+              { label: 'Total Sumber Dana (Income Operasional)', value: incomeInflow },
+            ],
+            financingInflow,
+            assetRelease,
+          }}
+          allocations={{
+            expense: totalRecurring,
+            expenseCount: recurring.length,
+            debtPayment: totalDebt,
+            debtCount: debtAllocations.length,
+            savingsAssets: totalAsset,
+            savingsCount: assetAllocations.length,
+            other: totalOther,
+            otherCount: otherAllocations.length,
+          }}
+          readiness={readiness}
+          strategies={
+            !canOpen ? (
+              <>
+                <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
+                <StrategyRow
+                  icon={<TrendingUp size={14} color={Colors.paidText} />}
+                  text={`Tambah Pendapatan · +${formatRupiah(fundingGap)}`}
+                  onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
+                />
+                {/* Asset release is a flow_type with no capture path yet: quick add
+                    writes OPERATING_INCOME for every income and the insert never
+                    sends ASSET_RELEASE. Shown as unavailable rather than routed to
+                    a form that would silently record the wrong flow type. */}
+                <StrategyRow
+                  icon={<Wallet size={14} color={Colors.textMuted} />}
+                  text="Pencairan Aset (Asset Release) · Dana Darurat"
+                  note="Belum tersedia — catat lewat penyesuaian saldo akun"
+                  disabled
+                />
+                <StrategyRow
+                  icon={<Landmark size={14} color={Colors.loanText} />}
+                  text="Pinjaman Baru (Financing Inflow) · +Liabilitas"
+                  onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'loan' } })}
+                />
+              </>
+            ) : undefined
+          }
+        />
 
         <PrimaryButton
-          label={canOpen ? 'Pilih Strategi & Buka Siklus' : 'Tutup Funding Gap Dulu'}
+          label={
+            loadFailed
+              ? 'Muat Ulang Dulu'
+              : canOpen
+                ? 'Pilih Strategi & Buka Siklus'
+                : 'Tutup Funding Gap Dulu'
+          }
           onPress={() => {
+            if (loadFailed) {
+              sourceQ.refetch();
+              allocQ.refetch();
+              return;
+            }
             if (canOpen) router.replace('/new-cycle');
           }}
         />
@@ -404,33 +419,6 @@ function StrategyRow({
         {!!note && <Text style={styles.strategyNote}>{note}</Text>}
       </View>
     </Pressable>
-  );
-}
-
-function ProjRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: 'gap' | 'warn' | 'ok';
-}) {
-  const color =
-    tone === 'gap'
-      ? Colors.pendingBorder
-      : tone === 'warn'
-        ? Colors.financingBorder
-        : tone === 'ok'
-          ? Colors.paidText
-          : Colors.white;
-  return (
-    <View style={styles.projRow}>
-      <Text style={styles.projRowLabel}>{label}</Text>
-      <Text style={[styles.projRowValue, { color }]}>
-        {value < 0 ? `−${formatRupiah(Math.abs(value))}` : formatRupiah(value)}
-      </Text>
-    </View>
   );
 }
 
@@ -507,33 +495,6 @@ const styles = StyleSheet.create({
   noteRow: { backgroundColor: Colors.canvas, borderRadius: Radius.sm, padding: 9 },
   noteText: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
 
-  projection: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 14, gap: 5 },
-  projLabel: {
-    color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700',
-    letterSpacing: 1, marginBottom: 4,
-  },
-  projRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    gap: 8, paddingVertical: 2,
-  },
-  projRowLabel: { color: Colors.borderStrong, fontSize: FontSize.caption, flex: 1 },
-  projRowValue: { fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  divider: { height: 1, backgroundColor: Colors.heroFooter, marginVertical: 5 },
-
-  bannerGap: {
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    backgroundColor: Colors.pendingBg, borderRadius: Radius.sm, padding: 10, marginTop: 4,
-  },
-  bannerGapText: { color: Colors.pendingText, fontSize: FontSize.caption, fontWeight: '600', flex: 1 },
-  bannerOk: {
-    backgroundColor: Colors.paidBg, borderRadius: Radius.sm, padding: 10, marginTop: 4,
-  },
-  bannerOkText: { color: Colors.paidText, fontSize: FontSize.caption, fontWeight: '600' },
-
-  strategies: {
-    marginTop: 8, paddingTop: 10, gap: 6,
-    borderTopWidth: 1, borderTopColor: Colors.heroFooter,
-  },
   strategiesTitle: {
     color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1,
   },

@@ -203,7 +203,7 @@ export default function ProfileScreen() {
             <TextInput
               value={nameDraft}
               onChangeText={setNameDraft}
-              placeholder="Andra"
+              placeholder="mis. Andra Pratama"
               placeholderTextColor={Colors.textMuted}
               style={styles.input}
             />

@@ -33,6 +33,7 @@ import type { PvaMetric } from '../lib/insight';
 import type { ChartColumn } from '../components/ui/Charts';
 import { normalizeObligationType, shortDateLabel } from '../lib/obligation';
 import { Badge } from '../components/ui/Badge';
+import { QueryError } from '../components/ui/QueryError';
 import { SegmentedTabs } from '../components/ui/SegmentedTabs';
 import {
   ChartScaleRow,
@@ -421,6 +422,10 @@ export default function AssetInsightScreen() {
         }`;
 
   const loading = yearQ.isLoading || yearsQ.isLoading;
+  // The empty state below reads "no cycles this year", which is a claim about
+  // the family's data — not about the network. A failed read must not be
+  // allowed to make it.
+  const failed = yearQ.isError || yearsQ.isError || obligQ.isError;
   const refetch = () => {
     void yearQ.refetch();
     void catsQ.refetch();
@@ -482,7 +487,15 @@ export default function AssetInsightScreen() {
         {!householdId && <Text style={styles.muted}>Mode offline — login untuk analisis live.</Text>}
         {loading && <Text style={styles.muted}>Memuat data tahun {activeYear}…</Text>}
 
-        {!loading && annual.monthsWithCycle === 0 && (
+        {failed && householdId && (
+          <QueryError
+            onRetry={refetch}
+            retrying={yearQ.isFetching}
+            message="Data tren tahun ini belum bisa dibaca, jadi grafik dan angkanya belum bisa dipercaya. Datamu tidak hilang."
+          />
+        )}
+
+        {!loading && !failed && annual.monthsWithCycle === 0 && (
           <SectionCard>
             <View style={styles.emptyArt}>
               <BrandIcon name="empty-data-tidak-ditemukan" size={72} label="" />
@@ -494,7 +507,7 @@ export default function AssetInsightScreen() {
           </SectionCard>
         )}
 
-        {!loading && annual.monthsWithCycle > 0 && (
+        {!loading && !failed && annual.monthsWithCycle > 0 && (
           <>
             {/* ---------- Section 1: Ringkasan Tren ---------- */}
             <TrendSummary

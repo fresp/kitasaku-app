@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -6,11 +6,13 @@ import { Colors, FontSize, Radius } from '../constants/theme';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
+import { cycleWindowFrom } from '../lib/profile';
 import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
-import { calculateFundingGap, calculateUnallocatedFunds } from '../lib/zero-based';
+import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
+import { ZeroBasedProjection } from '../components/ui/ZeroBasedProjection';
 
 function parseAmount(t: string): number {
   return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
@@ -18,7 +20,7 @@ function parseAmount(t: string): number {
 
 export default function NewCycleScreen() {
   const router = useRouter();
-  const { household } = useAuth();
+  const { household, loading: authLoading } = useAuth();
   const householdId = household?.id;
   const tmplQ = useTemplates(householdId);
   const catsQ = useCategories(householdId);
@@ -32,10 +34,34 @@ export default function NewCycleScreen() {
   );
   const [checked, setChecked] = useState<Record<string, boolean> | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const [cycleName, setCycleName] = useState('Siklus Nov 2026');
-  const [start, setStart] = useState('2026-10-25');
-  const [end, setEnd] = useState('2026-11-24');
-  const [incomeText, setIncomeText] = useState('15844000');
+  // Seeded from the family's own payday (migration 007) once the household
+  // loads, so the form opens on *their* cycle rather than a literal that was
+  // correct for one month in 2026. Editing the fields is the point of the
+  // screen, so this only fills them in; it never overwrites a typed value.
+  const [cycleName, setCycleName] = useState('');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const seeded = useRef(false);
+  const cycleWindow = useMemo(
+    () => cycleWindowFrom(household?.payday_day, new Date().toISOString().slice(0, 10)),
+    [household?.payday_day]
+  );
+  useEffect(() => {
+    // Waits for auth to settle before seeding. `household` is null while the
+    // membership is still loading, and seeding then would lock in the
+    // no-payday fallback (today) — the family's real payday would arrive a
+    // moment later and be ignored, because `seeded` is already spent.
+    if (seeded.current || authLoading || !cycleWindow) return;
+    seeded.current = true;
+    setCycleName((v) => v || cycleWindow.name);
+    setStart((v) => v || cycleWindow.start);
+    setEnd((v) => v || cycleWindow.end);
+  }, [authLoading, cycleWindow]);
+
+  // The payday figure is not derivable — only the family knows it — so it
+  // starts empty with a placeholder rather than pre-filled with a stranger's
+  // salary.
+  const [incomeText, setIncomeText] = useState('');
   const [err, setErr] = useState<string | null>(null);
   // Obligations settled within this cycle. All open ones are selected by
   // default because a carried-over debt is not optional spending — leaving one
@@ -86,21 +112,44 @@ export default function NewCycleScreen() {
   // The planned allocation is everything this cycle has already committed to,
   // before any voluntary savings. What is left is unallocated, not "sisa bersih"
   // — zero-based means it still needs a purpose.
+  //
+  // Savings/asset allocations are not part of this sum: a cycle that has not
+  // been opened yet has no `cycle_allocations` rows to count, so there is
+  // nothing to add. Funding Gap reads the same gate over the allocations that
+  // do exist once the cycle is live, and both go through `cycleReadiness`.
   const requiredAllocation = recurringExpense + totalDebtPayment;
-  const fundingGap = calculateFundingGap(requiredAllocation, sourceFunds);
-  const unallocated = calculateUnallocatedFunds(sourceFunds, requiredAllocation);
-  const canOpen = fundingGap === 0;
+  const readiness = cycleReadiness(requiredAllocation, sourceFunds);
+  const { fundingGap, unallocatedFunds: unallocated } = readiness;
+  const unallocatedLabel =
+    unallocated > 0
+      ? `${formatRupiah(unallocated)} belum punya tujuan. Alokasikan penuh ke Belanja, Pelunasan Utang, & Tabungan/Aset hingga tersisa Rp 0.`
+      : 'Seluruh dana telah dialokasikan penuh (Unallocated Funds = Rp 0).';
+  // A failed read of the routine positions or the open obligations empties the
+  // list the family is asked to confirm — and an empty list looks like a
+  // decision, not a failure. Opening on that would clone nothing and carry no
+  // debt forward, so the gate stays shut until the lists are actually readable.
+  const loadFailed = tmplQ.isError || obligQ.isError;
+  const canOpen = readiness.canOpen && !loadFailed;
 
   async function submit() {
     setErr(null);
     if (!householdId) { setErr('Login dulu untuk membuka siklus.'); return; }
+    // The dates are seeded, not typed, so an empty one means the seeding never
+    // ran — saving would write a cycle with no period and every ledger row in
+    // it would be undated.
+    if (!start.trim() || !end.trim()) {
+      setErr('Isi tanggal mulai dan selesai siklus dulu.');
+      return;
+    }
     if (selected.length === 0 && selectedObligations.length === 0 && income <= 0) {
       setErr('Pilih minimal 1 pos rutin, 1 kewajiban, atau isi pemasukan.');
       return;
     }
     if (!canOpen) {
       setErr(
-        `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas aset, atau catat pinjaman baru dulu.`
+        loadFailed
+          ? 'Daftar pos rutin atau tanggungan belum bisa dibaca. Coba muat ulang dulu supaya siklus tidak terbuka tanpa isinya.'
+          : `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas aset, atau catat pinjaman baru dulu.`
       );
       return;
     }
@@ -151,22 +200,56 @@ export default function NewCycleScreen() {
         </View>
 
         <Text style={styles.label}>NAMA SIKLUS</Text>
-        <TextInput value={cycleName} onChangeText={setCycleName} style={styles.input} />
+        <TextInput
+          value={cycleName}
+          onChangeText={setCycleName}
+          placeholder="mis. Siklus Nov 2026"
+          placeholderTextColor={Colors.textMuted}
+          style={styles.input}
+        />
         <View style={styles.dateRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>MULAI</Text>
-            <TextInput value={start} onChangeText={setStart} style={styles.input} />
+            <TextInput
+              value={start}
+              onChangeText={setStart}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.input}
+            />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>SELESAI</Text>
-            <TextInput value={end} onChangeText={setEnd} style={styles.input} />
+            <TextInput
+              value={end}
+              onChangeText={setEnd}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.input}
+            />
           </View>
         </View>
+        {/* Branch on the payday itself, not on `cycleWindow`: the window is
+            also derived (from today) when payday is unset, so testing the
+            window would print "tgl null" for every household that has not set
+            one yet — which is the default state after signing up. */}
+        <Text style={styles.note}>
+          {household?.payday_day
+            ? `Tanggal mengikuti hari gajian keluarga (tgl ${household.payday_day}). Ubah kalau siklus ini beda.`
+            : 'Belum ada hari gajian di Ruang Keluarga, jadi tanggal di bawah cuma perkiraan sebulan dari hari ini — atur tanggal gajian supaya terisi sendiri.'}
+        </Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>PEMASUKAN GAJIAN PERTAMA</Text>
-          <TextInput value={incomeText} onChangeText={setIncomeText} keyboardType="number-pad" style={styles.incomeInput} />
-          <Text style={styles.muted}>{formatRupiah(income)} • {accsQ.data?.[0]?.name ?? 'Mandiri'}</Text>
+          <TextInput
+            value={incomeText}
+            onChangeText={setIncomeText}
+            keyboardType="number-pad"
+            placeholder="0"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.incomeInput}
+          />
+          <Text style={styles.muted}>{formatRupiah(income)} • {accsQ.data?.[0]?.name ?? 'belum ada akun'}</Text>
         </View>
 
         <View style={styles.labelRow}>
@@ -188,6 +271,14 @@ export default function NewCycleScreen() {
             retrying={tmplQ.isFetching}
             message="Daftar pos rutin belum bisa dibaca, jadi siklus ini bisa terbuka tanpa pos yang seharusnya ikut."
           />
+        )}
+        {!tmplQ.isLoading && !tmplQ.isError && activeTemplates.length === 0 && (
+          <View style={styles.emptyArt}>
+            <BrandIcon name="empty-belum-ada-rencana" size={72} label="" />
+            <Text style={styles.muted}>
+              Belum ada pos rutin aktif. Siklus tetap bisa dibuka dengan pemasukan dan tanggungan saja.
+            </Text>
+          </View>
         )}
         {activeTemplates.map((t) => {
           const on = isChecked(t.id);
@@ -218,7 +309,18 @@ export default function NewCycleScreen() {
         <Text style={styles.label}>
           PEMBAYARAN KEWAJIBAN SIKLUS INI ({openObligations.length} TANGGUNGAN AKTIF)
         </Text>
-        {openObligations.length === 0 ? (
+        {/* Without this, a failed read of the obligations renders the same
+            "tidak ada tanggungan terbuka" card as a family that genuinely owes
+            nothing — and the cycle would open carrying no debt forward. */}
+        {obligQ.isError && (
+          <QueryError
+            onRetry={() => obligQ.refetch()}
+            retrying={obligQ.isFetching}
+            message="Daftar tanggungan belum bisa dibaca, jadi kewajiban yang seharusnya ikut ke siklus ini belum terlihat."
+          />
+        )}
+        {obligQ.isLoading && <Text style={styles.muted}>Memuat tanggungan…</Text>}
+        {!obligQ.isLoading && !obligQ.isError && openObligations.length === 0 ? (
           <View style={styles.emptyArt}>
             <BrandIcon name="empty-tidak-ada-tagihan" size={72} label="" />
             <Text style={styles.muted}>Tidak ada tanggungan terbuka yang dibawa ke siklus ini.</Text>
@@ -251,46 +353,53 @@ export default function NewCycleScreen() {
           Penerimaan pinjaman tidak dianggap income rutin dan tidak di-clone ke siklus berikutnya.
         </Text>
 
-        <View style={styles.projection}>
-          <Text style={styles.projLabel}>ZERO-BASED ALLOCATION SIKLUS INI</Text>
-          <ProjRow label="+ Pemasukan gajian" value={income} />
-          {recurringIncome > 0 && (
-            <ProjRow label="+ Pos pemasukan rutin" value={recurringIncome} />
-          )}
-          <ProjRow label="− Pengeluaran rutin" value={-recurringExpense} />
-          <ProjRow label={`− Pembayaran kewajiban (${selectedObligations.length})`} value={-totalDebtPayment} />
-          <View style={styles.projDivider} />
-          {fundingGap > 0 ? (
-            <>
-              <ProjRow label="= Funding Gap (Kebutuhan Pendanaan)" value={fundingGap} tone="gap" />
-              <Text style={styles.projNote}>
-                Kebutuhan {formatRupiah(requiredAllocation)} melebihi sumber dana {formatRupiah(sourceFunds)}.
-                Siklus tidak dapat dibuka selama Funding Gap belum tertutup.
-              </Text>
-              <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
-              <Text style={styles.strategy}>• Tambah Pendapatan</Text>
-              {/* Quick Add writes OPERATING_INCOME for every income and never
-                  ASSET_RELEASE, so this line used to send the family into a
-                  form that would record the wrong flow type. It is marked
-                  unavailable here the same way Funding Gap already does. */}
-              <Text style={styles.strategy}>• Pencairan Aset (Asset Release) — belum tersedia di app</Text>
-              <Text style={styles.strategy}>• Pinjaman Baru (Financing Inflow) — catat lewat Quick Add</Text>
-            </>
-          ) : (
-            <>
-              <ProjRow
-                label="= Dana belum dialokasikan"
-                value={unallocated}
-                tone={unallocated > 0 ? 'warn' : 'ok'}
-              />
-              <Text style={styles.projNote}>
-                {unallocated > 0
-                  ? `${formatRupiah(unallocated)} belum punya tujuan. Alokasikan penuh ke Belanja, Pelunasan Utang, & Tabungan/Aset hingga tersisa Rp 0.`
-                  : 'Seluruh dana telah dialokasikan penuh (Unallocated Funds = Rp 0).'}
-              </Text>
-            </>
-          )}
-        </View>
+        <ZeroBasedProjection
+          title="ZERO-BASED ALLOCATION SIKLUS INI"
+          source={{
+            incomeLines: [
+              { label: '+ Pemasukan gajian', value: income },
+              ...(recurringIncome > 0
+                ? [{ label: '+ Pos pemasukan rutin', value: recurringIncome }]
+                : []),
+            ],
+            // Nothing has been borrowed or released yet at this point: a loan
+            // is recorded after the cycle exists, and asset release has no
+            // capture path. The rows render at Rp 0 so a family can see what
+            // "sumber dana" excludes, which is the whole point of the row.
+            financingInflow: 0,
+            assetRelease: 0,
+          }}
+          allocations={{
+            expense: recurringExpense,
+            expenseCount: selected.filter((t) => t.direction === 'EXPENSE').length,
+            debtPayment: totalDebtPayment,
+            debtCount: selectedObligations.length,
+            savingsAssets: 0,
+            savingsCount: 0,
+            other: 0,
+            otherCount: 0,
+          }}
+          readiness={readiness}
+          note={
+            fundingGap > 0
+              ? `Kebutuhan ${formatRupiah(requiredAllocation)} melebihi sumber dana ${formatRupiah(sourceFunds)}. Siklus tidak dapat dibuka selama Funding Gap belum tertutup.`
+              : unallocatedLabel
+          }
+          strategies={
+            fundingGap > 0 ? (
+              <>
+                <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
+                <Text style={styles.strategy}>• Tambah Pendapatan</Text>
+                {/* Quick Add writes OPERATING_INCOME for every income and never
+                    ASSET_RELEASE, so this line used to send the family into a
+                    form that would record the wrong flow type. It is marked
+                    unavailable here the same way Funding Gap already does. */}
+                <Text style={styles.strategy}>• Pencairan Aset (Asset Release) — belum tersedia di app</Text>
+                <Text style={styles.strategy}>• Pinjaman Baru (Financing Inflow) — catat lewat Quick Add</Text>
+              </>
+            ) : undefined
+          }
+        />
 
         {err && (
           <View style={styles.errBox}>
@@ -299,39 +408,21 @@ export default function NewCycleScreen() {
         )}
 
         <PrimaryButton
-          label={createCycle.isPending ? 'Membuka…' : canOpen ? `Buka ${cycleName}` : 'Tutup Funding Gap Dulu'}
+          label={
+            createCycle.isPending
+              ? 'Membuka…'
+              : canOpen
+                ? `Buka ${cycleName}`
+                : loadFailed
+                  ? 'Muat Ulang Dulu'
+                  : 'Tutup Funding Gap Dulu'
+          }
           onPress={submit}
         />
         <SecondaryButton label="Kembali" onPress={() => router.back()} />
         <Badge label="Pos COMPLETED otomatis tidak muncul di daftar ini" />
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function ProjRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: 'gap' | 'warn' | 'ok';
-}) {
-  const color = tone === 'gap'
-    ? Colors.pendingBorder
-    : tone === 'warn'
-      ? Colors.financingBorder
-      : tone === 'ok'
-        ? Colors.paidBg
-        : Colors.white;
-  return (
-    <View style={styles.projRow}>
-      <Text style={styles.projRowLabel}>{label}</Text>
-      <Text style={[styles.projRowValue, { color }]}>
-        {value < 0 ? `−${formatRupiah(Math.abs(value))}` : formatRupiah(value)}
-      </Text>
-    </View>
   );
 }
 
@@ -358,13 +449,6 @@ const styles = StyleSheet.create({
   checkTextOn: { color: Colors.white },
   tplName: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
   amtInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.sm, paddingHorizontal: 10, height: 40, marginTop: 6, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.surface },
-  projection: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.md, padding: 14, gap: 4 },
-  projLabel: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
-  projRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingVertical: 2 },
-  projRowLabel: { color: Colors.borderStrong, fontSize: FontSize.caption, flex: 1 },
-  projRowValue: { fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  projDivider: { height: 1, backgroundColor: Colors.heroFooter, marginVertical: 4 },
-  projNote: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16, marginTop: 2 },
   strategiesTitle: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginTop: 8 },
   strategy: { color: Colors.borderStrong, fontSize: FontSize.caption, lineHeight: 18 },
   obligRow: { flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, alignItems: 'center' },

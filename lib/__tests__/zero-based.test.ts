@@ -7,6 +7,7 @@ import {
   calculateUnallocatedFunds,
   calculateZeroBasedSummary,
   canMarkAsPaid,
+  cycleReadiness,
   defaultFlowType,
   filterLedger,
   formatShortDate,
@@ -171,6 +172,43 @@ describe('zero-based domain contract', () => {
       summary.requiredAllocation,
     ]) {
       expect(Object.is(v, -0)).toBe(false);
+    }
+  });
+});
+
+describe('cycle readiness — the one gate both Buka Siklus and Funding Gap read', () => {
+  it('opens only when the plan is fully funded', () => {
+    expect(cycleReadiness(10_000_000, 10_000_000).canOpen).toBe(true);
+    expect(cycleReadiness(10_000_000, 12_000_000).canOpen).toBe(true);
+    expect(cycleReadiness(12_000_000, 10_000_000).canOpen).toBe(false);
+  });
+
+  it('keeps unallocated funds a warning, not a blocker', () => {
+    const r = cycleReadiness(8_000_000, 10_000_000);
+    expect(r.unallocatedFunds).toBe(2_000_000);
+    expect(r.fundingGap).toBe(0);
+    expect(r.canOpen).toBe(true);
+    expect(r.status).toBe('UNALLOCATED');
+  });
+
+  it('reports the shortfall and the status when short', () => {
+    const r = cycleReadiness(14_000_000, 10_000_000);
+    expect(r.fundingGap).toBe(4_000_000);
+    expect(r.unallocatedFunds).toBe(-4_000_000);
+    expect(r.status).toBe('FUNDING_GAP');
+    expect(r.canOpen).toBe(false);
+  });
+
+  it('treats a missing source or requirement as zero rather than NaN', () => {
+    expect(cycleReadiness(5_000_000, null).fundingGap).toBe(5_000_000);
+    expect(cycleReadiness(undefined, 5_000_000).canOpen).toBe(true);
+    expect(cycleReadiness(0, 0).status).toBe('COMPLETE');
+    expect(cycleReadiness(0, 0).canOpen).toBe(true);
+  });
+
+  it('never returns -0', () => {
+    for (const v of Object.values(cycleReadiness(0, 0))) {
+      if (typeof v === 'number') expect(Object.is(v, -0)).toBe(false);
     }
   });
 });
