@@ -58,6 +58,10 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'categories', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['cats'] });
+          // Renaming or deleting a category changes the joined name on every
+          // transaction and allocation row, so those views are stale too.
+          qc.invalidateQueries({ queryKey: ['txns'] });
+          qc.invalidateQueries({ queryKey: ['alloc'] });
         }
       )
       .on(

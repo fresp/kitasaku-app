@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  budgetFillPct,
+  budgetHealthStatus,
   calculateFundingGap,
   calculateSourceFunds,
   calculateUnallocatedFunds,
   calculateZeroBasedSummary,
   canMarkAsPaid,
   defaultFlowType,
+  filterLedger,
+  formatShortDate,
   isInstallmentOpen,
   isObligationPaydown,
+  ledgerDayLabel,
   normalizeAmount,
   resolveModeAmount,
   splitInstallments,
+  summarizeLedger,
+  templateDueLabel,
 } from '../zero-based';
 
 // Shared fixture: operating 10jt + financing 3jt + asset release 2jt.
@@ -246,5 +253,119 @@ describe('loan installment schedule (phase 2B)', () => {
     expect(isInstallmentOpen({ status: 'OVERDUE' })).toBe(true);
     expect(isInstallmentOpen({ status: 'SETTLED' })).toBe(false);
     expect(isInstallmentOpen({ status: 'CANCELLED' })).toBe(false);
+  });
+});
+
+describe('budget health (phase 4)', () => {
+  it('25: spending over the pagu is OVER and reports how far past', () => {
+    const h = budgetHealthStatus(3_630_000, 1_800_000);
+    expect(h.status).toBe('OVER');
+    expect(h.overAmount).toBe(1_830_000);
+    expect(h.remainingAmount).toBe(0);
+    expect(h.label).toBe('MELEBIHI RENCANA');
+    expect(h.tone).toBe('pending');
+    expect(h.ratioPct).toBe(202);
+  });
+
+  it('26: exactly at the pagu is not OVER, but the boundary is WATCH', () => {
+    // Equal is not over — overAmount stays 0. It is still WATCH rather than
+    // SAFE: the whole pagu is consumed, which is what the >80% band means.
+    // This matches the pre-Phase-4 inline check (`ratio > 1 ? over : ratio > 0.8
+    // ? watch : safe`) so the refactor does not silently change a verdict.
+    const h = budgetHealthStatus(1_500_000, 1_500_000);
+    expect(h.status).toBe('WATCH');
+    expect(h.overAmount).toBe(0);
+    expect(h.remainingAmount).toBe(0);
+    expect(h.ratioPct).toBe(100);
+  });
+
+  it('27: above 80% is WATCH with the remaining pagu', () => {
+    const h = budgetHealthStatus(1_250_000, 1_500_000);
+    expect(h.status).toBe('WATCH');
+    expect(h.overAmount).toBe(0);
+    expect(h.remainingAmount).toBe(250_000);
+    expect(h.label).toBe('CEK RINCIAN');
+    expect(h.tone).toBe('alert');
+  });
+
+  it('28: no pagu is its own state, not "safe" and not "over"', () => {
+    const spent = budgetHealthStatus(500_000, 0);
+    expect(spent.status).toBe('NO_BUDGET');
+    expect(spent.label).toBe('TANPA PAGU');
+    expect(spent.overAmount).toBe(0);
+    const untouched = budgetHealthStatus(0, 0);
+    expect(untouched.status).toBe('SAFE');
+    expect(untouched.label).toBe('ANGGARAN AMAN');
+  });
+
+  it('29: fill percent is clamped to 2..100 and full for no-pagu rows', () => {
+    expect(budgetFillPct(budgetHealthStatus(3_630_000, 1_800_000))).toBe(100);
+    expect(budgetFillPct(budgetHealthStatus(1_000, 1_800_000))).toBe(2);
+    expect(budgetFillPct(budgetHealthStatus(900_000, 1_000_000))).toBe(90);
+    expect(budgetFillPct(budgetHealthStatus(500_000, 0))).toBe(100);
+  });
+
+  it('30: null inputs never produce NaN', () => {
+    const h = budgetHealthStatus(null, undefined);
+    expect(h.status).toBe('SAFE');
+    expect(h.ratioPct).toBe(0);
+  });
+});
+
+describe('ledger grouping and filtering (phase 4)', () => {
+  const ROWS = [
+    { name: 'Kopi Kenangan FX', direction: 'EXPENSE' as const, account_id: 'bca', accountName: 'BCA', categoryName: 'Jajan' },
+    { name: 'Token Listrik 500rb', direction: 'EXPENSE' as const, account_id: 'mandiri', accountName: 'Mandiri', categoryName: 'Tagihan' },
+    { name: 'Gaji September', direction: 'INCOME' as const, account_id: 'mandiri', accountName: 'Mandiri Payroll', categoryName: 'Gaji & Pemasukan' },
+  ];
+
+  it('31: an empty filter keeps every row', () => {
+    expect(filterLedger(ROWS, {})).toHaveLength(3);
+    expect(filterLedger(ROWS, { query: '   ' })).toHaveLength(3);
+  });
+
+  it('32: search matches the merchant and the category, not just the name', () => {
+    expect(filterLedger(ROWS, { query: 'kenangan' })).toHaveLength(1);
+    expect(filterLedger(ROWS, { query: 'bca' })).toHaveLength(1);
+    expect(filterLedger(ROWS, { query: 'jajan' })).toHaveLength(1);
+    expect(filterLedger(ROWS, { query: 'mandiri' })).toHaveLength(2);
+    expect(filterLedger(ROWS, { query: 'tidak ada' })).toHaveLength(0);
+  });
+
+  it('33: direction and account chips compose with the query', () => {
+    expect(filterLedger(ROWS, { direction: 'INCOME' })).toHaveLength(1);
+    expect(filterLedger(ROWS, { direction: 'EXPENSE' })).toHaveLength(2);
+    expect(filterLedger(ROWS, { accountId: 'mandiri' })).toHaveLength(2);
+    expect(filterLedger(ROWS, { accountId: 'mandiri', direction: 'INCOME' })).toHaveLength(1);
+  });
+
+  it('34: ledger totals separate the two directions', () => {
+    const totals = summarizeLedger([
+      { direction: 'EXPENSE' as const, amount: 65_000 },
+      { direction: 'EXPENSE' as const, amount: 500_000 },
+      { direction: 'INCOME' as const, amount: 15_844_000 },
+    ]);
+    expect(totals.expense).toBe(565_000);
+    expect(totals.income).toBe(15_844_000);
+    expect(totals.expenseCount).toBe(2);
+    expect(totals.incomeCount).toBe(1);
+  });
+
+  it('35: day headings name today and yesterday, then fall back to a date', () => {
+    const today = '2026-09-25';
+    expect(ledgerDayLabel('2026-09-25', today)).toBe('Hari Ini · 25 Sep');
+    expect(ledgerDayLabel('2026-09-24', today)).toBe('Kemarin · 24 Sep');
+    expect(ledgerDayLabel('2026-09-20', today)).toBe('20 Sep 2026');
+    expect(ledgerDayLabel(null, today)).toBe('Tanpa tanggal');
+  });
+
+  it('36: short dates and template due days refuse garbage instead of printing it', () => {
+    expect(formatShortDate('2026-10-02')).toBe('2 Okt');
+    expect(formatShortDate('')).toBeNull();
+    expect(formatShortDate('02/10/2026')).toBeNull();
+    expect(templateDueLabel(5)).toBe('Tgl 5');
+    expect(templateDueLabel(null)).toBeNull();
+    expect(templateDueLabel(0)).toBeNull();
+    expect(templateDueLabel(32)).toBeNull();
   });
 });

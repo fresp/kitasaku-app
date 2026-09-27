@@ -28,7 +28,11 @@ export type {
 } from './zero-based';
 
 export interface Cycle { id: string; household_id: string; name: string; start_date: string; end_date: string; is_active: boolean; }
-export interface Category { id: string; household_id: string; name: string; monthly_budget: number; type: string; }
+export type CategorySystemRole = 'DEBT_PAYMENT' | 'FINANCING_INFLOW';
+export interface Category {
+  id: string; household_id: string; name: string; monthly_budget: number; type: string;
+  is_system?: boolean; system_role?: CategorySystemRole | null;
+}
 export interface Account { id: string; household_id: string; name: string; type: string; }
 export interface Txn {
   id: string; household_id: string; cycle_id: string | null;
@@ -54,6 +58,8 @@ export interface Template {
   id: string; household_id: string; name: string; category_id: string | null;
   account_id: string | null; direction: 'INCOME' | 'EXPENSE'; default_amount: number;
   status: 'ACTIVE' | 'COMPLETED'; notes: string | null;
+  /** Day of month the bill is due; null = no known due day (migration 006). */
+  due_day?: number | null;
   categories?: { name: string } | null; accounts?: { name: string } | null;
 }
 export interface ObligationInstallment {
@@ -779,12 +785,170 @@ export function useAllocateDebtPayment() {
       if (error) throw error;
       return data as { transaction_id: string; allocation_id: string }[];
     },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+// ============ Phase 4: templates and categories ============
+
+export interface TemplateInput {
+  name: string; categoryId: string | null; accountId: string | null;
+  direction: 'INCOME' | 'EXPENSE'; defaultAmount: number;
+  dueDay?: number | null; notes?: string | null;
+}
+
+function validateTemplateInput(args: TemplateInput): void {
+  if (args.name.trim().length < 3) throw new Error('Nama template minimal 3 huruf.');
+  if (!(args.defaultAmount > 0)) throw new Error('Nominal default harus lebih dari Rp 0.');
+  if (args.dueDay != null && (args.dueDay < 1 || args.dueDay > 31)) {
+    throw new Error('Tanggal jatuh tempo harus antara 1 dan 31.');
+  }
+}
+
+export function useCreateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string } & TemplateInput) => {
+      validateTemplateInput(args);
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('recurring_templates').insert({
+        household_id: args.householdId,
+        name: args.name.trim(),
+        category_id: args.categoryId,
+        account_id: args.accountId,
+        direction: args.direction,
+        default_amount: args.defaultAmount,
+        due_day: args.dueDay ?? null,
+        notes: args.notes ?? null,
+        status: 'ACTIVE',
+      }).select('*').single();
+      if (error) throw error;
+      return data as Template;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tmpl'] }),
+  });
+}
+
+/**
+ * Editing a template never rewrites history. Transactions already cloned from
+ * it keep the amount they were created with; only future cycles pick up the
+ * new default. That is why this updates the template row and nothing else.
+ */
+export function useUpdateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string } & Partial<TemplateInput>) => {
+      if (args.name !== undefined && args.name.trim().length < 3) {
+        throw new Error('Nama template minimal 3 huruf.');
+      }
+      if (args.defaultAmount !== undefined && !(args.defaultAmount > 0)) {
+        throw new Error('Nominal default harus lebih dari Rp 0.');
+      }
+      if (args.dueDay != null && (args.dueDay < 1 || args.dueDay > 31)) {
+        throw new Error('Tanggal jatuh tempo harus antara 1 dan 31.');
+      }
+      const sb = requireSupabase();
+      const patch: Record<string, string | number | null> = {};
+      if (args.name !== undefined) patch.name = args.name.trim();
+      if (args.categoryId !== undefined) patch.category_id = args.categoryId;
+      if (args.accountId !== undefined) patch.account_id = args.accountId;
+      if (args.direction !== undefined) patch.direction = args.direction;
+      if (args.defaultAmount !== undefined) patch.default_amount = args.defaultAmount;
+      if (args.dueDay !== undefined) patch.due_day = args.dueDay;
+      if (args.notes !== undefined) patch.notes = args.notes;
+      if (Object.keys(patch).length === 0) return null;
+      const { data, error } = await sb.from('recurring_templates')
+        .update(patch).eq('id', args.id).select('*').single();
+      if (error) throw error;
+      return data as Template;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tmpl'] }),
+  });
+}
+
+export function useSetTemplateStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string; status: 'ACTIVE' | 'COMPLETED' }) => {
+      const sb = requireSupabase();
+      const { error } = await sb.from('recurring_templates')
+        .update({ status: args.status }).eq('id', args.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tmpl'] }),
+  });
+}
+
+export interface CategoryInput {
+  name: string; monthlyBudget: number; type: 'EXPENSE' | 'INCOME' | 'INVESTMENT';
+}
+
+export function useCreateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string } & CategoryInput) => {
+      const name = args.name.trim();
+      if (name.length < 2) throw new Error('Nama kategori minimal 2 huruf.');
+      if (args.monthlyBudget < 0) throw new Error('Pagu tidak boleh negatif.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('categories').insert({
+        household_id: args.householdId, name,
+        monthly_budget: args.monthlyBudget, type: args.type,
+        is_system: false, system_role: null,
+      }).select('*').single();
+      if (error) throw error;
+      return data as Category;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cats'] }),
+  });
+}
+
+/**
+ * Renaming a system category is allowed — the family may call the "Pinjaman"
+ * slot something else. Deleting one is not: the ledger and the zero-based
+ * summary refer to those rows by role, and migration 006 enforces the refusal
+ * with a trigger, so this only mirrors the guard for a clearer message.
+ */
+export function useUpdateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string } & Partial<CategoryInput>) => {
+      if (args.name !== undefined && args.name.trim().length < 2) {
+        throw new Error('Nama kategori minimal 2 huruf.');
+      }
+      if (args.monthlyBudget !== undefined && args.monthlyBudget < 0) {
+        throw new Error('Pagu tidak boleh negatif.');
+      }
+      const sb = requireSupabase();
+      const patch: Record<string, string | number | null> = {};
+      if (args.name !== undefined) patch.name = args.name.trim();
+      if (args.monthlyBudget !== undefined) patch.monthly_budget = args.monthlyBudget;
+      if (args.type !== undefined) patch.type = args.type;
+      if (Object.keys(patch).length === 0) return null;
+      const { data, error } = await sb.from('categories')
+        .update(patch).eq('id', args.id).select('*').single();
+      if (error) throw error;
+      return data as Category;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cats'] }),
+  });
+}
+
+export function useDeleteCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string; isSystem?: boolean }) => {
+      if (args.isSystem) throw new Error('Kategori sistem tidak dapat dihapus.');
+      const sb = requireSupabase();
+      const { error } = await sb.from('categories').delete().eq('id', args.id);
+      if (error) throw error;
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['txns'] });
-      qc.invalidateQueries({ queryKey: ['oblig'] });
-      qc.invalidateQueries({ queryKey: ['alloc'] });
-      qc.invalidateQueries({ queryKey: ['zero-summary'] });
-      qc.invalidateQueries({ queryKey: ['source-funds'] });
+      qc.invalidateQueries({ queryKey: ['cats'] });
+      // Transactions and allocations keep their rows (ON DELETE SET NULL), but
+      // their joined category name disappears — so any view showing them is now
+      // stale and must refetch.
+      invalidateMoneyKeys(qc);
     },
   });
 }

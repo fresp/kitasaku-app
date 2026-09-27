@@ -2,155 +2,430 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import Plus from 'lucide-react-native/icons/plus';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
-import { requireSupabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth-context';
-import { useAccounts, useCategories, useTemplates } from '../lib/queries';
+import {
+  useAccounts,
+  useCategories,
+  useCreateTemplate,
+  useSetTemplateStatus,
+  useTemplates,
+  useUpdateTemplate,
+} from '../lib/queries';
+import type { Template } from '../lib/queries';
+import { templateDueLabel } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+
+/**
+ * Screen 9 — Template Rutin.
+ *
+ * A template is a promise about future cycles, not a record of past spending,
+ * so everything here edits the template only. Cloned transactions keep the
+ * amount they were created with; changing a default affects the next cycle
+ * that is opened, never one already running. The baseline figure is what the
+ * next cycle will inherit, which is why it counts ACTIVE EXPENSE templates
+ * only — an income template is not a commitment.
+ */
+
+function parseAmount(t: string): number {
+  return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
+}
+
+interface Draft {
+  id: string | null;
+  name: string;
+  amountText: string;
+  dueDayText: string;
+  categoryId: string | null;
+  accountId: string | null;
+}
+
+const EMPTY_DRAFT: Draft = {
+  id: null, name: '', amountText: '', dueDayText: '', categoryId: null, accountId: null,
+};
 
 export default function TemplatesScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;
+
   const tmplQ = useTemplates(householdId);
   const catsQ = useCategories(householdId);
   const accsQ = useAccounts(householdId);
+  const createTemplate = useCreateTemplate();
+  const updateTemplate = useUpdateTemplate();
+  const setStatus = useSetTemplateStatus();
 
   const [filter, setFilter] = useState<'ACTIVE' | 'COMPLETED'>('ACTIVE');
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [amountText, setAmountText] = useState('');
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const list = useMemo(
-    () => (tmplQ.data ?? []).filter((t) => t.status === filter),
-    [tmplQ.data, filter]
-  );
-  const activeCount = (tmplQ.data ?? []).filter((t) => t.status === 'ACTIVE').length;
-  const doneCount = (tmplQ.data ?? []).length - activeCount;
-  const baseline = (tmplQ.data ?? [])
-    .filter((t) => t.status === 'ACTIVE' && t.direction === 'EXPENSE')
+  const all = useMemo(() => tmplQ.data ?? [], [tmplQ.data]);
+  const list = useMemo(() => all.filter((t) => t.status === filter), [all, filter]);
+  const activeList = all.filter((t) => t.status === 'ACTIVE');
+  const activeCount = activeList.length;
+  const doneCount = all.length - activeCount;
+  const baseline = activeList
+    .filter((t) => t.direction === 'EXPENSE')
     .reduce((s, t) => s + t.default_amount, 0);
 
-  async function create() {
+  const categories = catsQ.data ?? [];
+  const accounts = accsQ.data ?? [];
+  const saving = createTemplate.isPending || updateTemplate.isPending;
+
+  async function save() {
     setErr(null);
-    const amount = parseInt(amountText.replace(/[^0-9]/g, '') || '0', 10);
-    if (!householdId) { setErr('Login dulu.'); return; }
-    if (name.trim().length < 3) { setErr('Nama template minimal 3 huruf.'); return; }
-    if (amount <= 0) { setErr('Nominal harus lebih dari Rp 0.'); return; }
+    if (!householdId || !draft) return;
+    const amount = parseAmount(draft.amountText);
+    const dueRaw = draft.dueDayText.trim();
+    const dueDay = dueRaw === '' ? null : parseAmount(dueRaw);
     try {
-      const sb = requireSupabase();
-      const { error } = await sb.from('recurring_templates').insert({
-        household_id: householdId,
-        name: name.trim(),
-        category_id: catsQ.data?.[0]?.id ?? null,
-        account_id: accsQ.data?.[0]?.id ?? null,
-        direction: 'EXPENSE',
-        default_amount: amount,
-        status: 'ACTIVE',
-      });
-      if (error) throw error;
-      setName(''); setAmountText(''); setShowForm(false);
-      tmplQ.refetch();
-    } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan.'); }
+      if (draft.id) {
+        await updateTemplate.mutateAsync({
+          id: draft.id,
+          name: draft.name,
+          defaultAmount: amount,
+          dueDay,
+          categoryId: draft.categoryId,
+          accountId: draft.accountId,
+        });
+      } else {
+        await createTemplate.mutateAsync({
+          householdId,
+          name: draft.name,
+          defaultAmount: amount,
+          dueDay,
+          categoryId: draft.categoryId,
+          accountId: draft.accountId,
+          direction: 'EXPENSE',
+        });
+      }
+      setDraft(null);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal menyimpan template.');
+    }
   }
 
-  async function setStatus(id: string, status: 'ACTIVE' | 'COMPLETED') {
-    const sb = requireSupabase();
-    await sb.from('recurring_templates').update({ status }).eq('id', id);
-    tmplQ.refetch();
+  async function toggleStatus(t: Template) {
+    setErr(null);
+    try {
+      await setStatus.mutateAsync({
+        id: t.id,
+        status: t.status === 'ACTIVE' ? 'COMPLETED' : 'ACTIVE',
+      });
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal mengubah status template.');
+    }
   }
+
+  const editing = draft?.id ? all.find((t) => t.id === draft.id) : null;
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Template Transaksi Rutin</Text>
-          <Pressable onPress={() => setShowForm((v) => !v)}>
-            <Text style={styles.add}>{showForm ? 'Tutup' : '+ Tambah'}</Text>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <ArrowLeft size={18} color={Colors.textPrimary} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>TEMPLATE RUTIN</Text>
+            <Text style={styles.title}>Template transaksi rutin</Text>
+          </View>
+          <Pressable
+            onPress={() => { setDraft(draft ? null : { ...EMPTY_DRAFT }); setErr(null); }}
+            style={styles.addBtn}
+          >
+            <Plus size={14} color={Colors.textPrimary} />
+            <Text style={styles.addText}>{draft ? 'Tutup' : 'Tambah'}</Text>
           </Pressable>
         </View>
 
         <View style={styles.baseline}>
-          <Text style={styles.eyebrow}>TOTAL KOMITMEN RUTIN BULANAN • {activeCount} AKTIF</Text>
-          <Text style={styles.total}>{formatRupiah(baseline)} / siklus</Text>
-          <Text style={styles.sub}>Kebutuhan wajib yang otomatis di-clone setiap siklus baru</Text>
+          <Text style={styles.baselineEyebrow}>
+            BASELINE BULANAN · {activeCount} TEMPLATE
+          </Text>
+          <View style={styles.baselineRow}>
+            <Text style={styles.baselineAmount}>{formatRupiah(baseline)}</Text>
+            <View style={styles.countPill}>
+              <View style={styles.countDot} />
+              <Text style={styles.countText}>{activeCount} aktif</Text>
+            </View>
+          </View>
+          <Text style={styles.baselineNote}>
+            Kebutuhan wajib yang otomatis di-clone saat siklus baru dibuka. Income tidak dihitung.
+          </Text>
         </View>
 
-        {showForm && (
+        {draft && (
           <View style={styles.form}>
+            <Text style={styles.formTitle}>
+              {editing ? `Ubah ${editing.name}` : 'Template Baru'}
+            </Text>
+            <Text style={styles.formNote}>
+              Perubahan hanya berlaku untuk siklus berikutnya. Transaksi yang sudah di-clone
+              tidak ikut berubah.
+            </Text>
+
             <Text style={styles.label}>NAMA POS</Text>
-            <TextInput value={name} onChangeText={setName} placeholder="Wifi Rumah" placeholderTextColor={Colors.textMuted} style={styles.input} />
+            <TextInput
+              value={draft.name}
+              onChangeText={(v) => setDraft({ ...draft, name: v })}
+              placeholder="Wifi Rumah"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.input}
+            />
+
             <Text style={styles.label}>NOMINAL DEFAULT</Text>
-            <TextInput value={amountText} onChangeText={setAmountText} placeholder="385000" placeholderTextColor={Colors.textMuted} keyboardType="number-pad" style={styles.input} />
-            <PrimaryButton label="Simpan Template" onPress={create} />
+            <TextInput
+              value={draft.amountText}
+              onChangeText={(v) => setDraft({ ...draft, amountText: v })}
+              placeholder="385000"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              style={styles.input}
+            />
+            <Text style={styles.hint}>{formatRupiah(parseAmount(draft.amountText))}</Text>
+
+            <Text style={styles.label}>JATUH TEMPO (TANGGAL, OPSIONAL)</Text>
+            <TextInput
+              value={draft.dueDayText}
+              onChangeText={(v) => setDraft({ ...draft, dueDayText: v })}
+              placeholder="5"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              style={styles.input}
+            />
+            <Text style={styles.hint}>
+              {draft.dueDayText.trim() === ''
+                ? 'Kosongkan kalau tanggalnya belum pasti.'
+                : templateDueLabel(parseAmount(draft.dueDayText)) ?? 'Tanggal harus 1–31.'}
+            </Text>
+
+            <Text style={styles.label}>KATEGORI</Text>
+            <View style={styles.chips}>
+              {categories
+                .filter((c) => c.type === 'EXPENSE')
+                .map((c) => (
+                  <Chip
+                    key={c.id}
+                    label={c.name}
+                    active={draft.categoryId === c.id}
+                    onPress={() =>
+                      setDraft({ ...draft, categoryId: draft.categoryId === c.id ? null : c.id })
+                    }
+                  />
+                ))}
+            </View>
+
+            <Text style={styles.label}>AKUN</Text>
+            <View style={styles.chips}>
+              {accounts.map((a) => (
+                <Chip
+                  key={a.id}
+                  label={a.name}
+                  active={draft.accountId === a.id}
+                  onPress={() =>
+                    setDraft({ ...draft, accountId: draft.accountId === a.id ? null : a.id })
+                  }
+                />
+              ))}
+            </View>
+
+            <PrimaryButton
+              label={saving ? 'Menyimpan…' : editing ? 'Simpan Perubahan' : 'Simpan Template'}
+              onPress={save}
+            />
+            <SecondaryButton label="Batal" onPress={() => { setDraft(null); setErr(null); }} />
           </View>
         )}
 
-        <View style={styles.filter}>
-          <Pressable onPress={() => setFilter('ACTIVE')} style={[styles.opt, filter === 'ACTIVE' && styles.optOn]}>
-            <Text style={[styles.optText, filter === 'ACTIVE' && styles.optTextOn]}>Aktif ({activeCount})</Text>
+        <View style={styles.tabs}>
+          <Pressable
+            onPress={() => setFilter('ACTIVE')}
+            style={[styles.tab, filter === 'ACTIVE' && styles.tabOn]}
+          >
+            <Text style={[styles.tabText, filter === 'ACTIVE' && styles.tabTextOn]}>
+              Aktif · {activeCount}
+            </Text>
           </Pressable>
-          <Pressable onPress={() => setFilter('COMPLETED')} style={[styles.opt, filter === 'COMPLETED' && styles.optOn]}>
-            <Text style={[styles.optText, filter === 'COMPLETED' && styles.optTextOn]}>Selesai ({doneCount})</Text>
+          <Pressable
+            onPress={() => setFilter('COMPLETED')}
+            style={[styles.tab, filter === 'COMPLETED' && styles.tabOn]}
+          >
+            <Text style={[styles.tabText, filter === 'COMPLETED' && styles.tabTextOn]}>
+              Selesai · {doneCount}
+            </Text>
           </Pressable>
         </View>
 
-        {list.map((t) => (
-          <View key={t.id} style={styles.card}>
-            <View style={styles.head}>
-              <Text style={styles.name}>{t.name}</Text>
-              <Badge label={t.status === 'ACTIVE' ? 'Aktif' : 'Selesai'} tone={t.status === 'ACTIVE' ? 'paid' : 'default'} />
+        <Text style={styles.section}>DAFTAR TEMPLATE</Text>
+
+        {tmplQ.isLoading && <Text style={styles.muted}>Memuat template…</Text>}
+
+        {list.map((t) => {
+          const due = templateDueLabel(t.due_day);
+          const meta = [
+            t.categories?.name,
+            t.accounts?.name,
+            due,
+          ].filter(Boolean).join(' · ');
+          return (
+            <View key={t.id} style={[styles.card, t.status === 'ACTIVE' && styles.cardActive]}>
+              <View style={styles.cardTop}>
+                <View style={[styles.cardIcon, t.status === 'ACTIVE' && styles.cardIconActive]}>
+                  <Text style={[styles.cardGlyph, t.status === 'ACTIVE' && styles.cardGlyphActive]}>
+                    {t.direction === 'INCOME' ? '↓' : '↑'}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.cardName}>{t.name}</Text>
+                  <Text style={styles.cardMeta} numberOfLines={1}>
+                    {meta || 'Tanpa kategori · Tanpa akun'}
+                  </Text>
+                </View>
+                <Text style={styles.cardAmount}>{formatRupiahShort(t.default_amount)}</Text>
+              </View>
+
+              <View style={styles.cardBottom}>
+                <Badge
+                  label={t.status === 'ACTIVE' ? 'Aktif' : 'Selesai'}
+                  tone={t.status === 'ACTIVE' ? 'alert' : 'default'}
+                />
+                <View style={{ flex: 1 }} />
+                {t.status === 'ACTIVE' && (
+                  <Pressable
+                    onPress={() =>
+                      setDraft({
+                        id: t.id,
+                        name: t.name,
+                        amountText: String(t.default_amount),
+                        dueDayText: t.due_day != null ? String(t.due_day) : '',
+                        categoryId: t.category_id,
+                        accountId: t.account_id,
+                      })
+                    }
+                    hitSlop={8}
+                  >
+                    <Text style={styles.actionLink}>Edit</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={() => toggleStatus(t)} hitSlop={8}>
+                  <Text style={styles.actionMuted}>
+                    {t.status === 'ACTIVE' ? 'Tandai selesai' : 'Aktifkan lagi'}
+                  </Text>
+                </Pressable>
+                <ChevronRight size={12} color={Colors.textMuted} />
+              </View>
             </View>
-            <Text style={styles.meta}>
-              {(t as any).categories?.name ?? '—'} • {(t as any).accounts?.name ?? '—'}
+          );
+        })}
+
+        {!tmplQ.isLoading && list.length === 0 && (
+          <View style={styles.emptyBox}>
+            <Text style={styles.empty}>
+              {filter === 'ACTIVE'
+                ? 'Belum ada template aktif. Tambahkan pos rutin supaya siklus baru terisi otomatis.'
+                : 'Belum ada template yang ditandai selesai.'}
             </Text>
-            <Text style={styles.amount}>{formatRupiah(t.default_amount)} • {formatRupiahShort(t.default_amount)}</Text>
-            {t.status === 'ACTIVE' ? (
-              <SecondaryButton label="Tandai Selesai" onPress={() => setStatus(t.id, 'COMPLETED')} />
-            ) : (
-              <SecondaryButton label="Aktifkan Lagi" onPress={() => setStatus(t.id, 'ACTIVE')} />
-            )}
           </View>
-        ))}
-        {list.length === 0 && <Text style={styles.muted}>Tidak ada template {filter === 'ACTIVE' ? 'aktif' : 'selesai'}.</Text>}
+        )}
 
         {err && (
           <View style={styles.errBox}>
             <Text style={styles.errText}>{err}</Text>
           </View>
         )}
-        <SecondaryButton label="Kembali" onPress={() => router.back()} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.chip, active && styles.chipOn]}>
+      <Text style={[styles.chipText, active && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.canvas },
+  safe: { flex: 1, backgroundColor: Colors.surface },
   container: { padding: 16, gap: 12, paddingBottom: 32 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
-  add: { color: Colors.textPrimary, fontWeight: '600' },
-  baseline: { backgroundColor: Colors.textPrimary, borderRadius: Radius.lg, padding: 16, gap: 4 },
-  eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 0.6 },
-  total: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  sub: { color: Colors.borderStrong, fontSize: FontSize.body },
-  form: { backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle, padding: 14, gap: 8 },
-  label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
-  input: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.canvas },
-  filter: { backgroundColor: Colors.subtle, borderRadius: Radius.pill, flexDirection: 'row', padding: 4 },
-  opt: { flex: 1, paddingVertical: 10, borderRadius: Radius.pill, alignItems: 'center' },
-  optOn: { backgroundColor: Colors.surface },
-  optText: { color: Colors.textMuted, fontWeight: '600' },
-  optTextOn: { color: Colors.textPrimary },
-  card: { backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle, padding: 14, gap: 6 },
-  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  name: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 },
-  meta: { color: Colors.textMuted, fontSize: FontSize.body },
-  amount: { color: Colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  backBtn: {
+    width: 32, height: 32, borderRadius: Radius.md, borderWidth: 1,
+    borderColor: Colors.borderSubtle, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  eyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
+  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700' },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.subtle, borderWidth: 1, borderColor: Colors.borderSubtle,
+    borderRadius: Radius.md, paddingHorizontal: 10, paddingVertical: 8,
+  },
+  addText: { color: Colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  baseline: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16, gap: 8 },
+  baselineEyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
+  baselineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  baselineAmount: { color: Colors.white, fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  countPill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  countDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.paidBg },
+  countText: { color: Colors.paidBg, fontSize: 11, fontWeight: '700' },
+  baselineNote: { color: Colors.borderStrong, fontSize: FontSize.caption, lineHeight: 16 },
+  form: {
+    backgroundColor: Colors.canvas, borderRadius: Radius.md, borderWidth: 1,
+    borderColor: Colors.borderSubtle, padding: 14, gap: 8,
+  },
+  formTitle: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700' },
+  formNote: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
+  label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1, marginTop: 4 },
+  input: {
+    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
+    paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
+  },
+  hint: { color: Colors.textSecondary, fontSize: FontSize.caption, fontVariant: ['tabular-nums'] },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle,
+    borderRadius: Radius.pill, paddingHorizontal: 14, paddingVertical: 8,
+  },
+  chipOn: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  chipText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  chipTextOn: { color: Colors.white, fontWeight: '700' },
+  tabs: { backgroundColor: Colors.subtle, borderRadius: Radius.pill, flexDirection: 'row', padding: 4, gap: 4 },
+  tab: { flex: 1, paddingVertical: 10, borderRadius: Radius.pill, alignItems: 'center' },
+  tabOn: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle },
+  tabText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '500' },
+  tabTextOn: { color: Colors.textPrimary, fontWeight: '700' },
+  section: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '600', letterSpacing: 0.8, marginTop: 4 },
+  card: {
+    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
+    borderColor: Colors.borderSubtle, padding: 12, gap: 10,
+  },
+  cardActive: { borderColor: Colors.brandPrimary },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  cardIcon: {
+    width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.subtle,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cardIconActive: { backgroundColor: Colors.brandPrimary },
+  cardGlyph: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  cardGlyphActive: { color: Colors.white },
+  cardName: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  cardMeta: { color: Colors.textSecondary, fontSize: FontSize.caption },
+  cardAmount: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  cardBottom: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  actionLink: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  actionMuted: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700' },
+  emptyBox: { paddingVertical: 12 },
+  empty: { color: Colors.textMuted, fontSize: FontSize.body },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },

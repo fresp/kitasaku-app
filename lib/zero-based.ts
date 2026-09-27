@@ -335,3 +335,180 @@ export function resolveModeAmount(
   }
   return normalizeAmount(txn.planned_amount);
 }
+
+// ============ Phase 4: budget health, ledger grouping, template labels ============
+
+export type BudgetHealthStatus = 'OVER' | 'WATCH' | 'SAFE' | 'NO_BUDGET';
+
+export interface BudgetHealth {
+  status: BudgetHealthStatus;
+  /** Ratio in whole percent, capped at 999 for display sanity. */
+  ratioPct: number;
+  /** How far past the pagu, 0 when at or under it. */
+  overAmount: number;
+  /** Remaining pagu, 0 once exceeded. */
+  remainingAmount: number;
+  /** Design copy: MELEBIHI RENCANA / CEK RINCIAN / ANGGARAN AMAN / TANPA PAGU. */
+  label: string;
+  /** Maps to `Badge`'s tone vocabulary. */
+  tone: 'pending' | 'alert' | 'paid' | 'default';
+}
+
+/**
+ * The single budget-health rule. Budget Health, Detail Kategori, and Kelola
+ * Kategori all render the same judgement, so the thresholds (100% / 80%) and
+ * the copy live here rather than in three screens that can drift apart.
+ *
+ * `NO_BUDGET` is the case the old screens got wrong in opposite directions:
+ * a category with no pagu but real spending was reported "ANGGARAN AMAN" in
+ * Detail Kategori and "MELEBIHI RENCANA" in Budget Health. Neither is true —
+ * there is no plan to be safe or over against.
+ */
+export function budgetHealthStatus(spent: AmountInput, budget: AmountInput): BudgetHealth {
+  const s = normalizeAmount(spent);
+  const b = normalizeAmount(budget);
+  if (b <= 0) {
+    return {
+      status: s > 0 ? 'NO_BUDGET' : 'SAFE',
+      ratioPct: s > 0 ? 999 : 0,
+      overAmount: 0,
+      remainingAmount: 0,
+      label: s > 0 ? 'TANPA PAGU' : 'ANGGARAN AMAN',
+      tone: s > 0 ? 'alert' : 'paid',
+    };
+  }
+  const ratio = s / b;
+  const ratioPct = Math.min(999, Math.round(ratio * 100));
+  if (ratio > 1) {
+    return {
+      status: 'OVER',
+      ratioPct,
+      overAmount: s - b,
+      remainingAmount: 0,
+      label: 'MELEBIHI RENCANA',
+      tone: 'pending',
+    };
+  }
+  if (ratio > 0.8) {
+    return {
+      status: 'WATCH',
+      ratioPct,
+      overAmount: 0,
+      remainingAmount: b - s,
+      label: 'CEK RINCIAN',
+      tone: 'alert',
+    };
+  }
+  return {
+    status: 'SAFE',
+    ratioPct,
+    overAmount: 0,
+    remainingAmount: b - s,
+    label: 'ANGGARAN AMAN',
+    tone: 'paid',
+  };
+}
+
+/** Bar fill percentage for a health row: 0 when no budget, else capped at 100. */
+export function budgetFillPct(health: BudgetHealth): number {
+  if (health.status === 'NO_BUDGET') return 100;
+  return Math.max(2, Math.min(100, health.ratioPct));
+}
+
+const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+/** `2026-09-25` -> `25 Sep`. Returns null for anything unparseable. */
+export function formatShortDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return null;
+  const month = MONTHS_ID[parseInt(m[2], 10) - 1];
+  if (!month) return null;
+  return `${parseInt(m[3], 10)} ${month}`;
+}
+
+/**
+ * Ledger day heading, matching the design's "Hari Ini · 25 Sep" /
+ * "Kemarin · 24 Sep" / "25 Sep 2026". Both dates are passed in so this stays
+ * pure and testable — the caller decides what "today" is.
+ */
+export function ledgerDayLabel(
+  dateISO: string | null | undefined,
+  todayISO: string
+): string {
+  const short = formatShortDate(dateISO);
+  if (!short) return 'Tanpa tanggal';
+  const year = /^(\d{4})/.exec(dateISO!)?.[1];
+  if (dateISO!.slice(0, 10) === todayISO.slice(0, 10)) return `Hari Ini · ${short}`;
+  const y = new Date(`${todayISO.slice(0, 10)}T00:00:00Z`);
+  y.setUTCDate(y.getUTCDate() - 1);
+  if (dateISO!.slice(0, 10) === y.toISOString().slice(0, 10)) return `Kemarin · ${short}`;
+  return year ? `${short} ${year}` : short;
+}
+
+export interface LedgerFilterRow {
+  name: string;
+  direction: 'INCOME' | 'EXPENSE';
+  account_id?: string | null;
+  accountName?: string | null;
+  categoryName?: string | null;
+}
+
+export interface LedgerFilter {
+  query?: string;
+  /** `null`/absent = every direction. */
+  direction?: 'INCOME' | 'EXPENSE' | null;
+  /** `null`/absent = every account. */
+  accountId?: string | null;
+}
+
+/**
+ * Ledger search + chips. The design's placeholder is "Cari transaksi atau
+ * toko...", so the needle is matched against the transaction name, the account
+ * (the "toko"), and the category — matching only `name` would make searching
+ * for a merchant silently fail.
+ */
+export function filterLedger<T extends LedgerFilterRow>(rows: T[], filter: LedgerFilter): T[] {
+  const needle = (filter.query ?? '').trim().toLowerCase();
+  return rows.filter((r) => {
+    if (filter.direction && r.direction !== filter.direction) return false;
+    if (filter.accountId && r.account_id !== filter.accountId) return false;
+    if (!needle) return true;
+    return (
+      r.name.toLowerCase().includes(needle) ||
+      (r.accountName ?? '').toLowerCase().includes(needle) ||
+      (r.categoryName ?? '').toLowerCase().includes(needle)
+    );
+  });
+}
+
+export interface LedgerTotals {
+  expense: number;
+  income: number;
+  expenseCount: number;
+  incomeCount: number;
+}
+
+/**
+ * Totals for the ledger summary block. Sums the amount the caller already
+ * resolved for the row (planned or actual), so the ledger and the zero-based
+ * projection can never disagree about what a row is worth.
+ */
+export function summarizeLedger<T extends { direction: 'INCOME' | 'EXPENSE'; amount: number }>(
+  rows: T[]
+): LedgerTotals {
+  let expense = 0, income = 0, expenseCount = 0, incomeCount = 0;
+  for (const r of rows) {
+    const amount = normalizeAmount(r.amount);
+    if (r.direction === 'INCOME') { income += amount; incomeCount += 1; }
+    else { expense += amount; expenseCount += 1; }
+  }
+  return { expense, income, expenseCount, incomeCount };
+}
+
+/** Design's "Tgl 5" fragment on a template card; null when no due day is set. */
+export function templateDueLabel(dueDay: number | null | undefined): string | null {
+  if (dueDay === null || dueDay === undefined) return null;
+  if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31) return null;
+  return `Tgl ${Math.floor(dueDay)}`;
+}
