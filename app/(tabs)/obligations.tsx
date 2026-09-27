@@ -2,12 +2,40 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
-import { useActiveCycle, useAllocateObligation, useCategories, useAccounts, useCreateObligation, useObligations, useTransactions } from '../../lib/queries';
-import { Badge } from '../../components/ui/Badge';
-import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
+import { useActiveCycle, useCreateObligation, useObligations } from '../../lib/queries';
+import {
+  matchesObligationFilter,
+  obligationBacklog,
+  obligationFilterCounts,
+  type ObligationFilter,
+} from '../../lib/obligation';
+import { ObligationRow } from '../../components/ui/ObligationRow';
+import { PrimaryButton } from '../../components/ui/Button';
+
+/**
+ * Screen 3 — Tanggungan.
+ *
+ * The pool of everything the family owes outside the monthly routine: loans,
+ * reimbursements, installments, and one-off bills. Home answers "is this
+ * cycle's plan sound?"; this screen answers "what do we still owe, and which of
+ * it is late?".
+ *
+ * Per-card state comes from `loanState` in lib/obligation.ts and per-row
+ * payment actions live in `ObligationRow`, so this file only lays out the
+ * filters, the overview, and the list.
+ */
+
+const FILTERS: { key: ObligationFilter; label: string }[] = [
+  { key: 'all', label: 'Semua' },
+  { key: 'loan', label: 'Pinjaman' },
+  { key: 'reimburse', label: 'Reimburse' },
+  { key: 'installment', label: 'Cicilan' },
+  { key: 'bill', label: 'Tagihan' },
+];
 
 export default function ObligationsScreen() {
   const router = useRouter();
@@ -15,36 +43,26 @@ export default function ObligationsScreen() {
   const householdId = household?.id;
   const cycleQ = useActiveCycle(householdId);
   const obligQ = useObligations(householdId);
-  const catsQ = useCategories(householdId);
-  const accsQ = useAccounts(householdId);
-  const txnsQ = useTransactions(householdId, cycleQ.data?.id);
-  const allocate = useAllocateObligation();
   const createOb = useCreateObligation();
 
+  const [filter, setFilter] = useState<ObligationFilter>('all');
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [totalText, setTotalText] = useState('');
-  const [allocId, setAllocId] = useState<string | null>(null);
-  const [allocText, setAllocText] = useState('');
   const [err, setErr] = useState<string | null>(null);
 
-  const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
-  const totalRemaining = obligations.reduce((s, o) => s + (o.remaining_amount ?? 0), 0);
-  const allocTarget = obligations.find((o) => o.id === allocId) ?? null;
+  // Read once per render rather than held in state: a stored "today" would go
+  // stale the moment the app is left open across midnight, and every card's
+  // overdue verdict depends on it.
+  const todayISO = new Date().toISOString().slice(0, 10);
 
-  const historyByOb = useMemo(() => {
-    const map: Record<string, { date: string; amount: number; account: string }[]> = {};
-    for (const t of txnsQ.data ?? []) {
-      if (t.obligation_id && t.status === 'PAID') {
-        (map[t.obligation_id] ??= []).push({
-          date: t.release_date ?? '',
-          amount: t.actual_amount,
-          account: (t as any).accounts?.name ?? '',
-        });
-      }
-    }
-    return map;
-  }, [txnsQ.data]);
+  const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
+  const backlog = useMemo(() => obligationBacklog(obligations), [obligations]);
+  const counts = useMemo(() => obligationFilterCounts(obligations), [obligations]);
+  const visible = useMemo(
+    () => obligations.filter((o) => matchesObligationFilter(o.type, filter)),
+    [obligations, filter]
+  );
 
   async function submitCreate() {
     setErr(null);
@@ -58,33 +76,14 @@ export default function ObligationsScreen() {
     } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan.'); }
   }
 
-  async function submitAllocate() {
-    setErr(null);
-    const amount = parseInt(allocText.replace(/[^0-9]/g, '') || '0', 10);
-    if (!householdId || !cycleQ.data?.id || !allocTarget) return;
-    if (amount <= 0) { setErr('Nominal alokasi harus lebih dari Rp 0.'); return; }
-    if (amount > allocTarget.remaining_amount) { setErr('Nominal melebihi sisa tanggungan.'); return; }
-    try {
-      await allocate.mutateAsync({
-        householdId,
-        cycleId: cycleQ.data.id,
-        obligationId: allocTarget.id,
-        amount,
-        categoryId: catsQ.data?.[0]?.id ?? null,
-        accountId: accsQ.data?.[0]?.id ?? null,
-      });
-      setAllocId(null); setAllocText('');
-      router.push('/(tabs)');
-    } catch (e: any) { setErr(e?.message ?? 'Gagal mengalokasikan.'); }
-  }
-
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Tanggungan & Reimburse</Text>
-          <Pressable onPress={() => setShowForm((v) => !v)}>
-            <Text style={styles.add}>{showForm ? 'Tutup' : '+ Tambah'}</Text>
+          <Text style={styles.title}>Kewajiban &amp; Reimburse</Text>
+          <Pressable onPress={() => setShowForm((v) => !v)} style={styles.addBtn}>
+            <Plus size={14} color={Colors.white} />
+            <Text style={styles.addText}>{showForm ? 'Tutup' : 'Tambah'}</Text>
           </Pressable>
         </View>
 
@@ -95,68 +94,69 @@ export default function ObligationsScreen() {
             <Text style={styles.label}>TOTAL NOMINAL</Text>
             <TextInput value={totalText} onChangeText={setTotalText} placeholder="2000000" placeholderTextColor={Colors.textMuted} keyboardType="number-pad" style={styles.input} />
             <PrimaryButton label={createOb.isPending ? 'Menyimpan…' : 'Simpan Tanggungan'} onPress={submitCreate} />
+            <Text style={styles.hint}>
+              Pinjaman dengan jadwal cicilan dicatat lewat Quick Add → Terima Pinjaman, supaya
+              bunga dan angsurannya ikut tersimpan.
+            </Text>
           </View>
         )}
 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {FILTERS.map((f) => {
+            const active = f.key === filter;
+            const n = counts[f.key];
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => setFilter(f.key)}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {f.label}
+                  {n > 0 ? ` ${n}` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
         <View style={styles.overview}>
-          <Text style={styles.eyebrow}>TOTAL TANGGUNGAN BELUM LUNAS • {obligations.length} AKTIF</Text>
-          <Text style={styles.total}>{formatRupiah(totalRemaining)}</Text>
-          <Text style={styles.sub}>Kewajiban independen di luar rutinitas bulanan</Text>
+          <Text style={styles.eyebrow}>{backlog.eyebrow}</Text>
+          <Text style={styles.total}>{formatRupiah(backlog.total)}</Text>
+          <Text style={styles.sub}>{backlog.sub}</Text>
         </View>
 
         {obligQ.isLoading && <Text style={styles.muted}>Memuat tanggungan…</Text>}
-        {!householdId && <Text style={styles.muted}>Mode offline — login untuk melihat pool tanggungan live.</Text>}
+        {!householdId && (
+          <Text style={styles.muted}>Mode offline — login untuk melihat pool tanggungan live.</Text>
+        )}
 
-        {obligations.map((o) => {
-          const paid = o.total_amount - o.remaining_amount;
-          const pct = o.total_amount > 0 ? Math.round((paid / o.total_amount) * 100) : 0;
-          const hist = historyByOb[o.id] ?? [];
-          return (
-            <View key={o.id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>{o.title}</Text>
-                <Badge
-                  label={o.status === 'PARTIAL' ? `PARTIAL • ${pct}%` : o.status}
-                  tone={o.status === 'PARTIAL' ? 'alert' : 'pending'}
-                />
-              </View>
-              <Text style={styles.breakdown}>
-                Total {formatRupiah(o.total_amount)} • Sisa {formatRupiah(o.remaining_amount)}
-              </Text>
-              <View style={styles.track}>
-                <View style={[styles.fill, { width: `${Math.max(pct, 2)}%` as any, backgroundColor: o.status === 'PARTIAL' ? Colors.alertText : Colors.pendingBorder }]} />
-              </View>
-              {hist.length > 0 && (
-                <View style={styles.history}>
-                  {hist.map((h, i) => (
-                    <Text key={i} style={styles.historyText}>
-                      {h.date}: Dibayar {formatRupiah(h.amount)}{h.account ? ` (${h.account})` : ''}
-                    </Text>
-                  ))}
-                </View>
-              )}
-              {allocId === o.id ? (
-                <View style={{ gap: 8 }}>
-                  <TextInput
-                    value={allocText}
-                    onChangeText={setAllocText}
-                    placeholder={`Nominal (sisa ${formatRupiah(o.remaining_amount)})`}
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="number-pad"
-                    style={styles.input}
-                  />
-                  <PrimaryButton label={allocate.isPending ? 'Menarik…' : 'Tarik ke Anggaran Bulan Ini'} onPress={submitAllocate} />
-                  <SecondaryButton label="Batal" onPress={() => { setAllocId(null); setAllocText(''); }} />
-                </View>
-              ) : (
-                <PrimaryButton
-                  label="+ Alokasikan ke Bulan Ini"
-                  onPress={() => { setAllocId(o.id); setAllocText(String(o.remaining_amount)); setErr(null); }}
-                />
-              )}
-            </View>
-          );
-        })}
+        {!obligQ.isLoading && visible.length === 0 && (
+          <View style={styles.emptyBox}>
+            <Text style={styles.muted}>
+              {obligations.length === 0
+                ? 'Belum ada tanggungan tercatat. Pinjaman yang kamu terima lewat Quick Add otomatis muncul di sini.'
+                : `Tidak ada ${FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} yang terbuka.`}
+            </Text>
+          </View>
+        )}
+
+        {visible.map((o) => (
+          <ObligationRow
+            key={o.id}
+            obligation={o}
+            todayISO={todayISO}
+            householdId={householdId}
+            cycleId={cycleQ.data?.id}
+            onPressDetail={() =>
+              router.push({ pathname: '/detail-pinjaman', params: { id: o.id } })
+            }
+          />
+        ))}
 
         {err && (
           <View style={styles.errBox}>
@@ -170,26 +170,43 @@ export default function ObligationsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.canvas },
-  container: { padding: 16, gap: 12, paddingBottom: 32 },
+  container: { padding: 16, gap: 12, paddingBottom: 96 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
-  add: { color: Colors.textPrimary, fontWeight: '600' },
-  form: { backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle, padding: 14, gap: 8 },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: Colors.brandPrimary,
+    borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  addText: { color: Colors.white, fontWeight: '600', fontSize: FontSize.body },
+
+  form: {
+    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
+    borderColor: Colors.borderSubtle, padding: 14, gap: 8,
+  },
   label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
-  input: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.canvas },
+  input: {
+    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
+    paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary,
+    backgroundColor: Colors.canvas,
+  },
+  hint: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
+
+  filterRow: { gap: 8, paddingVertical: 2, paddingRight: 8 },
+  chip: {
+    backgroundColor: Colors.subtle, borderRadius: Radius.pill,
+    paddingHorizontal: 14, paddingVertical: 8,
+  },
+  chipActive: { backgroundColor: Colors.brandPrimary },
+  chipText: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
+  chipTextActive: { color: Colors.white },
+
   overview: { backgroundColor: Colors.textPrimary, borderRadius: Radius.lg, padding: 16, gap: 4 },
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 0.6 },
   total: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '700', fontVariant: ['tabular-nums'] },
   sub: { color: Colors.borderStrong, fontSize: FontSize.body },
-  muted: { color: Colors.textMuted, fontSize: FontSize.body },
-  card: { backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle, padding: 14, gap: 8 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  cardTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 },
-  breakdown: { color: Colors.textSecondary, fontSize: FontSize.body },
-  track: { height: 6, borderRadius: 3, backgroundColor: Colors.subtle, overflow: 'hidden' },
-  fill: { height: 6, borderRadius: 3 },
-  history: { backgroundColor: Colors.canvas, borderRadius: Radius.sm, padding: 10, gap: 2 },
-  historyText: { color: Colors.textSecondary, fontSize: FontSize.body },
+
+  emptyBox: { paddingVertical: 16, paddingHorizontal: 4 },
+  muted: { color: Colors.textMuted, fontSize: FontSize.body, lineHeight: 18 },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
 });

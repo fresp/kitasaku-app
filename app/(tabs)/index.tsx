@@ -111,7 +111,18 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        <Pressable onPress={() => router.push('/new-cycle')} style={styles.cyclePill}>
+        {/* A cycle whose required allocation exceeds its source funds cannot be
+            planned against, so the pill opens the Funding Gap explanation
+            instead of the blank "open a cycle" form — landing someone on a form
+            when the answer is "you are short Rp 5jt" hides the actual problem. */}
+        <Pressable
+          onPress={() =>
+            summaryQ.data?.status === 'FUNDING_GAP'
+              ? router.push('/funding-gap')
+              : router.push('/new-cycle')
+          }
+          style={styles.cyclePill}
+        >
           <View style={styles.cycleLeft}>
             <Calendar size={16} color={Colors.textSecondary} />
             <View>

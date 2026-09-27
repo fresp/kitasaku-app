@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { requireSupabase } from './supabase';
 import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
+import { isRepaymentMode } from './obligation';
+import type { RepaymentMode } from './obligation';
 import {
   calculateZeroBasedSummary,
   canMarkAsPaid,
@@ -54,6 +56,12 @@ export interface Obligation {
   planned_installment_amount?: number | null; installment_count?: number | null;
   current_installment?: number | null; start_date?: string | null; due_date?: string | null;
   interest_fee_amount?: number | null;
+  /**
+   * Plan shape (migration 008): LUMP_NEXT_MONTH | INSTALLMENT | MANUAL.
+   * `null`/undefined means nobody has chosen — see `repaymentModeOf` in
+   * lib/obligation.ts, which derives a *display* default and says it did.
+   */
+  repayment_mode?: string | null;
 }
 export interface Template {
   id: string; household_id: string; name: string; category_id: string | null;
@@ -86,6 +94,7 @@ function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['txns'] });
   qc.invalidateQueries({ queryKey: ['oblig'] });
+  qc.invalidateQueries({ queryKey: ['obl-payments'] });
   qc.invalidateQueries({ queryKey: ['alloc'] });
   qc.invalidateQueries({ queryKey: ['source-funds'] });
   qc.invalidateQueries({ queryKey: ['zero-summary'] });
@@ -702,6 +711,56 @@ export function useObligationInstallments(
   });
 }
 
+/**
+ * One transaction by id, with its account and category joined.
+ *
+ * Used by Detail Pinjaman to name where the loan money landed: the obligation
+ * only stores `source_transaction_id`, and the transaction may belong to a
+ * cycle that is no longer active, so it cannot be found in the cycle ledger.
+ */
+export function useTransactionById(householdId: string | undefined, txnId: string | undefined) {
+  return useQuery({
+    queryKey: ['txn', householdId, txnId],
+    enabled: !!householdId && !!txnId,
+    queryFn: async (): Promise<Txn | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, categories(name), accounts(name)')
+        .eq('household_id', householdId!).eq('id', txnId!).maybeSingle();
+      if (error) throw error;
+      return (data as Txn | null) ?? null;
+    },
+  });
+}
+
+/**
+ * Every payment ever booked against one obligation, across all cycles.
+ *
+ * Deliberately not `useTransactions(householdId, cycleId)` filtered down: a
+ * loan taken in May and paid through November has payments in cycles that are
+ * no longer active, and a cycle-scoped query would render the Riwayat
+ * Pembayaran section empty for exactly the loans that have the most history.
+ */
+export function useObligationPayments(
+  householdId: string | undefined, obligationId: string | undefined
+) {
+  return useQuery({
+    queryKey: ['obl-payments', householdId, obligationId],
+    enabled: !!householdId && !!obligationId,
+    queryFn: async (): Promise<Txn[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, categories(name), accounts(name)')
+        .eq('household_id', householdId!).eq('obligation_id', obligationId!)
+        .eq('status', 'PAID')
+        .order('release_date', { ascending: false, nullsFirst: false })
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []) as Txn[];
+    },
+  });
+}
+
 /** Every installment in a cycle, for the cycle plan view. */
 export function useCycleInstallments(
   householdId: string | undefined, cycleId: string | undefined
@@ -787,6 +846,35 @@ export function useAllocateDebtPayment() {
       return data as { transaction_id: string; allocation_id: string }[];
     },
     onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+/**
+ * Chooses the plan shape for an obligation (migration 008). Moves no money, so
+ * it invalidates `['oblig']` only — routing it through `invalidateMoneyKeys`
+ * would refetch every projection just to learn that a label changed.
+ *
+ * `mode: null` clears the choice back to "not chosen", which is a legitimate
+ * thing to want after tapping the wrong option.
+ */
+export function useSetRepaymentMode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; obligationId: string; mode: RepaymentMode | null;
+    }) => {
+      if (args.mode !== null && !isRepaymentMode(args.mode)) {
+        throw new Error('Mode pembayaran tidak dikenal.');
+      }
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('set_obligation_repayment_mode', {
+        p_household_id: args.householdId,
+        p_obligation_id: args.obligationId,
+        p_mode: args.mode,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['oblig'] }),
   });
 }
 

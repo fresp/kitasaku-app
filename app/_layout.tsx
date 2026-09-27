@@ -41,6 +41,8 @@ function Gate() {
       <Stack.Screen name="kelola-kategori" options={{ presentation: 'card' }} />
       <Stack.Screen name="ruang-keluarga" options={{ presentation: 'card' }} />
       <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
+      <Stack.Screen name="detail-pinjaman" options={{ presentation: 'card' }} />
+      <Stack.Screen name="funding-gap" options={{ presentation: 'card' }} />
       <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
       <Stack.Screen
         name="payment-confirm"
