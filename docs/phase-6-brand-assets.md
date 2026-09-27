@@ -102,3 +102,27 @@ has been seen so it shows once. The gate in `app/_layout.tsx` reads that flag on
 every navigation rather than caching it in state: tapping "Mulai" writes the
 flag and pushes to sign-in in the same tick, so a state copy would still read
 `false` on the next pass and bounce the family back to the slide they just left.
+
+## 6. Migration to high-fidelity PNG illustrations
+
+The original SVG pack contained minimal geometric outlines. A richer illustration
+set from the Kitasaku showcase sheet (`design/assets-library.png`) provides 15
+high-fidelity artwork pieces:
+
+- 3 Onboarding illustrations (`onboarding-01` to `03`)
+- 6 Empty state illustrations (`empty-*`)
+- 6 Context illustrations (`context-*`)
+
+### Mixed pipeline: PNG first with SVG fallback
+
+1. **Dual resolution in `BrandIcon`**: `components/ui/BrandIcon.tsx` inspects a
+   static `BRAND_PNG` registry. If an illustration exists as a PNG, it renders
+   as a React Native `<Image>` preserving its natural aspect ratio scaled to `size`.
+2. **SVG fallback**: All 13 category glyphs (`category-*`) and brand assets
+   (`brand-mark`, `primary-logo`) remain vectors in `BRAND_ART`. At small sizes
+   (16–24px) in ledger rows and picker grids, crisp vector outlines perform
+   optimally, so keeping them on SVG without forcing raster equivalents avoids
+   blurriness on high-DPI screens.
+3. **Zero call site churn**: Screens continue to use `<BrandIcon name="..." size={...} />`
+   without needing separate import paths or conditional rendering.
+

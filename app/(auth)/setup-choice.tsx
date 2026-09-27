@@ -112,11 +112,15 @@ export default function SetupChoiceScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.label}>KODE UNDANGAN (mis. KEL-782)</Text>
+            {/* The example is deliberately generic. The code is generated from
+                the household name (`lib/household.ts`), so every family's
+                prefix differs — pinning "KEL-782" told everyone whose family
+                is not called "Keluarga …" that they had the wrong code. */}
+            <Text style={styles.label}>KODE UNDANGAN (mis. ABC-123)</Text>
             <TextInput
               value={code}
               onChangeText={(t) => setCode(t.toUpperCase())}
-              placeholder="KEL-782"
+              placeholder="ABC-123"
               placeholderTextColor={Colors.textMuted}
               autoCapitalize="characters"
               style={styles.input}

@@ -220,9 +220,15 @@ export default function FundingGapScreen() {
           {activeTemplates.length === 0 && (
             <View style={styles.emptyArt}>
               <BrandIcon name="empty-belum-ada-rencana" size={72} label="" />
-              <Text style={styles.rowSub}>
-                Belum ada pos rutin aktif. Buat lewat Riwayat → Template Rutin.
-              </Text>
+              <Text style={styles.rowSub}>Belum ada pos rutin aktif.</Text>
+              {/* This used to read "Buat lewat Riwayat → Template Rutin", which
+                  was a dead end twice over: Riwayat never linked to Template
+                  Rutin, and until now nothing else did either. It is a button
+                  to the real screen instead of directions to a route that did
+                  not exist. */}
+              <Pressable onPress={() => router.push('/templates')} style={styles.emptyCta}>
+                <Text style={styles.emptyCtaText}>+ Buat pos rutin</Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -436,6 +442,11 @@ function longDate(iso: string): string {
 
 const styles = StyleSheet.create({
   emptyArt: { alignItems: 'center', gap: 10, paddingVertical: 12 },
+  emptyCta: {
+    borderWidth: 1, borderColor: Colors.borderSubtle, backgroundColor: Colors.surface,
+    borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 9,
+  },
+  emptyCtaText: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700' },
 
   safe: { flex: 1, backgroundColor: Colors.canvas },
   container: { padding: 16, gap: 12, paddingBottom: 40 },

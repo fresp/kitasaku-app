@@ -7,6 +7,7 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Landmark from 'lucide-react-native/icons/landmark';
 import LogOut from 'lucide-react-native/icons/log-out';
 import Palette from 'lucide-react-native/icons/palette';
+import Repeat from 'lucide-react-native/icons/repeat';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Users from 'lucide-react-native/icons/users';
@@ -111,6 +112,17 @@ export default function ProfileScreen() {
       sub: 'Atur kategori pengeluaran dan ikon',
       tone: 'alert',
       onPress: () => router.push('/manage-categories'),
+    },
+    {
+      // Screen 9 was registered in the router with nothing linking to it, so
+      // this is one of its two doors (Buka Siklus has the other, where a
+      // family actually notices a routine is missing).
+      key: 'templates',
+      icon: Repeat,
+      title: 'Template Rutin',
+      sub: 'Pos pengeluaran & pemasukan yang di-clone tiap siklus',
+      tone: 'default',
+      onPress: () => router.push('/templates'),
     },
   ];
 

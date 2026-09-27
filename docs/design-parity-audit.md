@@ -12,25 +12,26 @@ kode yang diubah. Semua rujukan baris di bawah diverifikasi saat audit
 Cakupan frame design: Foundations, Flow A–K, Asset Library, dan
 `Screen 2 — Onboarding, Category Setup & Financial Insight`.
 
-> **Catatan penulisan.** Ada sesi paralel lain yang pernah menyentuh repo ini
-> (`6347858`, `88cb0b7` — beneficiaries/Flow K + account management). Audit ini
-> ditulis setelah working tree berisi perubahan yang belum di-commit pada
-> `app/(tabs)/index.tsx`, `app/funding-gap.tsx`, `app/quick-add.tsx`; temuan
-> mengacu pada isi terkini file-file itu.
+> **Catatan penulisan.** Repo ini sempat disentuh sesi lain (`88cb0b7`, `6347858`
+> — account management + beneficiaries/Flow K; `cbe9031` — Slice 3–7 Flow B).
+> Audit ini ditulis setelah semua itu mendarat dan working tree hanya berisi file
+> audit ini, jadi temuan di bawah mengacu pada `HEAD` `cbe9031`.
 >
 > ⚠️ **Nomor baris bisa bergeser.** Sesi paralel yang menyelesaikan Slice 3–7
 > Flow B mengubah `app/(tabs)/obligations.tsx`, `components/ui/ObligationCard.tsx`,
 > `lib/obligation.ts`, `lib/seed.ts`, dan `app/quick-add.tsx` **setelah** draf
-> pertama audit ini. Nomor baris di bawah valid pada verifikasi akhir
-> (2026-09-27) tetapi **verifikasi ulang dengan grep** sebelum mengandalkannya;
-> semua klaim penting disertai kutipan teks atau path, bukan hanya nomor baris.
+> pertama audit ini, lalu commit `cbe9031`. Nomor baris di bawah valid pada
+> verifikasi akhir (2026-09-27) tetapi **verifikasi ulang dengan grep** sebelum
+> mengandalkannya; semua klaim penting disertai kutipan teks atau path, bukan
+> hanya nomor baris.
 >
 > **Rekonsiliasi.** Slice 3–7 Flow B sudah mendarat saat audit ini selesai, jadi
 > temuan yang bersinggungan dengannya sudah ditandai ✅ di tabel §2 dan §6–§7.
 > Daftar temuan yang **benar-benar masih terbuka**: §1 #1 (mock bocor),
 > #2 (Template Rutin masih yatim), #3 (`isError` = 0), #4 (aritmetika Buka
 > Siklus), #5 (join Screen 13), #6 (Flow K3), ditambah panel Alokasi (§7.12),
-> copy Home (§4.5), dan release hygiene (§4.7).
+> copy Home (§4.5), baris menyesatkan `new-cycle.tsx:253` (§3.3), dan release
+> hygiene (§4.7).
 >
 > Audit Flow B (Quick Add / Tanggungan / Budget Health) sudah punya dokumen
 > sendiri: `docs/flow-b-quickadd-audit.md`. Dokumen ini tidak mengulang
@@ -58,8 +59,8 @@ Severity: 🔴 Kritis · 🟠 Tinggi · 🟡 Sedang · ⚪ Rendah
 | Design frame | Implementasi | Status | Severity |
 | --- | --- | --- | --- |
 | `y4yNUL` Screen 1 Home | `app/(tabs)/index.tsx` | Struktur cocok; copy beda; mock bocor | 🟠 |
-| `wOUgb` Screen 2 Konfirmasi Sheet | `app/payment-confirm.tsx` | Kurang konteks cicilan, "Ubah" tanggal, copy CTA; mock bocor | 🟠 |
-| `F0gyAy` Konfirmasi Pembayaran Pinjaman | `app/payment-confirm.tsx` | Varian pinjaman (rincian pokok/bunga/preview lunas) belum ada | 🟡 |
+| `wOUgb` Screen 2 Konfirmasi Sheet | `app/payment-confirm.tsx` | Tanggal terkunci ke hari ini & link "Hari ini" (`:143`) bukan `Pressable`; copy CTA; mock bocor | 🟠 |
+| `F0gyAy` Konfirmasi Pembayaran Pinjaman | `app/payment-confirm.tsx` | Varian pinjaman hanya dibedakan badge "Dari pool tanggungan" (`:132`) — tanpa rincian pokok/bunga/preview lunas | 🟡 |
 | `C4wuWy` Flow A Catat Pemasukan/Pinjaman | `app/quick-add.tsx` (mode loan) | "Cara pembayaran" (`REPAYMENT_MODES`) & "Yang akan dibuat" **sudah ada** (§6) | ⚪ |
 | `U4FWZM` Screen 3 Tanggungan | `app/(tabs)/obligations.tsx` + `components/ui/ObligationCard.tsx` | Cocok: baris Rencana/Tempo/Bunga & warna tab Pinjaman **sudah ada** | ⚪ |
 | `xdPDT` Detail Pinjaman | `app/loan-detail.tsx` | **Paling dekat** — hampir paritas penuh | ⚪ |
@@ -123,7 +124,7 @@ yang berbeda.
 
 `ASSET_RELEASE` ada di `FlowType`, dibaca Home & `asset-insight`, tapi tak ada
 UI yang bisa menghasilkannya: `quick-add.tsx` hanya mengenal `out`/`in`/`loan`,
-dan `in` selalu menulis `OPERATING_INCOME`. `funding-gap.tsx:334-343` sudah
+dan `in` selalu menulis `OPERATING_INCOME`. `funding-gap.tsx:340-342` sudah
 jujur menandai strategi ini `disabled` dengan catatan "Belum tersedia — catat
 lewat penyesuaian saldo akun". Fiturnya tetap kosong, tapi minimal tidak
 menyesatkan. (Keputusan "ditunda" sudah dicatat di `flow-b-quickadd-audit.md` §6.)
@@ -237,7 +238,7 @@ Catatan pendukung: `new-cycle.tsx` juga tidak menampilkan "31 hari" atau
 | `:36` | `const mock = pendingTransactions.find((t) => t.id === id) ?? pendingTransactions[1]` |
 | `:38-41` | `name` / `category` / `accountName` / `planned` fallback ke mock |
 | `:45` | `payable = !liveTxn \|\| canMarkAsPaid(liveTxn)` — tanpa `liveTxn` dianggap payable |
-| `:129` | Badge `"Bulan lalu"` hanya muncul saat `!liveTxn` (yakni **hanya** untuk mock) |
+| `:129-130` | Badge `"Bulan lalu"` hanya muncul saat `!liveTxn` (yakni **hanya** untuk mock) |
 
 `live` di Home = `!!householdId && !!cycleId && !!txnsQ.data` (`:72`). Jadi
 fallback justru aktif pada kondisi yang **nyata dan umum**: user sudah punya
@@ -270,8 +271,8 @@ nama & angka orang lain.
 
 | Design (`y4yNUL`) | Implementasi (`app/(tabs)/index.tsx`) |
 | --- | --- |
-| "2 tagihan belum dibayar" | `:219` `{unpaidCount} transaksi belum dibayar` — design bilang "tagihan", impl bilang "transaksi" (dan menghitung expense saja) |
-| "Jadwal terdekat · Tagihan Rumah" | `:220-222` "Terdekat · {nama}" — tanpa kata "Jadwal" dan tanpa jenis |
+| "2 tagihan belum dibayar" | `:217` `{unpaidCount} transaksi belum dibayar` — design bilang "tagihan", impl bilang "transaksi" (dan menghitung expense saja) |
+| "Jadwal terdekat · Tagihan Rumah" | `:219` "Terdekat · {nama}" — tanpa kata "Jadwal" dan tanpa jenis |
 
 Perlu dicatat: komentar `:92-94` **sengaja** membedakan `unpaidCount`
 (expense saja) dari `pendingCount`, dan itu keputusan yang benar — tapi
@@ -343,11 +344,15 @@ Verifikasi ulang di audit ini (`grep` atas source terkini) mengonfirmasi:
 - ✅ Slice 6 — pintu masuk Budget Health (`obligations.tsx:76-83`).
 - ✅ Slice 7 — CTA bernominal + date hint kontekstual.
 
-Artinya §1 temuan #2 (sebagian), §2 baris `C4wuWy` / `QNDJk` / `eixEN` /
-`U4FWZM` / `oyTdC`, dan §7 Tier 3 **sudah tidak lagi berlaku** — sebagian
-besar tetap tercatat di tabel sebagai riwayat audit, bukan pekerjaan terbuka.
-Yang **masih terbuka** dari audit ini: temuan #1 (mock), #2 (Template Rutin),
-#3 (`isError`), #4 (aritmetika Buka Siklus), #5 (join), #6 (Flow K3).
+Artinya baris `C4wuWy` / `QNDJk` / `eixEN` / `U4FWZM` / `oyTdC` di §2 dan
+seluruh §7 Tier 3 **sudah tidak lagi berlaku** — keduanya tetap dicantumkan di
+dokumen ini sebagai riwayat audit, bukan pekerjaan terbuka.
+
+**Temuan yang masih terbuka:** §1 #1 (mock bocor), #2 (Template Rutin masih
+yatim + pointer mati), #3 (`isError` = 0), #4 (aritmetika Buka Siklus), #5 (join
+Screen 13), #6 (Flow K3); ditambah §3.3 baris menyesatkan di `new-cycle.tsx:253`,
+§4.5 copy Home, §4.6 warning `BrandIcon`, panel Alokasi (§7.12), dan §4.7
+release hygiene.
 
 ---
 
@@ -373,6 +378,9 @@ Yang **masih terbuka** dari audit ini: temuan #1 (mock), #2 (Template Rutin),
      rutin") atau baris di My Profile.
    - Perbaiki pointer mati `app/funding-gap.tsx:224` (masih menunjuk
      "Riwayat → Template Rutin" yang tidak ada).
+   - Perbaiki `app/new-cycle.tsx:253` yang menyuruh "Pencairan Aset (Asset
+     Release) — catat lewat Quick Add" padahal Quick Add tak bisa
+     menghasilkannya (§3.3).
 4. **Samakan hint format kode undangan** dengan `generateInviteCode()`
    (`lib/household.ts:23-31`), atau ubah generator ke format design.
 
@@ -428,7 +436,7 @@ Yang **masih terbuka** dari audit ini: temuan #1 (mock), #2 (Template Rutin),
 `asset-insight`, `allocation` (semua `presentation: 'card'`);
 `payment-confirm`, `quick-add` (`presentation: 'modal'`).
 
-**Tab** (`app/(tabs)/_layout.tsx:46-73`): `index` (Home), `obligations`
+**Tab** (`app/(tabs)/_layout.tsx:46-72`): `index` (Home), `obligations`
 (Tanggungan), `history` (Riwayat), `profile` (My Profile) — sesuai
 `BottomNavigation / main-4` di design.
 

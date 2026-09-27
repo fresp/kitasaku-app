@@ -4,7 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
-import { pendingTransactions } from '../lib/mockData';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
 import { accountSubline } from '../lib/account';
@@ -12,6 +11,7 @@ import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number {
   const digits = text.replace(/[^0-9]/g, '');
@@ -33,16 +33,23 @@ export default function PaymentConfirmScreen() {
     () => (txnsQ.data ?? []).find((t) => t.id === id),
     [txnsQ.data, id]
   );
-  const mock = pendingTransactions.find((t) => t.id === id) ?? pendingTransactions[1];
 
-  const name = liveTxn?.name ?? mock.name;
-  const category = liveTxn?.categories?.name ?? mock.category;
-  const accountName = liveTxn?.accounts?.name ?? mock.account;
-  const planned = liveTxn?.planned_amount ?? mock.amount;
+  // This screen used to substitute a mock transaction whenever the real one was
+  // not in the cache, so an unrecognised id rendered "Flexy Cash · Rp 1.294.840"
+  // as if the family had planned it. Every field below now comes from the row
+  // that was actually asked for, or the screen says it could not find it.
+  const name = liveTxn?.name ?? '';
+  const category = liveTxn?.categories?.name ?? '';
+  const accountName = liveTxn?.accounts?.name ?? '';
+  const planned = liveTxn?.planned_amount ?? 0;
   // A settled row must never be reachable here — the route is public, so a
   // stale link or a back-navigation could otherwise re-confirm it and
   // decrement the obligation twice.
-  const payable = !liveTxn || canMarkAsPaid(liveTxn);
+  const payable = !!liveTxn && canMarkAsPaid(liveTxn);
+  // "Not loaded yet" and "not there" are different answers, and only one of
+  // them is worth a retry button.
+  const loadFailed = txnsQ.isError || cycleQ.isError || accsQ.isError;
+  const loading = !loadFailed && txnsQ.isLoading;
 
   const accountOptions = accsQ.data ?? [];
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -76,6 +83,49 @@ export default function PaymentConfirmScreen() {
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
     }
+  }
+
+  if (loadFailed || loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.settledBox}>
+          {loadFailed ? (
+            <QueryError
+              onRetry={() => {
+                txnsQ.refetch();
+                cycleQ.refetch();
+                accsQ.refetch();
+              }}
+              retrying={txnsQ.isFetching}
+              message="Transaksi ini belum bisa dibaca dari server, jadi nominalnya belum tentu benar. Datamu tidak hilang."
+            />
+          ) : (
+            <Text style={styles.settledBody}>Memuat transaksi…</Text>
+          )}
+          <View style={styles.settledAction}>
+            <PrimaryButton label="Kembali" onPress={() => router.back()} />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!liveTxn) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.settledBox}>
+          <BrandIcon name="empty-data-tidak-ditemukan" size={84} label="" />
+          <Text style={styles.settledTitle}>Transaksi tidak ditemukan</Text>
+          <Text style={styles.settledBody}>
+            Transaksi ini tidak ada di siklus aktif — mungkin sudah dihapus, atau tautannya sudah
+            kedaluwarsa.
+          </Text>
+          <View style={styles.settledAction}>
+            <PrimaryButton label="Kembali" onPress={() => router.back()} />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (!payable) {
@@ -126,10 +176,7 @@ export default function PaymentConfirmScreen() {
           </Text>
           <View style={styles.guideRow}>
             <Badge label={`Rencana ${formatRupiah(planned)}`} />
-            {typeof mock.prevAmount === 'number' && !liveTxn && (
-              <Badge label={`↓ Bulan lalu ${formatRupiah(mock.prevAmount)}`} tone="paid" />
-            )}
-            {liveTxn?.obligation_id && <Badge label="Dari pool tanggungan" tone="alert" />}
+            {liveTxn.obligation_id && <Badge label="Dari pool tanggungan" tone="alert" />}
           </View>
         </View>
 

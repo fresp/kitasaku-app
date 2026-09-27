@@ -6,6 +6,7 @@ import Gauge from 'lucide-react-native/icons/gauge';
 import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { BrandIcon } from '../../components/ui/BrandIcon';
+import { QueryError } from '../../components/ui/QueryError';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useObligations } from '../../lib/queries';
@@ -144,7 +145,20 @@ export default function ObligationsScreen() {
           <Text style={styles.muted}>Mode offline — login untuk melihat pool tanggungan live.</Text>
         )}
 
-        {!obligQ.isLoading && visible.length === 0 && (
+        {/* Without this, a failed read fell into the empty state and told the
+            family they owed nothing. */}
+        {obligQ.isError && householdId && (
+          <QueryError
+            onRetry={() => {
+              obligQ.refetch();
+              cycleQ.refetch();
+            }}
+            retrying={obligQ.isFetching}
+            message="Pool tanggungan belum bisa dibaca, jadi daftar di bawah belum lengkap. Datamu tidak hilang."
+          />
+        )}
+
+        {!obligQ.isLoading && !obligQ.isError && visible.length === 0 && (
           <View style={styles.emptyBox}>
             <BrandIcon
               name={

@@ -6,13 +6,13 @@ import Plus from 'lucide-react-native/icons/plus';
 import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../../constants/theme';
-import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockData';
 import { useAuth } from '../../lib/auth-context';
 import { calcCashflow, useActiveCycle, useTransactions, useZeroBasedSummary } from '../../lib/queries';
-import { memberInitials } from '../../lib/profile';
+import { cycleRangeLabel, memberInitials } from '../../lib/profile';
 import { formatRupiah } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
+import { QueryError } from '../../components/ui/QueryError';
 import type { Txn } from '../../lib/queries';
 import type { RowItem } from '../../components/ui/TransactionRow';
 
@@ -69,8 +69,20 @@ export default function HomeScreen() {
   // own screen.
   const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
 
-  const live = !!householdId && !!cycleId && !!txnsQ.data;
-  const txns = useMemo(() => (live ? txnsQ.data! : []), [live, txnsQ.data]);
+  // This screen used to fall back to `lib/mockData` whenever a live query had
+  // not resolved — which is not a rare state but the *normal* one just after
+  // sign-in, before a cycle exists. The family saw another family's rupiah
+  // amounts presented as their own. There is no longer anything to fall back
+  // to: a failed read shows an error, and a missing cycle shows the honest
+  // empty state below.
+  const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError;
+  const retryAll = () => {
+    cycleQ.refetch();
+    txnsQ.refetch();
+    summaryQ.refetch();
+  };
+
+  const txns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
   const flow = useMemo(() => calcCashflow(txns), [txns]);
   const liveTotals = useMemo(() => {
     let income = 0;
@@ -83,29 +95,32 @@ export default function HomeScreen() {
     return { income, expense };
   }, [txns]);
 
-  const homeRows = useMemo<HomeRow[]>(
-    () => (live ? txns.map(toRow).slice(0, 4) : (pendingTransactions.slice(0, 4) as HomeRow[])),
-    [live, txns]
-  );
+  const homeRows = useMemo<HomeRow[]>(() => txns.map(toRow).slice(0, 4), [txns]);
 
-  const cycleName = live ? (cycleQ.data!.name ?? 'Siklus Aktif') : mockCycle.name;
+  const cycleName = cycleQ.data?.name ?? 'Belum ada siklus aktif';
   // The alert counts unpaid *expenses*. `pendingCount` also counts an
   // un-cleared salary, and "Gaji Bulanan belum dibayar" is not a sentence this
   // screen should say.
-  const unpaidCount = live ? flow.unpaidExpenseCount : mockCycle.pendingCount;
-  const pendingCount = live ? flow.pendingCount : mockCycle.pendingCount;
-  const paidCount = live ? flow.paidCount : mockCycle.paidCount;
-  const income = live ? liveTotals.income : 15_844_000;
-  const expense = live ? liveTotals.expense : 9_810_000;
-  const actualCash = live ? flow.actualCash : mockCycle.actualCash;
-  const projectedRemaining = live ? flow.projectedRemaining : mockCycle.projectedRemaining;
+  const unpaidCount = flow.unpaidExpenseCount;
+  const pendingCount = flow.pendingCount;
+  const paidCount = flow.paidCount;
+  const income = liveTotals.income;
+  const expense = liveTotals.expense;
+  const actualCash = failed ? 0 : flow.actualCash;
+  const projectedRemaining = failed ? 0 : flow.projectedRemaining;
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const rangeLabel = cycleRangeLabel(cycleQ.data?.start_date, cycleQ.data?.end_date, todayISO);
 
   // The attention alert and its section link both mean "show me what is still
   // unpaid", so both carry the filter into Riwayat rather than dropping the user
   // into the unfiltered ledger to hunt for the rows themselves.
   const openUnpaid = () => router.push({ pathname: '/(tabs)/history', params: { status: 'PENDING' } });
 
-  const displayName = membership?.display_name?.trim() || 'Andra';
+  // Falls back through the two names the family actually chose: the member's
+  // display name, then the household's. 'Keluarga' is the last resort so a
+  // freshly-joined account is never greeted with someone else's name.
+  const displayName = membership?.display_name?.trim() || household?.name?.trim() || 'Keluarga';
   const avatarInitial = memberInitials(membership?.display_name ?? household?.name ?? 'Keluarga');
 
   return (
@@ -157,7 +172,7 @@ export default function HomeScreen() {
             <View style={styles.cycleCopy}>
               <Text style={styles.cycleTitle}>{cycleName}</Text>
               <Text style={styles.cycleRange}>
-                {live ? `${cycleQ.data!.start_date} – ${cycleQ.data!.end_date}` : mockCycle.dayLabel} • Payday-to-Payday
+                {rangeLabel ?? 'Siklus belum dibuka'} • Payday-to-Payday
               </Text>
             </View>
           </View>
@@ -169,6 +184,12 @@ export default function HomeScreen() {
             <Text style={styles.offlineText}>Mode offline — ketuk untuk login &amp; sinkron dengan pasangan</Text>
             <ChevronRight size={15} color={Colors.alertText} />
           </Pressable>
+        )}
+
+        {/* Shown above the hero on purpose: if the read failed, every number
+            below it is a zero that means "unknown", not "nothing". */}
+        {failed && householdId && (
+          <QueryError onRetry={retryAll} retrying={txnsQ.isFetching || cycleQ.isFetching} />
         )}
 
         <View style={styles.hero}>
@@ -214,7 +235,10 @@ export default function HomeScreen() {
             <Pressable onPress={openUnpaid} style={styles.attention}>
               <View style={styles.attentionIcon}><Text style={styles.attentionIconText}>!</Text></View>
               <View style={styles.attentionCopy}>
-                <Text style={styles.attentionTitle}>{unpaidCount} transaksi belum dibayar</Text>
+                {/* `unpaidCount` counts unpaid *expenses*, and the design calls
+                    those "tagihan" — "transaksi" made the alert read as if the
+                    whole ledger were unsettled. */}
+                <Text style={styles.attentionTitle}>{unpaidCount} tagihan belum dibayar</Text>
                 <Text style={styles.attentionSubtitle} numberOfLines={1}>
                   Terdekat · {homeRows.find((row) => row.status === 'PENDING' && row.direction === 'EXPENSE')?.name ?? 'Periksa daftar transaksi'}
                 </Text>
@@ -228,12 +252,26 @@ export default function HomeScreen() {
 
         {txnsQ.isLoading && householdId ? (
           <Text style={styles.empty}>Memuat aktivitas keluarga…</Text>
+        ) : failed && householdId ? (
+          // Deliberately not the empty state: that would claim the cycle is
+          // empty when the truth is we could not read it.
+          <Text style={styles.empty}>Aktivitas belum bisa dimuat.</Text>
         ) : homeRows.length === 0 ? (
           <View style={styles.emptyBox}>
             <BrandIcon name="empty-belum-ada-transaksi" size={72} label="" />
-            <Text style={styles.empty}>Belum ada aktivitas di siklus ini.</Text>
-            <Pressable onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}>
-              <Text style={styles.emptyLink}>+ Catat transaksi pertama</Text>
+            <Text style={styles.empty}>
+              {cycleId ? 'Belum ada aktivitas di siklus ini.' : 'Belum ada siklus aktif.'}
+            </Text>
+            <Pressable
+              onPress={() =>
+                cycleId
+                  ? router.push({ pathname: '/quick-add', params: { kind: 'out' } })
+                  : router.push('/new-cycle')
+              }
+            >
+              <Text style={styles.emptyLink}>
+                {cycleId ? '+ Catat transaksi pertama' : 'Buka siklus pertama'}
+              </Text>
             </Pressable>
           </View>
         ) : (

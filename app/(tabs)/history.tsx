@@ -10,6 +10,7 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
+import { QueryError } from '../../components/ui/QueryError';
 import { useAuth } from '../../lib/auth-context';
 import { useAccounts, useActiveCycle, useTransactionLedger } from '../../lib/queries';
 import type { LedgerRow } from '../../lib/queries';
@@ -307,9 +308,23 @@ export default function HistoryScreen() {
           <Text style={styles.muted}>Mode offline — login untuk riwayat live.</Text>
         )}
 
+        {/* Before this, a failed ledger read rendered the empty state below —
+            "Belum ada transaksi di siklus ini" — which on a reconciliation
+            screen is a claim, not a placeholder. */}
+        {ledgerQ.isError && householdId && (
+          <QueryError
+            onRetry={() => {
+              ledgerQ.refetch();
+              cycleQ.refetch();
+            }}
+            retrying={ledgerQ.isFetching}
+            message="Riwayat transaksi belum bisa dibaca, jadi daftar di bawah belum lengkap. Datamu tidak hilang."
+          />
+        )}
+
         {ledgerQ.isLoading && <Text style={styles.muted}>Memuat riwayat…</Text>}
 
-        {!ledgerQ.isLoading && filtered.length === 0 && (
+        {!ledgerQ.isLoading && !ledgerQ.isError && filtered.length === 0 && (
           <View style={styles.emptyBox}>
             <Text style={styles.empty}>
               {allRows.length === 0

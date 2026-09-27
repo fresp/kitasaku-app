@@ -1,21 +1,122 @@
 import { memo } from 'react';
+import { Image, ImageSourcePropType, ImageStyle, StyleProp } from 'react-native';
 import Svg, { Circle, Ellipse, G, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { BRAND_ART, type BrandNode } from '../../lib/brand-art';
+
+interface RasterAsset {
+  source: ImageSourcePropType;
+  width: number;
+  height: number;
+  title: string;
+}
+
+/**
+ * Static map of raster PNG assets from the Kitasaku showcase sheet.
+ * Metro requires static string paths inside require().
+ */
+const BRAND_PNG: Record<string, RasterAsset> = {
+  'context-budget': {
+    source: require('../../assets/context-budget.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context budget',
+  },
+  'context-calendar': {
+    source: require('../../assets/context-calendar.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context calendar',
+  },
+  'context-family': {
+    source: require('../../assets/context-family.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context family',
+  },
+  'context-goal': {
+    source: require('../../assets/context-goal.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context goal',
+  },
+  'context-home': {
+    source: require('../../assets/context-home.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context home',
+  },
+  'context-payment': {
+    source: require('../../assets/context-payment.png'),
+    width: 210,
+    height: 140,
+    title: 'Kitasaku context payment',
+  },
+  'empty-belum-ada-pemasukan': {
+    source: require('../../assets/empty-belum-ada-pemasukan.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty belum ada pemasukan',
+  },
+  'empty-belum-ada-rencana': {
+    source: require('../../assets/empty-belum-ada-rencana.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty belum ada rencana',
+  },
+  'empty-belum-ada-tabungan': {
+    source: require('../../assets/empty-belum-ada-tabungan.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty belum ada tabungan',
+  },
+  'empty-belum-ada-transaksi': {
+    source: require('../../assets/empty-belum-ada-transaksi.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty belum ada transaksi',
+  },
+  'empty-data-tidak-ditemukan': {
+    source: require('../../assets/empty-data-tidak-ditemukan.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty data tidak ditemukan',
+  },
+  'empty-tidak-ada-tagihan': {
+    source: require('../../assets/empty-tidak-ada-tagihan.png'),
+    width: 192,
+    height: 125,
+    title: 'Kitasaku empty tidak ada tagihan',
+  },
+  'onboarding-01-family-finance': {
+    source: require('../../assets/onboarding-01-family-finance.png'),
+    width: 420,
+    height: 220,
+    title: 'Kitasaku onboarding 01 family finance',
+  },
+  'onboarding-02-expense-tracking': {
+    source: require('../../assets/onboarding-02-expense-tracking.png'),
+    width: 420,
+    height: 220,
+    title: 'Kitasaku onboarding 02 expense tracking',
+  },
+  'onboarding-03-shared-goal': {
+    source: require('../../assets/onboarding-03-shared-goal.png'),
+    width: 420,
+    height: 220,
+    title: 'Kitasaku onboarding 03 shared goal',
+  },
+};
 
 /**
  * Renders one icon from the Kitasaku asset pack.
  *
- * The geometry lives in `lib/brand-art.ts` as data rather than as .svg imports,
- * so this component is the single place that touches react-native-svg. Adding
- * an icon to the pack means rerunning gen-brand-art.py; no component changes.
+ * If a raster PNG is available (onboarding, empty states, context illustrations),
+ * it renders as a native Image preserving the asset's aspect ratio within `size`.
  *
- * `size` is the only sizing control. Every icon is authored on a 512x512
- * viewBox and the design places them at 44 (categories), 84 (empty states,
- * context) and 180 (onboarding), so scaling the viewBox to `size` is what keeps
- * a 7.2-unit stroke on an onboarding illustration proportionally the same as a
- * 20-unit stroke on a category glyph.
+ * If only SVG vector data exists (categories, brand marks, logos), it falls back
+ * to react-native-svg using the transcribed geometry in `lib/brand-art.ts`.
  *
- * Accessibility: the pack's own <title> becomes the label, so a caller that
+ * Accessibility: the pack's own title becomes the label, so a caller that
  * passes no `label` still gets a meaningful one ("Kitasaku category rumah")
  * instead of an unlabelled image. Pass `label=""` for decorative art that sits
  * beside a visible caption, which is most of the empty states.
@@ -30,8 +131,31 @@ export const BrandIcon = memo(function BrandIcon({
   size: number;
   /** Overrides the pack title. Pass '' for purely decorative art. */
   label?: string;
-  style?: object;
+  style?: StyleProp<ImageStyle>;
 }) {
+  const png = BRAND_PNG[name];
+  if (png) {
+    const a11y =
+      label === undefined
+        ? { accessible: true, accessibilityRole: 'image' as const, accessibilityLabel: png.title }
+        : label === ''
+          ? { accessible: false }
+          : { accessible: true, accessibilityRole: 'image' as const, accessibilityLabel: label };
+
+    const aspect = png.width / png.height;
+    const width = size;
+    const height = Math.round(size / aspect);
+
+    return (
+      <Image
+        source={png.source}
+        style={[{ width, height }, style]}
+        resizeMode="contain"
+        {...a11y}
+      />
+    );
+  }
+
   const art = BRAND_ART[name];
   if (!art) return null;
 
@@ -47,7 +171,7 @@ export const BrandIcon = memo(function BrandIcon({
       width={size}
       height={size}
       viewBox={`0 0 ${art.viewBox} ${art.viewBox}`}
-      style={style}
+      style={style as any}
       {...a11y}
     >
       {art.nodes.map((node, i) => (

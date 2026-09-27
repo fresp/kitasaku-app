@@ -10,6 +10,7 @@ import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplate
 import { calculateFundingGap, calculateUnallocatedFunds } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(t: string): number {
   return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
@@ -168,8 +169,26 @@ export default function NewCycleScreen() {
           <Text style={styles.muted}>{formatRupiah(income)} • {accsQ.data?.[0]?.name ?? 'Mandiri'}</Text>
         </View>
 
-        <Text style={styles.label}>PILIH TRANSAKSI RUTIN YANG DI-CLONE ({activeTemplates.length} POS AKTIF)</Text>
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>
+            PILIH TRANSAKSI RUTIN YANG DI-CLONE ({activeTemplates.length} POS AKTIF)
+          </Text>
+          {/* Screen 9 (Template Rutin) was registered in the router but nothing
+              linked to it, so the screen shipped unreachable. Buka Siklus is
+              where a family notices a missing or wrong routine, so the way to
+              fix it belongs here rather than buried in My Profile. */}
+          <Pressable onPress={() => router.push('/templates')} hitSlop={8}>
+            <Text style={styles.labelLink}>Kelola</Text>
+          </Pressable>
+        </View>
         {tmplQ.isLoading && <Text style={styles.muted}>Memuat template…</Text>}
+        {tmplQ.isError && (
+          <QueryError
+            onRetry={() => tmplQ.refetch()}
+            retrying={tmplQ.isFetching}
+            message="Daftar pos rutin belum bisa dibaca, jadi siklus ini bisa terbuka tanpa pos yang seharusnya ikut."
+          />
+        )}
         {activeTemplates.map((t) => {
           const on = isChecked(t.id);
           return (
@@ -250,7 +269,11 @@ export default function NewCycleScreen() {
               </Text>
               <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
               <Text style={styles.strategy}>• Tambah Pendapatan</Text>
-              <Text style={styles.strategy}>• Pencairan Aset (Asset Release) — catat lewat Quick Add</Text>
+              {/* Quick Add writes OPERATING_INCOME for every income and never
+                  ASSET_RELEASE, so this line used to send the family into a
+                  form that would record the wrong flow type. It is marked
+                  unavailable here the same way Funding Gap already does. */}
+              <Text style={styles.strategy}>• Pencairan Aset (Asset Release) — belum tersedia di app</Text>
               <Text style={styles.strategy}>• Pinjaman Baru (Financing Inflow) — catat lewat Quick Add</Text>
             </>
           ) : (
@@ -321,6 +344,8 @@ const styles = StyleSheet.create({
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 0.6 },
   title: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700' },
   label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1, marginTop: 6 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  labelLink: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700', marginTop: 6 },
   input: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.canvas },
   dateRow: { flexDirection: 'row', gap: 10 },
   card: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 6 },
