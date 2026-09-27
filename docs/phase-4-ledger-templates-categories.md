@@ -39,11 +39,40 @@ than "2% used".
 
 Rewritten around `actual` mode. Home answers "is the plan sound?" and reads
 `planned`; the ledger answers "what has actually happened?" and reads `actual`.
-A PENDING row therefore shows its planned amount, greyed, with a "Belum
-dieksekusi" chip instead of a flow badge.
+
+Reading `actual` naively makes the screen useless for the thing it is mostly used
+for. `resolveModeAmount('actual')` returns `0` for a PENDING row — right for the
+projection, and on a ledger it renders a planned-but-unpaid bill as "− Rp 0" and
+totals the cycle's unpaid obligations at zero. Rows therefore print
+`ledgerDisplayAmount(row)` (`lib/zero-based.ts`): the plan while PENDING, the real
+figure once PAID, and the plan again for a PAID row with no recorded actual, since
+both pay paths reject a zero payment. `LedgerRow` carries both numbers — `amount`
+(mode-resolved, what the projections consume) and `displayAmount` (what the screen
+prints) — and the summary block totals `displayAmount` for the same reason.
 
 New behaviour:
 
+- **Status filter** — `Semua` / `Belum dieksekusi` / `Sudah dieksekusi` chips, with
+  Home's "N transaksi belum dibayar" alert deep-linking to
+  `/(tabs)/history?status=PENDING`. The filter lives in the URL, not in component
+  state: a tab screen stays mounted once visited, so state initialised from the
+  param would be correct on the first visit and silently ignored on every one after
+  it. `statusFromParam` reads it each render and `router.setParams` writes it back.
+  The chips say "dieksekusi" rather than "dibayar" because the filter is on status
+  alone — an un-cleared salary lands in that bucket, and Home's alert (which counts
+  expenses only) is the one that says "belum dibayar".
+- **Status chip counts** are computed against the search/direction/account set with
+  the status filter deliberately left off, so "Belum dieksekusi · 3" keeps meaning
+  "3 pending rows match what you have already narrowed to" instead of collapsing to
+  the count of the chip just tapped.
+- **Unexecuted rows group separately, at the top**, under "Belum dieksekusi". They
+  have no `release_date` to sort by — every row cloned at cycle open is PENDING with
+  a null date — so date-bucketing them would bury the whole "what do we still owe"
+  list under an undated heading at the bottom, the opposite of what the alert that
+  links here promises.
+- **A pending row is tappable** and opens `/payment-confirm`; executed rows stay
+  inert, because payment-confirm is built to refuse them and a row that opens only
+  to say "already paid" is worse than one that does nothing.
 - **Search matches more than the name.** The design's placeholder is "Cari
   transaksi atau toko...", so `filterLedger` matches the transaction name, the
   account (the *toko*), and the category. Searching only `name` would make
@@ -54,7 +83,9 @@ New behaviour:
   that ignores the active filter is a lie about what is on screen.
 - **Day grouping** uses `ledgerDayLabel`, producing the design's "Hari Ini ·
   25 Sep" / "Kemarin · 24 Sep" / "20 Sep 2026". Both dates are passed in so the
-  function stays pure and testable.
+  function stays pure and testable. Its null case reads "Belum bertanggal", not
+  "Tanpa tanggal" — a null `release_date` means the date does not exist yet, not
+  that nobody wrote one down.
 - **Pagination**: 30 rows, then "Muat N transaksi lainnya" (design's footer).
 - **Per-flow chips** (`FLOW_LABELS` / `FLOW_TONES`) give each flow type its
   colour from the Phase 3 token set, so a financing inflow looks the same here

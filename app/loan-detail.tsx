@@ -2,15 +2,25 @@ import { useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import Check from 'lucide-react-native/icons/check';
+import Copy from 'lucide-react-native/icons/copy';
 import ReceiptText from 'lucide-react-native/icons/receipt-text';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
+  cleanAccountNumber,
+  formatAccountNumberDisplay,
+  formatBankBadge,
+  formatBeneficiaryHolder,
+} from '../lib/beneficiary';
+import {
   useActiveCycle,
   useAccounts,
   useAllocateDebtPayment,
+  useBeneficiaries,
   useObligationInstallments,
   useObligationPayments,
   useObligations,
@@ -63,11 +73,13 @@ export default function LoanDetailScreen() {
   const instQ = useObligationInstallments(householdId, id);
   const payQ = useObligationPayments(householdId, id);
   const accsQ = useAccounts(householdId);
+  const beneficiariesQ = useBeneficiaries(householdId);
   const setMode = useSetRepaymentMode();
   const pay = useAllocateDebtPayment();
 
   const [err, setErr] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   // "Ubah Rencana Pembayaran" scrolls to the mode card rather than picking a
   // mode for the person. The y offset is measured on layout, not hardcoded,
   // because the summary card above it grows with interest/installment rows.
@@ -80,6 +92,20 @@ export default function LoanDetailScreen() {
   );
   const installments = useMemo(() => instQ.data ?? [], [instQ.data]);
   const payments = useMemo(() => payQ.data ?? [], [payQ.data]);
+
+  const beneficiary = useMemo(() => {
+    if (obligation?.beneficiary) return obligation.beneficiary;
+    if (!obligation?.beneficiary_id) return null;
+    return (beneficiariesQ.data ?? []).find((b) => b.id === obligation.beneficiary_id) ?? null;
+  }, [obligation, beneficiariesQ.data]);
+
+  async function handleCopyBeneficiary() {
+    if (!beneficiary?.account_number) return;
+    const num = cleanAccountNumber(beneficiary.account_number);
+    await Clipboard.setStringAsync(num);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   // The loan's own receipt transaction, so the hero can name the account the
   // money landed in. Fetched by id because the receipt may sit in a cycle that
@@ -242,6 +268,48 @@ export default function LoanDetailScreen() {
           )}
         </View>
 
+        {beneficiary && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.sectionLabel}>INFO TRANSFER PEMBAYARAN</Text>
+              <Badge label={formatBankBadge(beneficiary.bank_name)} tone="dark" />
+            </View>
+
+            <View style={styles.transferBox}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.transferDestName}>{beneficiary.name}</Text>
+                <Text style={styles.transferAccountNumber}>
+                  {formatAccountNumberDisplay(beneficiary.account_number)}
+                </Text>
+                {!!formatBeneficiaryHolder(beneficiary.account_holder_name) && (
+                  <Text style={styles.transferHolder}>
+                    {formatBeneficiaryHolder(beneficiary.account_holder_name)}
+                  </Text>
+                )}
+              </View>
+
+              <Pressable
+                onPress={handleCopyBeneficiary}
+                style={[styles.copyActionBtn, copied && styles.copyActionBtnCopied]}
+                accessibilityRole="button"
+                accessibilityLabel="Salin nomor rekening"
+              >
+                {copied ? (
+                  <>
+                    <Check size={14} color={Colors.paidText} strokeWidth={2.5} />
+                    <Text style={styles.copyActionTextCopied}>✓ Tersalin</Text>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} color={Colors.brandPrimary} />
+                    <Text style={styles.copyActionText}>Salin</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         <View style={styles.card} onLayout={(e) => setModeY(e.nativeEvent.layout.y)}>
           <Text style={styles.sectionLabel}>Mode Pembayaran</Text>
           <View style={styles.modeRow}>
@@ -398,6 +466,65 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1,
     borderColor: Colors.borderSubtle, padding: 14, gap: 8,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  transferBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.canvas,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    padding: 12,
+    gap: 12,
+    marginTop: 4,
+  },
+  transferDestName: {
+    fontSize: FontSize.cardTitle,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  transferAccountNumber: {
+    fontSize: FontSize.currencyLarge,
+    fontWeight: '700',
+    color: Colors.brandPrimary,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.5,
+  },
+  transferHolder: {
+    fontSize: FontSize.caption,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  copyActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.subtle,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
+  copyActionBtnCopied: {
+    backgroundColor: Colors.paidBg,
+    borderColor: Colors.paidText,
+  },
+  copyActionText: {
+    fontSize: FontSize.body,
+    fontWeight: '600',
+    color: Colors.brandPrimary,
+  },
+  copyActionTextCopied: {
+    fontSize: FontSize.body,
+    fontWeight: '600',
+    color: Colors.paidText,
   },
   sectionLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },

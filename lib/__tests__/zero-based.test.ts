@@ -13,6 +13,7 @@ import {
   isInstallmentOpen,
   isObligationPaydown,
   ledgerDayLabel,
+  ledgerDisplayAmount,
   normalizeAmount,
   resolveModeAmount,
   splitInstallments,
@@ -356,7 +357,35 @@ describe('ledger grouping and filtering (phase 4)', () => {
     expect(ledgerDayLabel('2026-09-25', today)).toBe('Hari Ini · 25 Sep');
     expect(ledgerDayLabel('2026-09-24', today)).toBe('Kemarin · 24 Sep');
     expect(ledgerDayLabel('2026-09-20', today)).toBe('20 Sep 2026');
-    expect(ledgerDayLabel(null, today)).toBe('Tanpa tanggal');
+    expect(ledgerDayLabel(null, today)).toBe('Belum bertanggal');
+  });
+
+  it('37: the ledger prints the plan for a row that has not moved yet', () => {
+    const pending = { planned_amount: 4_800_000, actual_amount: 4_800_000, status: 'PENDING' as const };
+    const paid = { planned_amount: 4_800_000, actual_amount: 4_650_000, status: 'PAID' as const };
+    expect(ledgerDisplayAmount(pending)).toBe(4_800_000);
+    expect(ledgerDisplayAmount(paid)).toBe(4_650_000);
+  });
+
+  it('38: a settled row with no recorded actual falls back to its plan, not to zero', () => {
+    // Both pay paths reject actual = 0, so a 0 here means the column was never
+    // written. Printing Rp 0 would understate a line that really did settle.
+    const settled = { planned_amount: 1_100_000, actual_amount: 0, status: 'PAID' as const };
+    expect(ledgerDisplayAmount(settled)).toBe(1_100_000);
+    expect(ledgerDisplayAmount({ planned_amount: null, actual_amount: null, status: 'PENDING' as const })).toBe(0);
+  });
+
+  it('39: the status filter narrows to one side and ignores rows without a status', () => {
+    const rows = [
+      { name: 'Tagihan Rumah', direction: 'EXPENSE' as const, status: 'PENDING' as const },
+      { name: 'Listrik PLN', direction: 'EXPENSE' as const, status: 'PAID' as const },
+      { name: 'Gaji Bulanan', direction: 'INCOME' as const, status: 'PENDING' as const },
+    ];
+    expect(filterLedger(rows, { status: 'PENDING' })).toHaveLength(2);
+    expect(filterLedger(rows, { status: 'PAID' })).toHaveLength(1);
+    expect(filterLedger(rows, {})).toHaveLength(3);
+    // A row whose status is unknown stays visible rather than being dropped.
+    expect(filterLedger([{ name: 'X', direction: 'EXPENSE' as const }], { status: 'PAID' })).toHaveLength(1);
   });
 
   it('36: short dates and template due days refuse garbage instead of printing it', () => {

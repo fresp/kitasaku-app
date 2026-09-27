@@ -336,6 +336,30 @@ export function resolveModeAmount(
   return normalizeAmount(txn.planned_amount);
 }
 
+/**
+ * What a row is *worth on screen* in the ledger.
+ *
+ * `resolveModeAmount('actual')` answers "how much money actually moved", which
+ * is 0 for a PENDING row — right for the projection, useless in Riwayat: a
+ * planned-but-unpaid bill would render as "− Rp 0" and its summary as Rp 0.
+ * The ledger shows the plan for a row that has not been executed and the real
+ * figure once it has.
+ *
+ * A PAID row with no recorded actual falls back to its plan rather than to
+ * zero. `actual == 0` on a settled row is never a real payment (both pay paths
+ * reject it), so it means the column was never written — and a settled line
+ * reporting Rp 0 would understate the ledger.
+ */
+export function ledgerDisplayAmount(txn: {
+  planned_amount: AmountInput;
+  actual_amount: AmountInput;
+  status: 'PENDING' | 'PAID';
+}): number {
+  if (txn.status === 'PENDING') return normalizeAmount(txn.planned_amount);
+  const actual = normalizeAmount(txn.actual_amount);
+  return actual > 0 ? actual : normalizeAmount(txn.planned_amount);
+}
+
 // ============ Phase 4: budget health, ledger grouping, template labels ============
 
 export type BudgetHealthStatus = 'OVER' | 'WATCH' | 'SAFE' | 'NO_BUDGET';
@@ -436,13 +460,18 @@ export function formatShortDate(iso: string | null | undefined): string | null {
  * Ledger day heading, matching the design's "Hari Ini · 25 Sep" /
  * "Kemarin · 24 Sep" / "25 Sep 2026". Both dates are passed in so this stays
  * pure and testable — the caller decides what "today" is.
+ *
+ * `release_date` is null for a row that has not been executed, which is every
+ * row cloned when a cycle opens. Those are not "undated": their date simply
+ * does not exist yet, and a heading saying so is more honest than an empty
+ * bucket at the bottom of the list.
  */
 export function ledgerDayLabel(
   dateISO: string | null | undefined,
   todayISO: string
 ): string {
   const short = formatShortDate(dateISO);
-  if (!short) return 'Tanpa tanggal';
+  if (!short) return 'Belum bertanggal';
   const year = /^(\d{4})/.exec(dateISO!)?.[1];
   if (dateISO!.slice(0, 10) === todayISO.slice(0, 10)) return `Hari Ini · ${short}`;
   const y = new Date(`${todayISO.slice(0, 10)}T00:00:00Z`);
@@ -457,6 +486,7 @@ export interface LedgerFilterRow {
   account_id?: string | null;
   accountName?: string | null;
   categoryName?: string | null;
+  status?: 'PENDING' | 'PAID';
 }
 
 export interface LedgerFilter {
@@ -465,6 +495,8 @@ export interface LedgerFilter {
   direction?: 'INCOME' | 'EXPENSE' | null;
   /** `null`/absent = every account. */
   accountId?: string | null;
+  /** `null`/absent = every status. `PENDING` is Home's "belum dibayar" deep link. */
+  status?: 'PENDING' | 'PAID' | null;
 }
 
 /**
@@ -478,6 +510,10 @@ export function filterLedger<T extends LedgerFilterRow>(rows: T[], filter: Ledge
   return rows.filter((r) => {
     if (filter.direction && r.direction !== filter.direction) return false;
     if (filter.accountId && r.account_id !== filter.accountId) return false;
+    // Applied only when the caller asked for a status *and* the row carries
+    // one. An absent status on the row means "unknown", and dropping those
+    // would hide rows rather than narrow the list.
+    if (filter.status && r.status && r.status !== filter.status) return false;
     if (!needle) return true;
     return (
       r.name.toLowerCase().includes(needle) ||

@@ -2,49 +2,26 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Svg, { Path } from 'react-native-svg';
-import { Colors, FontSize, Radius } from '../../constants/theme';
-import { Badge } from '../../components/ui/Badge';
-import { PrimaryButton } from '../../components/ui/Button';
-import { supabase, requireSupabase } from '../../lib/supabase';
+import { Check, Lock } from 'lucide-react-native';
+import { Colors } from '../../constants/theme';
+import { BrandIcon } from '../../components/ui/BrandIcon';
 import { signInWithGoogle } from '../../lib/google-auth';
 
-function GoogleIcon({ size = 20 }: { size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-        fill="#4285F4"
-      />
-      <Path
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-        fill="#34A853"
-      />
-      <Path
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-        fill="#FBBC05"
-      />
-      <Path
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-        fill="#EA4335"
-      />
-    </Svg>
-  );
-}
+const VALUE_PROPS = [
+  { id: 'payday', label: 'Siklus payday-to-payday' },
+  { id: 'tagihan', label: 'Tandai tagihan lunas sekali sentuh' },
+  { id: 'reimburse', label: 'Pool tanggungan reimburse antar-bulan' },
+] as const;
 
 export default function SignInScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [stage, setStage] = useState<'email' | 'otp'>('email');
-  const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -57,199 +34,203 @@ export default function SignInScreen() {
         router.replace('/(auth)/setup-choice');
       }
     } catch (e: any) {
-      setErr(e?.message ?? 'Gagal masuk dengan Google. Pastikan provider Google sudah aktif di Supabase.');
+      setErr(
+        e?.message ??
+          'Gagal masuk dengan Google. Pastikan provider Google sudah aktif di Supabase.'
+      );
     } finally {
       setGoogleBusy(false);
     }
   }
 
-  async function sendOtp() {
-    setErr(null);
-    if (!email.includes('@')) {
-      setErr('Masukkan email yang valid dulu ya.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const sb = supabase ?? requireSupabase();
-      const { error } = await sb.auth.signInWithOtp({
-        email: email.trim(),
-        options: { shouldCreateUser: true },
-      });
-      if (error) throw error;
-      setStage('otp');
-    } catch (e: any) {
-      setErr(e?.message ?? 'Gagal mengirim kode. Coba lagi.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyOtp() {
-    setErr(null);
-    if (code.trim().length < 6) {
-      setErr('Kode OTP 6 digit — cek inbox / spam email kamu.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const sb = supabase ?? requireSupabase();
-      const { error } = await sb.auth.verifyOtp({
-        email: email.trim(),
-        token: code.trim(),
-        type: 'email',
-      });
-      if (error) throw error;
-      router.replace('/(auth)/setup-choice');
-    } catch (e: any) {
-      setErr(e?.message ?? 'Kode salah / kedaluwarsa. Minta kode baru.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        <Badge label="KITASAKU • KEUANGAN KELUARGA" />
-        <Text style={styles.title}>Masuk untuk sinkron dengan pasangan</Text>
-        <Text style={styles.sub}>
-          Siklus, Tanggungan & Riwayat otomatis tersinkron di dua HP secara real-time.
-        </Text>
-
-        {/* Google Sign In Button */}
-        <Pressable
-          style={styles.googleBtn}
-          onPress={handleGoogleSignIn}
-          disabled={googleBusy || busy}
-        >
-          {googleBusy ? (
-            <ActivityIndicator size="small" color={Colors.textPrimary} />
-          ) : (
-            <>
-              <GoogleIcon size={20} />
-              <Text style={styles.googleBtnText}>Lanjut dengan Google</Text>
-            </>
-          )}
-        </Pressable>
-
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>atau lewat email</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <Text style={styles.label}>EMAIL</Text>
-        <TextInput
-          value={email}
-          onChangeText={setEmail}
-          placeholder="kamu@email.com"
-          placeholderTextColor={Colors.textMuted}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          style={styles.input}
-        />
-
-        {stage === 'otp' && (
-          <>
-            <Text style={styles.label}>KODE OTP 6 DIGIT</Text>
-            <TextInput
-              value={code}
-              onChangeText={setCode}
-              placeholder="123456"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={6}
-              style={styles.input}
-            />
-          </>
-        )}
-
-        {err && (
-          <View style={styles.errBox}>
-            <Text style={styles.errText}>{err}</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.contentWrapper}>
+          {/* Brand Hero */}
+          <View style={styles.brandHero}>
+            <View style={styles.logoLockup}>
+              <BrandIcon name="brand-mark" size={52} label="" />
+              <Text style={styles.logotype}>Kitasaku</Text>
+            </View>
+            <Text style={styles.tagline}>
+              Satu dompet anggaran kelola bersama pasangan transparan real-time
+            </Text>
           </View>
-        )}
 
-        {stage === 'email' ? (
-          <PrimaryButton label={busy ? 'Mengirim kode…' : 'Kirim Kode Login'} onPress={sendOtp} />
-        ) : (
-          <View style={{ gap: 10 }}>
-            <PrimaryButton
-              label={busy ? 'Memverifikasi…' : 'Masuk'}
-              onPress={verifyOtp}
-            />
-            <Pressable onPress={sendOtp}>
-              <Text style={styles.resend}>Kirim ulang kode</Text>
+          {/* Value Props */}
+          <View style={styles.valueProps}>
+            {VALUE_PROPS.map((prop) => (
+              <View key={prop.id} style={styles.propCard}>
+                <View style={styles.checkBadge}>
+                  <Check size={14} color={Colors.paidText} strokeWidth={2.5} />
+                </View>
+                <Text style={styles.propLabel}>{prop.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Auth Block */}
+          <View style={styles.authBlock}>
+            <Pressable
+              style={[styles.googleBtn, googleBusy && styles.googleBtnDisabled]}
+              onPress={handleGoogleSignIn}
+              disabled={googleBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Lanjutkan dengan Google"
+            >
+              {googleBusy ? (
+                <ActivityIndicator size="small" color={Colors.surface} />
+              ) : (
+                <>
+                  <Text style={styles.gMark}>G</Text>
+                  <Text style={styles.googleLabel}>Lanjutkan dengan Google</Text>
+                </>
+              )}
             </Pressable>
-          </View>
-        )}
 
-        <Text style={styles.note}>
-          Aman dan terenkripsi langsung ke Supabase PostgreSQL Anda.
-        </Text>
-      </View>
+            {err && (
+              <View style={styles.errBox}>
+                <Text style={styles.errText}>{err}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Footer Secure */}
+          <View style={styles.footerSecure}>
+            <Lock size={12} color={Colors.textMuted} />
+            <Text style={styles.secureNote}>
+              Data keuangan keluarga dienkripsi aman
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.surface },
-  container: { padding: 20, gap: 12, flex: 1, justifyContent: 'center' },
-  title: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700', marginTop: 8 },
-  sub: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 20 },
+  safe: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  contentWrapper: {
+    paddingTop: 20,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    gap: 20,
+  },
+  brandHero: {
+    alignItems: 'center',
+    gap: 12,
+    paddingTop: 28,
+    paddingBottom: 4,
+    paddingHorizontal: 8,
+  },
+  logoLockup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  logotype: {
+    color: Colors.textPrimary,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  valueProps: {
+    gap: 10,
+  },
+  propCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
+  checkBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.paidBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  propLabel: {
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  authBlock: {
+    gap: 12,
+  },
   googleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    height: 50,
-    backgroundColor: Colors.canvas,
-    borderRadius: Radius.md,
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: Colors.brandPrimary,
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    marginTop: 8,
+    borderColor: Colors.brandPrimary,
   },
-  googleBtnText: {
-    color: Colors.textPrimary,
-    fontSize: 15,
+  googleBtnDisabled: {
+    opacity: 0.7,
+  },
+  gMark: {
+    color: Colors.surface,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  googleLabel: {
+    color: Colors.surface,
+    fontSize: 14,
     fontWeight: '600',
   },
-  dividerRow: {
+  errBox: {
+    backgroundColor: Colors.pendingBg,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.pendingBorder,
+  },
+  errText: {
+    color: Colors.pendingText,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  footerSecure: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 4,
-    gap: 10,
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: 8,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.borderSubtle,
-  },
-  dividerText: {
+  secureNote: {
     color: Colors.textMuted,
-    fontSize: FontSize.caption,
+    fontSize: 11,
+    fontWeight: '500',
   },
-  label: {
-    color: Colors.textMuted,
-    fontSize: FontSize.caption,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    borderRadius: Radius.md,
-    paddingHorizontal: 14,
-    height: 50,
-    fontSize: 16,
-    color: Colors.textPrimary,
-    backgroundColor: Colors.canvas,
-  },
-  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
-  errText: { color: Colors.pendingText, fontSize: FontSize.body },
-  resend: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center' },
-  note: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center', marginTop: 8 },
 });

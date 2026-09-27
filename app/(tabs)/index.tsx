@@ -89,12 +89,21 @@ export default function HomeScreen() {
   );
 
   const cycleName = live ? (cycleQ.data!.name ?? 'Siklus Aktif') : mockCycle.name;
+  // The alert counts unpaid *expenses*. `pendingCount` also counts an
+  // un-cleared salary, and "Gaji Bulanan belum dibayar" is not a sentence this
+  // screen should say.
+  const unpaidCount = live ? flow.unpaidExpenseCount : mockCycle.pendingCount;
   const pendingCount = live ? flow.pendingCount : mockCycle.pendingCount;
   const paidCount = live ? flow.paidCount : mockCycle.paidCount;
   const income = live ? liveTotals.income : 15_844_000;
   const expense = live ? liveTotals.expense : 9_810_000;
   const actualCash = live ? flow.actualCash : mockCycle.actualCash;
   const projectedRemaining = live ? flow.projectedRemaining : mockCycle.projectedRemaining;
+
+  // The attention alert and its section link both mean "show me what is still
+  // unpaid", so both carry the filter into Riwayat rather than dropping the user
+  // into the unfiltered ledger to hunt for the rows themselves.
+  const openUnpaid = () => router.push({ pathname: '/(tabs)/history', params: { status: 'PENDING' } });
 
   const displayName = membership?.display_name?.trim() || 'Andra';
   const avatarInitial = memberInitials(membership?.display_name ?? household?.name ?? 'Keluarga');
@@ -193,15 +202,15 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {pendingCount > 0 && (
+        {unpaidCount > 0 && (
           <View>
-            <SectionHeader title="Perlu perhatian" onPress={() => router.push('/(tabs)/history')} />
-            <Pressable onPress={() => router.push('/(tabs)/history')} style={styles.attention}>
+            <SectionHeader title="Perlu perhatian" onPress={openUnpaid} />
+            <Pressable onPress={openUnpaid} style={styles.attention}>
               <View style={styles.attentionIcon}><Text style={styles.attentionIconText}>!</Text></View>
               <View style={styles.attentionCopy}>
-                <Text style={styles.attentionTitle}>{pendingCount} transaksi belum dibayar</Text>
+                <Text style={styles.attentionTitle}>{unpaidCount} transaksi belum dibayar</Text>
                 <Text style={styles.attentionSubtitle} numberOfLines={1}>
-                  Terdekat · {homeRows.find((row) => row.status === 'PENDING')?.name ?? 'Periksa daftar transaksi'}
+                  Terdekat · {homeRows.find((row) => row.status === 'PENDING' && row.direction === 'EXPENSE')?.name ?? 'Periksa daftar transaksi'}
                 </Text>
               </View>
               <ChevronRight size={16} color={Colors.alertText} />

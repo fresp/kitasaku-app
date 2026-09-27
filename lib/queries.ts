@@ -4,6 +4,8 @@ import { requireSupabase } from './supabase';
 import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
 import { isRepaymentMode } from './obligation';
 import type { RepaymentMode } from './obligation';
+import type { Beneficiary } from './beneficiary';
+import { cleanAccountNumber } from './beneficiary';
 import {
   normalizeAccountNumber,
   sortAccounts,
@@ -14,6 +16,7 @@ import {
   canMarkAsPaid,
   defaultFlowType,
   isObligationPaydown,
+  ledgerDisplayAmount,
   resolveModeAmount,
 } from './zero-based';
 import type {
@@ -34,6 +37,7 @@ export type {
   SummaryMode,
   ZeroBasedSummary,
 } from './zero-based';
+export type { Beneficiary } from './beneficiary';
 
 export interface Cycle { id: string; household_id: string; name: string; start_date: string; end_date: string; is_active: boolean; }
 export type CategorySystemRole = 'DEBT_PAYMENT' | 'FINANCING_INFLOW';
@@ -84,6 +88,12 @@ export interface Obligation {
    * lib/obligation.ts, which derives a *display* default and says it did.
    */
   repayment_mode?: string | null;
+  /**
+   * Counterparty beneficiary reference (migration 011 / Flow K).
+   * External destination account for paying this obligation/bill.
+   */
+  beneficiary_id?: string | null;
+  beneficiary?: Beneficiary | null;
 }
 export interface Template {
   id: string; household_id: string; name: string; category_id: string | null;
@@ -193,7 +203,8 @@ export function useObligations(householdId: string | undefined) {
     queryKey: ['oblig', householdId], enabled: !!householdId,
     queryFn: async (): Promise<Obligation[]> => {
       const sb = requireSupabase();
-      const { data, error } = await sb.from('obligations').select('*')
+      const { data, error } = await sb.from('obligations')
+        .select('*, beneficiary:beneficiaries(*)')
         .eq('household_id', householdId!).neq('status', 'SETTLED').order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as Obligation[];
@@ -352,6 +363,31 @@ export function useAllocateObligation() {
   });
 }
 
+/**
+ * Opens a cycle: the moment a plan becomes binding, so everything the plan
+ * commits to is materialised here — not later, not implicitly.
+ *
+ * Two things are written per commitment, and they answer different questions:
+ *
+ *   - a `transactions` row in `PENDING`, which is what the ledger lists and what
+ *     the family pays off. Cloned routine positions and carried-over obligations
+ *     alike. `release_date` stays null until it is actually executed.
+ *   - a `cycle_allocations` row, which is the commitment itself. Phase 1's
+ *     anti-double-count rule says the allocation total comes from these rows
+ *     alone, and Phase 2 adds that committing money *is* the allocation — so
+ *     writing only the transaction would leave "Total Alokasi" at Rp 0 while
+ *     the screen that opened the cycle insisted the money was committed.
+ *
+ * An obligation also gets `flow_type: 'DEBT_PAYMENT'` and its `obligation_id`,
+ * which is what makes `useMarkAsPaid` reduce `remaining_amount` exactly once
+ * when the row is paid (see docs/phase-2-payment-paths.md).
+ *
+ * Note on atomicity: this is three round trips (cycle, transactions,
+ * allocations), so a failure between them can leave a cycle with rows but no
+ * allocations. The existing `create_financing_with_obligation` /
+ * `allocate_debt_payment` RPCs exist precisely to avoid that pattern; folding
+ * cycle creation into an RPC is the follow-up, tracked in the release audit.
+ */
 export function useCreateCycle() {
   const qc = useQueryClient();
   return useMutation({
@@ -359,6 +395,8 @@ export function useCreateCycle() {
       householdId: string; name: string; start: string; end: string;
       incomeAmount: number; incomeAccountId: string | null; incomeCategoryId: string | null;
       items: { templateId: string; name: string; amount: number; categoryId: string | null; accountId: string | null; direction: 'INCOME' | 'EXPENSE' }[];
+      /** Open obligations carried into this cycle, at their remaining amount. */
+      obligations: { obligationId: string; title: string; amount: number; categoryId: string | null; accountId: string | null }[];
     }) => {
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
@@ -369,6 +407,7 @@ export function useCreateCycle() {
       }).select('*').single();
       if (cErr) throw cErr;
       const cid = (cycle as Cycle).id;
+
       const rows: Record<string, string | number | null>[] = args.items.map((it) => ({
         household_id: args.householdId, cycle_id: cid,
         recurring_template_id: it.templateId, name: it.name,
@@ -378,6 +417,22 @@ export function useCreateCycle() {
         category_id: it.categoryId, account_id: it.accountId,
         created_by: user?.id ?? null,
       }));
+
+      // Carried-over obligations. Only outflows: an obligation is something the
+      // family owes, so it can never be a PENDING inflow.
+      for (const ob of args.obligations) {
+        if (!(ob.amount > 0)) continue;
+        rows.push({
+          household_id: args.householdId, cycle_id: cid,
+          recurring_template_id: null, obligation_id: ob.obligationId, name: ob.title,
+          direction: 'EXPENSE' as const, flow_type: 'DEBT_PAYMENT' as const,
+          planned_amount: ob.amount, actual_amount: ob.amount,
+          status: 'PENDING' as const, release_date: null,
+          category_id: ob.categoryId, account_id: ob.accountId,
+          created_by: user?.id ?? null,
+        });
+      }
+
       if (args.incomeAmount > 0) {
         rows.push({
           household_id: args.householdId, cycle_id: cid,
@@ -393,6 +448,33 @@ export function useCreateCycle() {
         const { error: tErr } = await sb.from('transactions').insert(rows);
         if (tErr) throw tErr;
       }
+
+      // The commitment side. Income is a *source*, never an allocation, so it
+      // deliberately has no row here.
+      const allocations: Record<string, string | number | null>[] = [];
+      for (const it of args.items) {
+        if (it.direction !== 'EXPENSE' || !(it.amount > 0)) continue;
+        allocations.push({
+          household_id: args.householdId, cycle_id: cid,
+          allocation_type: 'EXPENSE', amount: it.amount,
+          category_id: it.categoryId, account_id: it.accountId,
+          obligation_id: null, created_by: user?.id ?? null,
+        });
+      }
+      for (const ob of args.obligations) {
+        if (!(ob.amount > 0)) continue;
+        allocations.push({
+          household_id: args.householdId, cycle_id: cid,
+          allocation_type: 'DEBT_PAYMENT', amount: ob.amount,
+          obligation_id: ob.obligationId, account_id: ob.accountId,
+          category_id: ob.categoryId, created_by: user?.id ?? null,
+        });
+      }
+      if (allocations.length > 0) {
+        const { error: aErr } = await sb.from('cycle_allocations').insert(allocations);
+        if (aErr) throw aErr;
+      }
+
       return cycle as Cycle;
     },
     onSuccess: () => {
@@ -402,30 +484,102 @@ export function useCreateCycle() {
   });
 }
 
+export interface InlineBeneficiaryInput {
+  name: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolderName?: string | null;
+}
+
+export interface CreateObligationArgs {
+  householdId: string;
+  title: string;
+  type: string;
+  total: number;
+  recipient?: string;
+  dueDate?: string | null;
+  categoryId?: string | null;
+  beneficiaryId?: string | null;
+  inlineBeneficiary?: InlineBeneficiaryInput | null;
+}
+
 /**
  * Creates an obligation in the canonical `OPEN` state. `UNPAID` is only kept
  * as a legacy read alias (migration 004) — new rows must not write it, or the
  * "is this still owed?" checks would need two spellings.
+ * Supports attaching a saved beneficiary or creating one inline (Flow K).
  */
 export function useCreateObligation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { householdId: string; title: string; type: string; total: number; recipient?: string }) => {
+    mutationFn: async (args: CreateObligationArgs) => {
       if (!(args.total > 0)) throw new Error('Total tanggungan harus lebih dari Rp 0.');
       const sb = requireSupabase();
+      let beneficiaryId = args.beneficiaryId ?? null;
+      let recipient = args.recipient ?? null;
+
+      if (!beneficiaryId && args.inlineBeneficiary) {
+        const { data: bData, error: bErr } = await sb
+          .from('beneficiaries')
+          .insert({
+            household_id: args.householdId,
+            name: args.inlineBeneficiary.name.trim(),
+            bank_name: args.inlineBeneficiary.bankName.trim(),
+            account_number: cleanAccountNumber(args.inlineBeneficiary.accountNumber),
+            account_holder_name: args.inlineBeneficiary.accountHolderName?.trim() || null,
+          })
+          .select('*')
+          .single();
+        if (bErr) throw bErr;
+        if (bData) {
+          const created = bData as Beneficiary;
+          beneficiaryId = created.id;
+          if (!recipient) {
+            recipient = created.name;
+          }
+        }
+      }
+
       const { error } = await sb.from('obligations').insert({
-        household_id: args.householdId, title: args.title, type: args.type,
-        total_amount: args.total, remaining_amount: args.total, status: 'OPEN',
-        recipient: args.recipient ?? null,
+        household_id: args.householdId,
+        title: args.title,
+        type: args.type,
+        total_amount: args.total,
+        remaining_amount: args.total,
+        status: 'OPEN',
+        recipient,
+        due_date: args.dueDate ?? null,
+        beneficiary_id: beneficiaryId,
       });
       if (error) throw error;
     },
-    onSuccess: () => invalidateMoneyKeys(qc),
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['beneficiaries'] });
+    },
   });
 }
 
-export function calcCashflow(txns: Txn[]): { actualCash: number; projectedRemaining: number; pendingCount: number; paidCount: number } {
+export interface Cashflow {
+  actualCash: number;
+  projectedRemaining: number;
+  /** Every row not yet executed. Counts both directions — this is the ledger total. */
+  pendingCount: number;
+  paidCount: number;
+  /**
+   * PENDING **outflow** rows: the ones that still owe money and therefore
+   * belong in Home's "N transaksi belum dibayar" alert. Counting every PENDING
+   * row there made an un-cleared salary ("Gaji Bulanan", pending until payday)
+   * read as a bill the family had not paid.
+   */
+  unpaidExpenseCount: number;
+  /** PENDING inflow rows — money expected but not landed yet ("menunggu cair"). */
+  pendingIncomeCount: number;
+}
+
+export function calcCashflow(txns: Txn[]): Cashflow {
   let cashIn = 0, cashOut = 0, pendingOut = 0, pendingCount = 0, paidCount = 0;
+  let unpaidExpenseCount = 0, pendingIncomeCount = 0;
   for (const t of txns) {
     if (t.status === 'PAID') {
       paidCount += 1;
@@ -433,12 +587,24 @@ export function calcCashflow(txns: Txn[]): { actualCash: number; projectedRemain
       else cashOut += t.actual_amount;
     } else {
       pendingCount += 1;
-      if (t.direction === 'EXPENSE') pendingOut += t.planned_amount;
-      else pendingOut -= t.planned_amount;
+      if (t.direction === 'EXPENSE') {
+        pendingOut += t.planned_amount;
+        unpaidExpenseCount += 1;
+      } else {
+        pendingOut -= t.planned_amount;
+        pendingIncomeCount += 1;
+      }
     }
   }
   const actualCash = cashIn - cashOut;
-  return { actualCash, projectedRemaining: actualCash - pendingOut, pendingCount, paidCount };
+  return {
+    actualCash,
+    projectedRemaining: actualCash - pendingOut,
+    pendingCount,
+    paidCount,
+    unpaidExpenseCount,
+    pendingIncomeCount,
+  };
 }
 
 // ============ Phase 1: zero-based projection + allocation mutations ============
@@ -459,7 +625,17 @@ export interface CycleAllocation {
 
 export interface LedgerRow extends Txn {
   flowType: FlowType;
+  /**
+   * Mode-resolved: what moved. 0 for a PENDING row in `actual` mode, which is
+   * what every projection wants and what no ledger row should print.
+   */
   amount: number;
+  /**
+   * What the ledger prints. Equals `amount` once a row is executed; falls back
+   * to the plan for a row that has not moved yet, so an unpaid bill reads as
+   * "Rp 4.800.000 · Belum dieksekusi" rather than "Rp 0".
+   */
+  displayAmount: number;
 }
 
 function aggregateSourceFunds(
@@ -706,6 +882,7 @@ export function useTransactionLedger(
     ...t,
     flowType: t.flow_type ?? defaultFlowType(t.direction, t.obligation_id),
     amount: resolveModeAmount(t, mode),
+    displayAmount: ledgerDisplayAmount(t),
   }));
   return { ...q, data };
 }
@@ -1427,4 +1604,86 @@ export function useReorderAccounts() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accs'] }),
   });
 }
+
+// ============ Flow K: Counterparty Beneficiaries queries & mutations ============
+
+export interface BeneficiaryInput {
+  name: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolderName?: string | null;
+}
+
+export function useBeneficiaries(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['beneficiaries', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Beneficiary[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb
+        .from('beneficiaries')
+        .select('*')
+        .eq('household_id', householdId!)
+        .order('name');
+      if (error) throw error;
+      return (data ?? []) as Beneficiary[];
+    },
+  });
+}
+
+export function useCreateBeneficiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string } & BeneficiaryInput): Promise<Beneficiary> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb
+        .from('beneficiaries')
+        .insert({
+          household_id: args.householdId,
+          name: args.name.trim(),
+          bank_name: args.bankName.trim(),
+          account_number: cleanAccountNumber(args.accountNumber),
+          account_holder_name: args.accountHolderName?.trim() || null,
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return data as Beneficiary;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['beneficiaries'] });
+    },
+  });
+}
+
+export function useUpdateBeneficiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string } & Partial<BeneficiaryInput>): Promise<Beneficiary> => {
+      const sb = requireSupabase();
+      const patch: Record<string, string | null> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (args.name !== undefined) patch.name = args.name.trim();
+      if (args.bankName !== undefined) patch.bank_name = args.bankName.trim();
+      if (args.accountNumber !== undefined) patch.account_number = cleanAccountNumber(args.accountNumber);
+      if (args.accountHolderName !== undefined) {
+        patch.account_holder_name = args.accountHolderName?.trim() || null;
+      }
+      const { data, error } = await sb
+        .from('beneficiaries')
+        .update(patch)
+        .eq('id', args.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      return data as Beneficiary;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['beneficiaries'] });
+      qc.invalidateQueries({ queryKey: ['oblig'] });
+    },
+  });
+}
+
 

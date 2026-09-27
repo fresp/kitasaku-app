@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import Copy from 'lucide-react-native/icons/copy';
+import Check from 'lucide-react-native/icons/check';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
+import {
+  cleanAccountNumber,
+  formatAccountNumberDisplay,
+  formatBankBadge,
+  formatBeneficiaryHolder,
+} from '../../lib/beneficiary';
 import {
   useAccounts,
   useAllocateDebtPayment,
@@ -10,6 +19,7 @@ import {
   useObligationPayments,
 } from '../../lib/queries';
 import type { Obligation } from '../../lib/queries';
+import { Badge } from './Badge';
 import { PrimaryButton } from './Button';
 import { ObligationCard } from './ObligationCard';
 
@@ -48,6 +58,15 @@ export function ObligationRow({
   const [amountText, setAmountText] = useState('');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyBeneficiaryNumber() {
+    if (!obligation.beneficiary?.account_number) return;
+    const num = cleanAccountNumber(obligation.beneficiary.account_number);
+    await Clipboard.setStringAsync(num);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   const instQ = useObligationInstallments(householdId, obligation.id);
   const histQ = useObligationPayments(householdId, obligation.id);
@@ -132,6 +151,46 @@ export function ObligationRow({
           <Text style={styles.panelLabel}>
             {panel === 'pay' ? 'CATAT PEMBAYARAN' : 'ALOKASIKAN KE ANGGARAN SIKLUS INI'}
           </Text>
+
+          {panel === 'pay' && obligation.beneficiary && (
+            <View style={styles.transferInfoCard}>
+              <View style={styles.transferInfoTop}>
+                <Badge
+                  label={formatBankBadge(obligation.beneficiary.bank_name)}
+                  tone="dark"
+                />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.transferInfoName} numberOfLines={1}>
+                    {obligation.beneficiary.name}
+                  </Text>
+                  <Text style={styles.transferInfoNumber}>
+                    {formatAccountNumberDisplay(obligation.beneficiary.account_number)}
+                    {formatBeneficiaryHolder(obligation.beneficiary.account_holder_name)
+                      ? ` • ${formatBeneficiaryHolder(obligation.beneficiary.account_holder_name)}`
+                      : ''}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={handleCopyBeneficiaryNumber}
+                  style={[styles.copyBtn, copied && styles.copyBtnCopied]}
+                  accessibilityRole="button"
+                >
+                  {copied ? (
+                    <>
+                      <Check size={12} color={Colors.paidText} strokeWidth={2.5} />
+                      <Text style={styles.copyTextCopied}>✓ Tersalin</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={12} color={Colors.brandPrimary} />
+                      <Text style={styles.copyText}>Salin</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          )}
+
           <TextInput
             value={amountText}
             onChangeText={setAmountText}
@@ -187,6 +246,51 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderStrong, padding: 14, gap: 8,
   },
   panelLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
+  transferInfoCard: {
+    backgroundColor: Colors.canvas,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    padding: 10,
+    marginBottom: 4,
+  },
+  transferInfoTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  transferInfoName: {
+    fontSize: FontSize.body,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  transferInfoNumber: {
+    fontSize: FontSize.caption,
+    color: Colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.subtle,
+  },
+  copyBtnCopied: {
+    backgroundColor: Colors.paidBg,
+  },
+  copyText: {
+    fontSize: FontSize.caption,
+    fontWeight: '600',
+    color: Colors.brandPrimary,
+  },
+  copyTextCopied: {
+    fontSize: FontSize.caption,
+    fontWeight: '600',
+    color: Colors.paidText,
+  },
   input: {
     borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
     paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary,

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Search from 'lucide-react-native/icons/search';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Calendar from 'lucide-react-native/icons/calendar';
@@ -52,8 +52,26 @@ const PAGE_SIZE = 30;
 
 type DirectionFilter = 'ALL' | 'EXPENSE' | 'INCOME';
 
+type StatusFilter = 'ALL' | 'PENDING' | 'PAID';
+
+/**
+ * The status filter lives in the URL, not in component state.
+ *
+ * Home's "N transaksi belum dibayar" alert links to `/(tabs)/history?status=PENDING`,
+ * and a tab screen stays mounted once visited — so state initialised from the
+ * param would be correct on the first visit and silently ignored on every one
+ * after it. Reading the param every render (and writing it back with
+ * `router.setParams`) keeps one source of truth, and makes the filtered view
+ * survivable across a reload.
+ */
+function statusFromParam(value: string | string[] | undefined): StatusFilter {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v === 'PENDING' || v === 'PAID' ? v : 'ALL';
+}
+
 export default function HistoryScreen() {
   const router = useRouter();
+  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
   const { household } = useAuth();
   const householdId = household?.id;
 
@@ -61,6 +79,8 @@ export default function HistoryScreen() {
   const cycleId = cycleQ.data?.id;
   const accsQ = useAccounts(householdId);
   // actual mode: the ledger reports what was executed, not what was planned.
+  // The *amounts on screen* come from `displayAmount` instead, so an unexecuted
+  // row still reads as its plan rather than as Rp 0 — see LedgerRow.
   const ledgerQ = useTransactionLedger(householdId, cycleId, 'actual');
 
   const [q, setQ] = useState('');
@@ -69,9 +89,20 @@ export default function HistoryScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [visible, setVisible] = useState(PAGE_SIZE);
 
+  const status = statusFromParam(statusParam);
+
+  const setStatus = (next: StatusFilter) => {
+    setVisible(PAGE_SIZE);
+    router.setParams({ status: next === 'ALL' ? undefined : next });
+  };
+
   const allRows: LedgerRow[] = useMemo(() => ledgerQ.data ?? [], [ledgerQ.data]);
 
-  const filtered = useMemo(
+  // Search + direction + account, with the status filter deliberately left off.
+  // The status chips count against this set, so "Belum dibayar · 3" keeps
+  // meaning "3 pending rows match what you have already narrowed to" instead of
+  // collapsing to the count of the chip you just tapped.
+  const narrowed = useMemo(
     () =>
       filterLedger(
         allRows.map((r) => ({
@@ -84,27 +115,65 @@ export default function HistoryScreen() {
     [allRows, q, direction, accountId]
   );
 
-  const totals = useMemo(() => summarizeLedger(filtered), [filtered]);
+  // Routed back through `filterLedger` rather than a one-line `.filter`, so the
+  // status rule lives in exactly one place — including its "a row with no status
+  // is unknown, not excluded" clause, which an inline comparison would silently
+  // invert.
+  const filtered = useMemo(
+    () => (status === 'ALL' ? narrowed : filterLedger(narrowed, { status })),
+    [narrowed, status]
+  );
+
+  const pendingCount = useMemo(
+    () => narrowed.filter((r) => r.status === 'PENDING').length,
+    [narrowed]
+  );
+  // Counted, not derived as `narrowed.length - pendingCount`: that arithmetic
+  // silently books a row with no status as executed, and it is the same
+  // assumption the status filter deliberately refuses to make.
+  const paidCount = useMemo(
+    () => narrowed.filter((r) => r.status === 'PAID').length,
+    [narrowed]
+  );
+
+  // Totalled from `displayAmount`, not `amount`: the summary block already
+  // claims to describe what is on screen, and a block reading "Rp 0" above a
+  // list of unpaid bills would contradict the rows right under it.
+  const totals = useMemo(
+    () => summarizeLedger(filtered.map((r) => ({ direction: r.direction, amount: r.displayAmount }))),
+    [filtered]
+  );
 
   const page = filtered.slice(0, visible);
   const remaining = filtered.length - page.length;
 
-  // Day grouping matches the design's "Hari Ini · 25 Sep" headings. Rows with
-  // no release date (not yet executed) fall into their own group rather than
-  // being silently dropped.
+  // Day grouping matches the design's "Hari Ini · 25 Sep" headings.
+  //
+  // Unexecuted rows are grouped separately, at the top. They have no
+  // `release_date` to sort by — every row cloned when a cycle opens is
+  // `PENDING` with a null date — so leaving them in the date buckets would bury
+  // the entire "what do we still owe" list under an undated heading at the
+  // bottom, which is the opposite of what the alert that links here promises.
   const groups = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const map = new Map<string, { label: string; rows: LedgerRow[] }>();
-    for (const r of page) {
-      const key = r.release_date ?? '';
+    const pending = page.filter((r) => r.status === 'PENDING');
+    const dated = page.filter((r) => r.status !== 'PENDING');
+
+    const map = new Map<string, { key: string; label: string; rows: LedgerRow[] }>();
+    for (const r of dated) {
+      const key = r.release_date ?? 'no-date';
       const label = ledgerDayLabel(r.release_date, today);
-      if (!map.has(key)) map.set(key, { label, rows: [] });
+      if (!map.has(key)) map.set(key, { key, label, rows: [] });
       map.get(key)!.rows.push(r);
     }
-    // Newest day first; the "no date" bucket sorts last because '' < any ISO.
-    return [...map.entries()]
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([, v]) => v);
+    // Newest day first; a settled row with no date sorts last.
+    const datedGroups = [...map.values()].sort((a, b) => (a.key < b.key ? 1 : -1));
+
+    // "Belum dieksekusi", not "Belum dibayar": the bucket holds pending rows of
+    // both directions, and an un-cleared salary is not a bill.
+    return pending.length > 0
+      ? [{ key: 'pending', label: 'Belum dieksekusi', rows: pending }, ...datedGroups]
+      : datedGroups;
   }, [page]);
 
   const accounts = accsQ.data ?? [];
@@ -183,13 +252,29 @@ export default function HistoryScreen() {
 
         <View style={styles.chips}>
           <Chip
-            label={`Semua · ${filtered.length}`}
-            active={direction === 'ALL' && !accountId}
+            label={`Semua · ${narrowed.length}`}
+            active={status === 'ALL' && direction === 'ALL' && !accountId}
             primary
             onPress={() => {
               setDirection('ALL');
               setAccountId(null);
+              setStatus('ALL');
             }}
+          />
+          {/* "Belum dieksekusi", not "Belum dibayar": the filter is on status
+              alone, so an un-cleared salary sits in this bucket too — and the
+              heading it opens uses the same word, so the chip never promises
+              fewer rows than it shows. Home's alert is the opposite case: it
+              counts expenses only and says "belum dibayar". */}
+          <Chip
+            label={`Belum dieksekusi · ${pendingCount}`}
+            active={status === 'PENDING'}
+            onPress={() => setStatus(status === 'PENDING' ? 'ALL' : 'PENDING')}
+          />
+          <Chip
+            label={`Sudah dieksekusi · ${paidCount}`}
+            active={status === 'PAID'}
+            onPress={() => setStatus(status === 'PAID' ? 'ALL' : 'PAID')}
           />
           <Chip
             label="Pengeluaran"
@@ -231,12 +316,13 @@ export default function HistoryScreen() {
                 ? 'Belum ada transaksi di siklus ini.'
                 : 'Tidak ada transaksi yang cocok dengan filter.'}
             </Text>
-            {(q.length > 0 || direction !== 'ALL' || accountId) && (
+            {(q.length > 0 || direction !== 'ALL' || !!accountId || status !== 'ALL') && (
               <Pressable
                 onPress={() => {
                   setQ('');
                   setDirection('ALL');
                   setAccountId(null);
+                  setStatus('ALL');
                 }}
               >
                 <Text style={styles.emptyLink}>Reset filter</Text>
@@ -246,14 +332,27 @@ export default function HistoryScreen() {
         )}
 
         {groups.map((g) => (
-          <View key={g.label} style={styles.group}>
+          <View key={g.key} style={styles.group}>
             <View style={styles.groupHead}>
               <Text style={styles.groupTitle}>{g.label}</Text>
               <Text style={styles.groupCount}>{g.rows.length} transaksi</Text>
             </View>
             <View style={styles.ledger}>
               {g.rows.map((r, i) => (
-                <LedgerRowView key={r.id} row={r} first={i === 0} />
+                <LedgerRowView
+                  key={r.id}
+                  row={r}
+                  first={i === 0}
+                  // A row that has not moved is the only one with something left
+                  // to do. Executed rows stay inert: payment-confirm is built to
+                  // refuse them, and a row that opens only to say "already paid"
+                  // is worse than one that does nothing.
+                  onPress={
+                    r.status === 'PENDING'
+                      ? () => router.push({ pathname: '/payment-confirm', params: { id: r.id } })
+                      : undefined
+                  }
+                />
               ))}
             </View>
           </View>
@@ -307,15 +406,16 @@ function Chip({
   );
 }
 
-function LedgerRowView({ row, first }: { row: LedgerRow; first: boolean }) {
+function LedgerRowView({ row, first, onPress }: { row: LedgerRow; first: boolean; onPress?: () => void }) {
   const flow = row.flowType;
   const tone = FLOW_TONES[flow];
   const isIncome = row.direction === 'INCOME';
   const executed = row.status === 'PAID';
 
-  // The amount shown is what the row is worth in actual mode: the executed
-  // figure for a PAID row, the plan for a row still pending. `row.amount`
-  // already resolved that; only the sign and the colour are decided here.
+  // `displayAmount`, not `amount`: in `actual` mode the latter is 0 for every
+  // unexecuted row, which is correct for the projection and wrong on screen.
+  // A pending row shows the plan it was created with, greyed and labelled
+  // "Rencana" so it is never mistaken for money that moved.
   const amountColor = !executed
     ? Colors.textMuted
     : isIncome
@@ -323,7 +423,11 @@ function LedgerRowView({ row, first }: { row: LedgerRow; first: boolean }) {
       : Colors.textPrimary;
 
   return (
-    <View style={[styles.row, !first && styles.rowBordered]}>
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      style={[styles.row, !first && styles.rowBordered]}
+    >
       <View style={[styles.iconBox, { backgroundColor: tone.bg, borderColor: tone.border }]}>
         <BrandIcon
           name={categoryIconName({
@@ -347,15 +451,15 @@ function LedgerRowView({ row, first }: { row: LedgerRow; first: boolean }) {
       <View style={styles.rowRight}>
         <Text style={[styles.rowAmount, { color: amountColor }]}>
           {isIncome ? '+' : '−'}
-          {formatRupiah(row.amount)}
+          {formatRupiah(row.displayAmount)}
         </Text>
         <View style={[styles.flowBadge, { backgroundColor: tone.bg, borderColor: tone.border }]}>
           <Text style={[styles.flowBadgeText, { color: tone.text }]} numberOfLines={1}>
-            {executed ? FLOW_LABELS[flow] : 'Belum dieksekusi'}
+            {executed ? FLOW_LABELS[flow] : 'Rencana'}
           </Text>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

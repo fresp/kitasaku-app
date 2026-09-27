@@ -100,12 +100,26 @@ refuse an unfundable plan.
 - Every open obligation (`remaining_amount > 0`, not `SETTLED`/`CANCELLED`) is
   selected by default. A carried-over debt is not optional spending; leaving one
   out is exactly how a silent funding gap is created.
-- `requiredAllocation = totalRecurring + totalDebtPayment`.
-- `fundingGap = max(requiredAllocation − income, 0)`; the CTA reads **Tutup
-  Funding Gap Dulu** and `submit()` refuses while `fundingGap > 0`.
+- Routine positions are split by direction: `sourceFunds = income + recurringIncome`,
+  `requiredAllocation = recurringExpense + totalDebtPayment`. The screen used to sum
+  all recurring positions into one `totalRecurring` and compare it against `income`
+  alone, which both understated the funds available and treated a cloned salary as
+  though it were a bill. It matters beyond the gate now: the EXPENSE side is exactly
+  what gets written to `cycle_allocations` when the cycle opens, so the number the
+  gate approves has to be the number the plan stores (see
+  `docs/phase-1-domain-contract.md` §8).
+- `fundingGap = max(requiredAllocation − sourceFunds, 0)`; the CTA reads **Tutup
+  Funding Gap Dulu** and `submit()` refuses while `fundingGap > 0`. The gap note
+  names both terms, so "kebutuhan X melebihi sumber dana Y" is checkable by eye.
 - The projection panel replaced the old "Estimasi Sisa Bersih" number. What is
   left over is *unallocated*, not "net remaining" — zero-based means it still
-  needs a purpose.
+  needs a purpose. It prints `+ Pemasukan gajian`, `+ Pos pemasukan rutin` (only
+  when non-zero), `− Pengeluaran rutin`, and `− Pembayaran kewajiban (N)`.
+- Ticking an obligation is not merely a projection entry: `useCreateCycle` writes a
+  PENDING `DEBT_PAYMENT` transaction (with `obligation_id`) plus a `DEBT_PAYMENT`
+  allocation for each one, so the debt appears in Riwayat as a row the family can
+  open and pay. Payment still goes through `useMarkAsPaid` — the same gate as any
+  other PENDING row.
 - A note states that financing inflow is not routine income and is not cloned
   into the next cycle.
 

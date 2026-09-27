@@ -23,6 +23,8 @@ import {
 } from '../../lib/obligation';
 import { Badge } from './Badge';
 import type { ObligationInstallment } from '../../lib/queries';
+import type { Beneficiary } from '../../lib/beneficiary';
+import { formatBankBadge } from '../../lib/beneficiary';
 
 /**
  * The Tanggungan card (design "Screen 3"), one component covering all four of
@@ -50,6 +52,8 @@ export interface ObligationCardData {
   interest_fee_amount?: number | null;
   installment_count?: number | null;
   planned_installment_amount?: number | null;
+  beneficiary_id?: string | null;
+  beneficiary?: Beneficiary | null;
 }
 
 const STATE_ICON: Record<LoanState, typeof Scale> = {
@@ -92,7 +96,9 @@ export function ObligationCard({
   const Icon = STATE_ICON[state];
   const settled = state === 'SETTLED' || state === 'CANCELLED';
   const schedule = installmentProgressLabel(installments);
-  const counterparty = counterpartyLabel(obligation.type, obligation.recipient);
+  const counterparty = obligation.beneficiary
+    ? `Tujuan: ${obligation.beneficiary.name} (${formatBankBadge(obligation.beneficiary.bank_name)})`
+    : counterpartyLabel(obligation.type, obligation.recipient);
   const dueLabel = longDateLabel(obligation.due_date);
 
   // A settled card shows how it finished; a live card shows what is still owed.
@@ -127,6 +133,9 @@ export function ObligationCard({
             <Icon size={14} color={STATE_ICON_COLOR[state]} />
           </View>
           <Badge label={obligationTypeLabel(obligation.type)} />
+          {obligation.beneficiary && (
+            <Badge label={formatBankBadge(obligation.beneficiary.bank_name)} tone="dark" />
+          )}
         </View>
         <Badge label={badge.label} tone={badge.tone} />
       </View>

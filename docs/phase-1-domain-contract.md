@@ -44,6 +44,15 @@ New metadata columns (all nullable except `interest_fee_amount DEFAULT 0`): `rep
 `requiredAllocation` is always the planned total; mode affects only source funds.
 Allocation total comes ONLY from `cycle_allocations`; transaction outflows classify ledger rows but are never summed into it.
 
+Anti-double-count has a second, later sibling: `resolveModeAmount('actual')` answers
+"how much money actually moved", which is `0` for a PENDING row — correct for the
+projection, useless in a ledger that lists rows the family still has to pay. The
+ledger therefore prints `ledgerDisplayAmount(txn)` instead: the plan while the row is
+PENDING, the real figure once it is PAID, and the plan again if a PAID row has no
+recorded actual (`actual = 0` on a settled row means the column was never written —
+both pay paths reject a zero payment). `amount` keeps the mode-resolved value so the
+Home projections are unaffected; `LedgerRow` carries both.
+
 ## 6. Migration 004 contents
 
 `transactions.flow_type` + backfill + 6 indexes · `cycle_allocations` + household-consistency trigger
@@ -64,7 +73,39 @@ and tablename in ('cycle_allocations','obligation_installments')` → 2 rows (da
 `useDeleteAllocation` (client validates `amount > 0`) · `useCreateFinancingLoan` / `useAllocateDebtPayment`
 (RPC wrappers). Realtime (`lib/realtime.ts`) invalidates `['alloc']`, `['zero-summary']`, `['oblig']`.
 
-## 8. Open TODOs (decisions deferred, not silent assumptions)
+`calcCashflow` classifies pending rows by direction and exposes `unpaidExpenseCount` /
+`pendingIncomeCount` alongside the raw `pendingCount`, because a PENDING INCOME row ("Gaji
+Bulanan", pending until payday) is not a bill — Home's "N transaksi belum dibayar" alert reads
+the expense count, while Riwayat's status filter uses the raw status.
+
+## 8. Where allocations come from at cycle open
+
+The plan becomes binding the moment the cycle opens, so that is where its commitments are
+written — not lazily as the family taps each row. `useCreateCycle` materialises, in order:
+
+1. the `cycles` row, deactivating the previous active cycle;
+2. one PENDING `transactions` row per selected routine position, per carried-over obligation
+   (`flow_type = 'DEBT_PAYMENT'`, `obligation_id` set, name = the obligation title verbatim so it
+   matches what `useAllocateObligation` writes), and one for the payday figure (`'Gaji Bulanan'`,
+   `OPERATING_INCOME`);
+3. one `cycle_allocations` row per commitment — `EXPENSE` per routine EXPENSE item, `DEBT_PAYMENT`
+   per obligation. Income is a *source*, never an allocation, so it deliberately has no row here.
+
+This is what makes the gate and the dashboard agree from the first render: `app/new-cycle.tsx`
+computes `requiredAllocation = recurringExpense + totalDebtPayment` against
+`sourceFunds = income + recurringIncome`, and the same split is what gets written to
+`cycle_allocations`. Summing routine income into the requirement (as the screen once did) would
+both understate the funds available and book a salary as an EXPENSE commitment.
+
+Execution is unchanged: `useMarkAsPaid` on the PENDING row is the only path that moves cash, and
+it writes no second allocation — one commitment, one allocation row.
+
+Atomicity caveat: this is three round trips, so a failure between them can leave a cycle with
+rows but no allocations. The `create_financing_with_obligation` / `allocate_debt_payment` RPCs
+exist to avoid exactly that shape; folding cycle creation into a `create_cycle_with_plan` RPC is
+the follow-up tracked in the release audit.
+
+## 9. Open TODOs (decisions deferred, not silent assumptions)
 
 - ~~When an `EXPENSE` txn with `obligation_id` may count as `DEBT_PAYMENT`~~ → **resolved in Phase 2A**:
   an obligation row is always `DEBT_PAYMENT`; see `docs/phase-2-payment-paths.md`.

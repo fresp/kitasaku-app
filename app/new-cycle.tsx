@@ -47,7 +47,19 @@ export default function NewCycleScreen() {
     amounts[id] !== undefined ? parseAmount(amounts[id]) : fallback;
 
   const selected = activeTemplates.filter((t) => isChecked(t.id));
-  const totalRecurring = selected.reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+
+  // A routine position is either a commitment (EXPENSE → an allocation) or a
+  // source (INCOME → part of the money this cycle can spend). Summing them into
+  // one number — as this screen used to — both understates the funds available
+  // and books a salary as if it were a bill. The split matters more now than it
+  // did before: the EXPENSE side is what gets written to `cycle_allocations`
+  // when the cycle opens, so the gate and the stored plan have to agree.
+  const recurringExpense = selected
+    .filter((t) => t.direction === 'EXPENSE')
+    .reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+  const recurringIncome = selected
+    .filter((t) => t.direction === 'INCOME')
+    .reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
 
   const openObligations = useMemo(
     () => (obligQ.data ?? []).filter((o) => o.remaining_amount > 0 && o.status !== 'SETTLED' && o.status !== 'CANCELLED'),
@@ -57,19 +69,34 @@ export default function NewCycleScreen() {
   const selectedObligations = openObligations.filter((o) => isObligChecked(o.id));
   const totalDebtPayment = selectedObligations.reduce((s, o) => s + o.remaining_amount, 0);
 
+  // The "Pinjaman" system category (migration 006) is what classifies a
+  // debt-payment row in the ledger — an obligation carries no category of its
+  // own. Without it the row lands in Riwayat with no category and a
+  // name-derived icon that claims a debt paydown is a purchase.
+  const debtCategoryId = useMemo(
+    () => (catsQ.data ?? []).find((c) => c.system_role === 'DEBT_PAYMENT')?.id ?? null,
+    [catsQ.data]
+  );
+
   const income = parseAmount(incomeText);
+  // Everything this cycle can spend: the payday figure plus any routine income
+  // position the family cloned in.
+  const sourceFunds = income + recurringIncome;
   // The planned allocation is everything this cycle has already committed to,
   // before any voluntary savings. What is left is unallocated, not "sisa bersih"
   // — zero-based means it still needs a purpose.
-  const requiredAllocation = totalRecurring + totalDebtPayment;
-  const fundingGap = calculateFundingGap(requiredAllocation, income);
-  const unallocated = calculateUnallocatedFunds(income, requiredAllocation);
+  const requiredAllocation = recurringExpense + totalDebtPayment;
+  const fundingGap = calculateFundingGap(requiredAllocation, sourceFunds);
+  const unallocated = calculateUnallocatedFunds(sourceFunds, requiredAllocation);
   const canOpen = fundingGap === 0;
 
   async function submit() {
     setErr(null);
     if (!householdId) { setErr('Login dulu untuk membuka siklus.'); return; }
-    if (selected.length === 0 && income <= 0) { setErr('Pilih minimal 1 pos rutin atau isi pemasukan.'); return; }
+    if (selected.length === 0 && selectedObligations.length === 0 && income <= 0) {
+      setErr('Pilih minimal 1 pos rutin, 1 kewajiban, atau isi pemasukan.');
+      return;
+    }
     if (!canOpen) {
       setErr(
         `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas aset, atau catat pinjaman baru dulu.`
@@ -89,6 +116,21 @@ export default function NewCycleScreen() {
           amount: amountFor(t.id, t.default_amount),
           categoryId: t.category_id, accountId: t.account_id,
           direction: t.direction,
+        })),
+        // Carried-over obligations, at their remaining amount. Each becomes a
+        // PENDING DEBT_PAYMENT row plus its allocation, so "what do we still owe
+        // this cycle" is a list the family can open and pay — not just a number
+        // in the projection below.
+        //
+        // The row name is the obligation title verbatim, matching what
+        // `useAllocateObligation` writes: the two paths must produce the same
+        // row, or the same debt shows up under two names in the ledger.
+        obligations: selectedObligations.map((o) => ({
+          obligationId: o.id,
+          title: o.title,
+          amount: o.remaining_amount,
+          categoryId: debtCategoryId,
+          accountId: null,
         })),
       });
       void cycle;
@@ -192,15 +234,18 @@ export default function NewCycleScreen() {
 
         <View style={styles.projection}>
           <Text style={styles.projLabel}>ZERO-BASED ALLOCATION SIKLUS INI</Text>
-          <ProjRow label={`+ Pemasukan (${selected.length} pos rutin)`} value={income} />
-          <ProjRow label={`− Pengeluaran rutin`} value={-totalRecurring} />
+          <ProjRow label="+ Pemasukan gajian" value={income} />
+          {recurringIncome > 0 && (
+            <ProjRow label="+ Pos pemasukan rutin" value={recurringIncome} />
+          )}
+          <ProjRow label="− Pengeluaran rutin" value={-recurringExpense} />
           <ProjRow label={`− Pembayaran kewajiban (${selectedObligations.length})`} value={-totalDebtPayment} />
           <View style={styles.projDivider} />
           {fundingGap > 0 ? (
             <>
               <ProjRow label="= Funding Gap (Kebutuhan Pendanaan)" value={fundingGap} tone="gap" />
               <Text style={styles.projNote}>
-                Kebutuhan {formatRupiah(requiredAllocation)} melebihi sumber dana {formatRupiah(income)}.
+                Kebutuhan {formatRupiah(requiredAllocation)} melebihi sumber dana {formatRupiah(sourceFunds)}.
                 Siklus tidak dapat dibuka selama Funding Gap belum tertutup.
               </Text>
               <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>

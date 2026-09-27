@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
@@ -7,7 +7,7 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { BrandIcon } from '../../components/ui/BrandIcon';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
-import { useActiveCycle, useCreateObligation, useObligations } from '../../lib/queries';
+import { useActiveCycle, useObligations } from '../../lib/queries';
 import {
   matchesObligationFilter,
   obligationBacklog,
@@ -15,7 +15,7 @@ import {
   type ObligationFilter,
 } from '../../lib/obligation';
 import { ObligationRow } from '../../components/ui/ObligationRow';
-import { PrimaryButton } from '../../components/ui/Button';
+import { ObligationFormSheet } from '../../components/obligations/ObligationFormSheet';
 
 /**
  * Screen 3 — Tanggungan.
@@ -44,13 +44,9 @@ export default function ObligationsScreen() {
   const householdId = household?.id;
   const cycleQ = useActiveCycle(householdId);
   const obligQ = useObligations(householdId);
-  const createOb = useCreateObligation();
 
   const [filter, setFilter] = useState<ObligationFilter>('all');
   const [showForm, setShowForm] = useState(false);
-  const [title, setTitle] = useState('');
-  const [totalText, setTotalText] = useState('');
-  const [err, setErr] = useState<string | null>(null);
 
   // Read once per render rather than held in state: a stored "today" would go
   // stale the moment the app is left open across midnight, and every card's
@@ -65,42 +61,22 @@ export default function ObligationsScreen() {
     [obligations, filter]
   );
 
-  async function submitCreate() {
-    setErr(null);
-    const total = parseInt(totalText.replace(/[^0-9]/g, '') || '0', 10);
-    if (!householdId) { setErr('Login dulu untuk mencatat tanggungan.'); return; }
-    if (title.trim().length < 3) { setErr('Judul minimal 3 huruf.'); return; }
-    if (total <= 0) { setErr('Total nominal harus lebih dari Rp 0.'); return; }
-    try {
-      await createOb.mutateAsync({ householdId, title: title.trim(), type: 'BILL', total });
-      setTitle(''); setTotalText(''); setShowForm(false);
-    } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan.'); }
-  }
-
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>Kewajiban &amp; Reimburse</Text>
-          <Pressable onPress={() => setShowForm((v) => !v)} style={styles.addBtn}>
+          <Pressable onPress={() => setShowForm(true)} style={styles.addBtn}>
             <Plus size={14} color={Colors.white} />
-            <Text style={styles.addText}>{showForm ? 'Tutup' : 'Tambah'}</Text>
+            <Text style={styles.addText}>Tambah</Text>
           </Pressable>
         </View>
 
-        {showForm && (
-          <View style={styles.form}>
-            <Text style={styles.label}>JUDUL TANGGUNGAN</Text>
-            <TextInput value={title} onChangeText={setTitle} placeholder="Reimburse Belanja Istri" placeholderTextColor={Colors.textMuted} style={styles.input} />
-            <Text style={styles.label}>TOTAL NOMINAL</Text>
-            <TextInput value={totalText} onChangeText={setTotalText} placeholder="2000000" placeholderTextColor={Colors.textMuted} keyboardType="number-pad" style={styles.input} />
-            <PrimaryButton label={createOb.isPending ? 'Menyimpan…' : 'Simpan Tanggungan'} onPress={submitCreate} />
-            <Text style={styles.hint}>
-              Pinjaman dengan jadwal cicilan dicatat lewat Quick Add → Terima Pinjaman, supaya
-              bunga dan angsurannya ikut tersimpan.
-            </Text>
-          </View>
-        )}
+        <ObligationFormSheet
+          visible={showForm}
+          onClose={() => setShowForm(false)}
+          householdId={householdId}
+        />
 
         <ScrollView
           horizontal
@@ -167,12 +143,6 @@ export default function ObligationsScreen() {
             }
           />
         ))}
-
-        {err && (
-          <View style={styles.errBox}>
-            <Text style={styles.errText}>{err}</Text>
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
