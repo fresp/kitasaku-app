@@ -101,6 +101,7 @@ export default function ProfileScreen() {
       title: 'Insight & Aset 2026',
       sub: 'Analisis tren bulanan, cashflow, aset likuid & kewajiban',
       tone: 'paid',
+      onPress: () => router.push('/insight-aset'),
     },
     {
       key: 'kategori',

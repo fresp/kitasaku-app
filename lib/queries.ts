@@ -544,6 +544,114 @@ export function useFundingGap(
   };
 }
 
+/**
+ * Everything the Insight & Aset screen needs for one calendar year, in one
+ * query.
+ *
+ * Three separate `useX(householdId, cycleId)` hooks cannot serve this screen:
+ * it charts twelve months at once, so it would need one query per month and
+ * would show twelve independent loading states. Worse, the six sections all
+ * read the SAME rows — five queries for one dataset is five chances for the
+ * charts to disagree with each other.
+ *
+ * The year filter is on the cycle, not on `created_at`: a transaction belongs
+ * to the month of the cycle it was budgeted in, and a row created in January
+ * for a December cycle is December's money.
+ *
+ * `year` is passed in rather than read from the clock so the caller owns the
+ * "which year am I looking at" decision and the hook stays pure-ish and
+ * cacheable per year.
+ */
+export function useYearInsight(householdId: string | undefined, year: number) {
+  return useQuery({
+    queryKey: ['year-insight', householdId, year],
+    enabled: !!householdId,
+    queryFn: async (): Promise<{
+      cycles: Cycle[];
+      txns: Txn[];
+      allocations: CycleAllocation[];
+    }> => {
+      const sb = requireSupabase();
+      const yearStart = `${year}-01-01`;
+      const yearEnd = `${year}-12-31`;
+      // A cycle straddles two months, so a cycle ending 24 Jan belongs to
+      // January but starts in December of the year before. Overlap, not
+      // containment, is the right filter: `start_date <= yearEnd AND
+      // end_date >= yearStart` keeps the cycle that crosses New Year in both
+      // years, which is exactly what `cyclesInYear` in lib/insight.ts expects.
+      const { data: cycleData, error: cycleErr } = await sb
+        .from('cycles')
+        .select('*')
+        .eq('household_id', householdId!)
+        .lte('start_date', yearEnd)
+        .gte('end_date', yearStart)
+        .order('end_date', { ascending: true });
+      if (cycleErr) throw cycleErr;
+
+      const cycles = (cycleData ?? []) as Cycle[];
+      if (cycles.length === 0) return { cycles, txns: [], allocations: [] };
+
+      const cycleIds = cycles.map((c) => c.id);
+      const [txnRes, allocRes] = await Promise.all([
+        sb.from('transactions')
+          .select('*, categories(name), accounts(name)')
+          .eq('household_id', householdId!)
+          .in('cycle_id', cycleIds)
+          .limit(2000),
+        sb.from('cycle_allocations')
+          .select('*, categories(name), obligations(title), accounts(name)')
+          .eq('household_id', householdId!)
+          .in('cycle_id', cycleIds)
+          .limit(2000),
+      ]);
+      if (txnRes.error) throw txnRes.error;
+      if (allocRes.error) throw allocRes.error;
+
+      return {
+        cycles,
+        txns: (txnRes.data ?? []) as Txn[],
+        allocations: (allocRes.data ?? []) as CycleAllocation[],
+      };
+    },
+  });
+}
+
+/**
+ * Every year the household has a cycle in, newest first.
+ *
+ * A `min`/`max` on the dates would be wrong here: a family with cycles in 2024
+ * and 2026 but not 2025 has three years on the selector's axis and only two
+ * with data, so the screen must know which years exist rather than assume the
+ * range is contiguous. Selecting only the two date columns keeps this cheap
+ * enough to run alongside the year query.
+ */
+export function useCycleYears(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['cycle-years', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<number[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb
+        .from('cycles')
+        .select('start_date, end_date')
+        .eq('household_id', householdId!);
+      if (error) throw error;
+      const set = new Set<number>();
+      for (const c of (data ?? []) as { start_date: string; end_date: string }[]) {
+        // A cycle straddling New Year belongs to both years; `cyclesInYear`
+        // accepts either, so the selector must offer both.
+        const end = Number((c.end_date ?? '').slice(0, 4));
+        const start = Number((c.start_date ?? '').slice(0, 4));
+        if (end >= 1900) set.add(end);
+        if (start >= 1900) set.add(start);
+      }
+      const thisYear = new Date().getFullYear();
+      if (set.size === 0) set.add(thisYear);
+      return [...set].sort((a, b) => b - a);
+    },
+  });
+}
+
 export function useObligationSummaries(householdId: string | undefined) {
   const q = useObligations(householdId);
   const data: ObligationSummary[] | undefined = q.data?.map((o) => {

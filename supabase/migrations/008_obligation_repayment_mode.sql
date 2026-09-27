@@ -6,7 +6,7 @@
 --   * "Cicil per siklus"  -> INSTALLMENT
 --   * "Manual"            -> MANUAL
 --
--- Why this is a separate column from `repayment_method` (005): the two answer
+-- Why this is a separate column from `repayment_method` (004): the two answer
 -- different questions. `repayment_method` is HOW the money moves (TRANSFER,
 -- CASH, AUTO_DEBIT, ...); `repayment_mode` is the SHAPE of the plan — settle it
 -- in one go next cycle, split it across a schedule, or decide per payment.
