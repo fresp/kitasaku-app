@@ -5,6 +5,11 @@ import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './
 import { isRepaymentMode } from './obligation';
 import type { RepaymentMode } from './obligation';
 import {
+  normalizeAccountNumber,
+  sortAccounts,
+  validateAccountNumber,
+} from './account';
+import {
   calculateZeroBasedSummary,
   canMarkAsPaid,
   defaultFlowType,
@@ -43,7 +48,17 @@ export interface Category {
    */
   icon?: string | null;
 }
-export interface Account { id: string; household_id: string; name: string; type: string; }
+export interface Account {
+  id: string;
+  household_id: string;
+  name: string;
+  type: string;
+  account_number?: string | null;
+  account_holder_name?: string | null;
+  is_active?: boolean;
+  sort_order?: number;
+  icon?: string | null;
+}
 export interface Txn {
   id: string; household_id: string; cycle_id: string | null;
   recurring_template_id: string | null; obligation_id: string | null;
@@ -150,14 +165,25 @@ export function useCategories(householdId: string | undefined) {
   });
 }
 
-export function useAccounts(householdId: string | undefined) {
+export function useAccounts(
+  householdId: string | undefined,
+  options?: { includeArchived?: boolean }
+) {
+  const includeArchived = options?.includeArchived ?? false;
   return useQuery({
-    queryKey: ['accs', householdId], enabled: !!householdId,
+    queryKey: ['accs', householdId, includeArchived],
+    enabled: !!householdId,
     queryFn: async (): Promise<Account[]> => {
       const sb = requireSupabase();
-      const { data, error } = await sb.from('accounts').select('*').eq('household_id', householdId!).order('name');
+      const { data, error } = await sb
+        .from('accounts')
+        .select('*')
+        .eq('household_id', householdId!)
+        .order('name');
       if (error) throw error;
-      return (data ?? []) as Account[];
+      const accounts = (data ?? []) as Account[];
+      const sorted = sortAccounts(accounts);
+      return includeArchived ? sorted : sorted.filter((a) => a.is_active !== false);
     },
   });
 }
@@ -1218,3 +1244,187 @@ export function useUpdateMyMemberProfile() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['members'] }),
   });
 }
+
+// ============ Flow J: Managed Account mutations & helpers ============
+
+export interface AccountInput {
+  name: string;
+  type: string;
+  accountNumber?: string | null;
+  accountHolderName?: string | null;
+  icon?: string | null;
+  sortOrder?: number;
+}
+
+export function useCreateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string } & AccountInput) => {
+      const name = args.name.trim();
+      if (name.length < 2) throw new Error('Nama akun minimal 2 huruf.');
+      const numErr = validateAccountNumber(args.accountNumber);
+      if (numErr) throw new Error(numErr);
+      const normalizedNum = normalizeAccountNumber(args.accountNumber);
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('accounts').insert({
+        household_id: args.householdId,
+        name,
+        type: args.type,
+        account_number: normalizedNum,
+        account_holder_name: args.accountHolderName?.trim() || null,
+        icon: args.icon?.trim() || null,
+        sort_order: args.sortOrder ?? 0,
+        is_active: true,
+      }).select('*').single();
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('Nomor akun ini sudah terdaftar di keluarga kamu.');
+        }
+        throw error;
+      }
+      return data as Account;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accs'] }),
+  });
+}
+
+export function useUpdateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string } & Partial<AccountInput> & { isActive?: boolean }) => {
+      if (args.name !== undefined && args.name.trim().length < 2) {
+        throw new Error('Nama akun minimal 2 huruf.');
+      }
+      if (args.accountNumber !== undefined) {
+        const numErr = validateAccountNumber(args.accountNumber);
+        if (numErr) throw new Error(numErr);
+      }
+      const sb = requireSupabase();
+      const patch: Record<string, string | number | boolean | null> = {};
+      if (args.name !== undefined) patch.name = args.name.trim();
+      if (args.type !== undefined) patch.type = args.type;
+      if (args.accountNumber !== undefined) {
+        patch.account_number = normalizeAccountNumber(args.accountNumber);
+      }
+      if (args.accountHolderName !== undefined) {
+        patch.account_holder_name = args.accountHolderName?.trim() || null;
+      }
+      if (args.icon !== undefined) {
+        patch.icon = args.icon?.trim() || null;
+      }
+      if (args.sortOrder !== undefined) {
+        patch.sort_order = args.sortOrder;
+      }
+      if (args.isActive !== undefined) {
+        patch.is_active = args.isActive;
+      }
+      if (Object.keys(patch).length === 0) return null;
+      const { data, error } = await sb.from('accounts')
+        .update(patch).eq('id', args.id).select('*').single();
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error('Nomor akun ini sudah terdaftar di keluarga kamu.');
+        }
+        throw error;
+      }
+      return data as Account;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accs'] });
+      invalidateMoneyKeys(qc);
+    },
+  });
+}
+
+export function useArchiveAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string }) => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('accounts')
+        .update({ is_active: false }).eq('id', args.id).select('*').single();
+      if (error) throw error;
+      return data as Account;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accs'] });
+      invalidateMoneyKeys(qc);
+    },
+  });
+}
+
+export function useReactivateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string }) => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('accounts')
+        .update({ is_active: true }).eq('id', args.id).select('*').single();
+      if (error) throw error;
+      return data as Account;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accs'] });
+      invalidateMoneyKeys(qc);
+    },
+  });
+}
+
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string }) => {
+      const sb = requireSupabase();
+      const { error } = await sb.from('accounts').delete().eq('id', args.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accs'] });
+      invalidateMoneyKeys(qc);
+    },
+  });
+}
+
+/**
+ * Checks whether an account is referenced by any transaction or recurring template.
+ * If referenced, deleting would violate foreign key constraints (or nullify allocations),
+ * so only archiving is allowed.
+ */
+export function useAccountUsage(accountId: string | undefined) {
+  return useQuery({
+    queryKey: ['acc-usage', accountId],
+    enabled: !!accountId,
+    queryFn: async (): Promise<{ isUsed: boolean; txnCount: number; templateCount: number }> => {
+      if (!accountId) return { isUsed: false, txnCount: 0, templateCount: 0 };
+      const sb = requireSupabase();
+      const [{ count: txnCount, error: txnErr }, { count: tmplCount, error: tmplErr }] = await Promise.all([
+        sb.from('transactions').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+        sb.from('recurring_templates').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+      ]);
+      if (txnErr) throw txnErr;
+      if (tmplErr) throw tmplErr;
+      const total = (txnCount ?? 0) + (tmplCount ?? 0);
+      return {
+        isUsed: total > 0,
+        txnCount: txnCount ?? 0,
+        templateCount: tmplCount ?? 0,
+      };
+    },
+  });
+}
+
+export function useReorderAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (accounts: { id: string; sort_order: number }[]) => {
+      const sb = requireSupabase();
+      await Promise.all(
+        accounts.map((a) =>
+          sb.from('accounts').update({ sort_order: a.sort_order }).eq('id', a.id)
+        )
+      );
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accs'] }),
+  });
+}
+

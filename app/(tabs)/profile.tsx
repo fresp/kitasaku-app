@@ -10,6 +10,7 @@ import Palette from 'lucide-react-native/icons/palette';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Users from 'lucide-react-native/icons/users';
+import Wallet from 'lucide-react-native/icons/wallet';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useUpdateMyMemberProfile } from '../../lib/queries';
@@ -134,9 +135,18 @@ export default function ProfileScreen() {
     },
   ];
 
-  const accountRows: MenuRow[] = [
-    { key: 'appearance', icon: Palette, title: 'Preferensi tampilan', tone: 'default' },
-    { key: 'security', icon: ShieldCheck, title: 'Keamanan & privasi', tone: 'default' },
+  const accountRows: (MenuRow & { soon?: boolean })[] = [
+    {
+      key: 'managed-account',
+      icon: Wallet,
+      title: 'Kelola Akun',
+      sub: 'Atur rekening, kartu, dan e-wallet keluarga',
+      tone: 'default',
+      onPress: () => router.push('/manage-accounts'),
+      soon: false,
+    },
+    { key: 'appearance', icon: Palette, title: 'Preferensi tampilan', tone: 'default', soon: true },
+    { key: 'security', icon: ShieldCheck, title: 'Keamanan & privasi', tone: 'default', soon: true },
   ];
 
   return (
@@ -247,7 +257,7 @@ export default function ProfileScreen() {
         <Text style={styles.section}>AKUN</Text>
         <View style={styles.group}>
           {accountRows.map((r, i) => (
-            <MenuRowView key={r.key} row={r} first={i === 0} soon />
+            <MenuRowView key={r.key} row={r} first={i === 0} soon={r.soon} />
           ))}
         </View>
 

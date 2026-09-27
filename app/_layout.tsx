@@ -17,7 +17,7 @@ let nativeSplashHidden = false;
 function hideNativeSplash() {
   if (nativeSplashHidden) return;
   nativeSplashHidden = true;
-  SplashScreen.hideAsync().catch(() => {});
+  SplashScreen.hideAsync().catch(() => { });
 }
 
 const queryClient = new QueryClient();
@@ -86,6 +86,7 @@ function Gate() {
         <Stack.Screen name="templates" options={{ presentation: 'card' }} />
         <Stack.Screen name="category-detail" options={{ presentation: 'card' }} />
         <Stack.Screen name="manage-categories" options={{ presentation: 'card' }} />
+        <Stack.Screen name="manage-accounts" options={{ presentation: 'card' }} />
         <Stack.Screen name="household" options={{ presentation: 'card' }} />
         <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
         <Stack.Screen name="loan-detail" options={{ presentation: 'card' }} />

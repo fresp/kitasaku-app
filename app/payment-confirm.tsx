@@ -7,6 +7,7 @@ import { formatRupiah } from '../lib/format';
 import { pendingTransactions } from '../lib/mockData';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
+import { accountSubline } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { BrandIcon } from '../components/ui/BrandIcon';
@@ -43,7 +44,7 @@ export default function PaymentConfirmScreen() {
   // decrement the obligation twice.
   const payable = !liveTxn || canMarkAsPaid(liveTxn);
 
-  const accountOptions = (accsQ.data ?? []).map((a) => ({ id: a.id, name: a.name }));
+  const accountOptions = accsQ.data ?? [];
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isFinal, setIsFinal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -149,6 +150,7 @@ export default function PaymentConfirmScreen() {
           ) : (
             accountOptions.map((a) => {
               const active = a.id === selectedAccountId;
+              const sub = accountSubline(a);
               return (
                 <Pressable
                   key={a.id}
@@ -157,6 +159,9 @@ export default function PaymentConfirmScreen() {
                 >
                   <Text style={[styles.pillText, active && styles.pillTextActive]}>
                     {active ? `✓ ${a.name}` : a.name}
+                  </Text>
+                  <Text style={[styles.pillSub, active && styles.pillSubActive]}>
+                    {sub}
                   </Text>
                 </Pressable>
               );
@@ -242,12 +247,33 @@ const styles = StyleSheet.create({
   sectionLabel: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
   pills: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   pill: {
-    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.pill,
-    paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 2,
+    backgroundColor: Colors.surface,
   },
-  pillActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
-  pillText: { color: Colors.textPrimary, fontWeight: '600' },
-  pillTextActive: { color: Colors.white },
+  pillActive: {
+    backgroundColor: Colors.brandPrimary,
+    borderColor: Colors.brandPrimary,
+  },
+  pillText: {
+    color: Colors.textPrimary,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  pillTextActive: {
+    color: Colors.white,
+  },
+  pillSub: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+  },
+  pillSubActive: {
+    color: Colors.white + 'D9',
+  },
   toggleCard: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   toggleLabel: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
