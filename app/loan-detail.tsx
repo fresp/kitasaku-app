@@ -51,7 +51,7 @@ import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
  * stored, the card shows the derived display default AND says it is a guess
  * (`derived`), because a plan nobody chose should not look chosen.
  */
-export default function DetailPinjamanScreen() {
+export default function LoanDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { household } = useAuth();

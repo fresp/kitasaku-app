@@ -163,7 +163,7 @@ export default function ObligationsScreen() {
             householdId={householdId}
             cycleId={cycleQ.data?.id}
             onPressDetail={() =>
-              router.push({ pathname: '/detail-pinjaman', params: { id: o.id } })
+              router.push({ pathname: '/loan-detail', params: { id: o.id } })
             }
           />
         ))}

@@ -98,7 +98,7 @@ function parseAmount(t: string): number {
   return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
 }
 
-export default function KelolaKategoriScreen() {
+export default function ManageCategoriesScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;

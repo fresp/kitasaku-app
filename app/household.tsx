@@ -43,7 +43,7 @@ import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
  * partner had left.
  */
 
-export default function RuangKeluargaScreen() {
+export default function HouseholdScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ focus?: string }>();
   const { household, membership, refresh } = useAuth();

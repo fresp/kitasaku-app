@@ -85,12 +85,12 @@ function Gate() {
         <Stack.Screen name="new-cycle" options={{ presentation: 'card' }} />
         <Stack.Screen name="templates" options={{ presentation: 'card' }} />
         <Stack.Screen name="category-detail" options={{ presentation: 'card' }} />
-        <Stack.Screen name="kelola-kategori" options={{ presentation: 'card' }} />
-        <Stack.Screen name="ruang-keluarga" options={{ presentation: 'card' }} />
+        <Stack.Screen name="manage-categories" options={{ presentation: 'card' }} />
+        <Stack.Screen name="household" options={{ presentation: 'card' }} />
         <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
-        <Stack.Screen name="detail-pinjaman" options={{ presentation: 'card' }} />
+        <Stack.Screen name="loan-detail" options={{ presentation: 'card' }} />
         <Stack.Screen name="funding-gap" options={{ presentation: 'card' }} />
-        <Stack.Screen name="insight-aset" options={{ presentation: 'card' }} />
+        <Stack.Screen name="asset-insight" options={{ presentation: 'card' }} />
         <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
         <Stack.Screen
           name="payment-confirm"

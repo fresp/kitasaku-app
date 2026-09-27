@@ -103,12 +103,12 @@ valid day rather than a number that grows forever.
 **`app/(tabs)/profile.tsx` — My Profile.** Eyebrow "AKUN & RUANG KELUARGA",
 editable identity card (initials, name, role badge), a household summary card
 reading `paydayLabel(..., 'row')`, then four groups: KEUANGAN (Insight & Aset
-2026 — no handler yet, 5C; Kelola Kategori → `/kelola-kategori`), RUANG KELUARGA
-(Ruang Keluarga, Undang Pasangan → `/ruang-keluarga?focus=invite`, and the
+2026 — no handler yet, 5C; Kelola Kategori → `/manage-categories`), RUANG KELUARGA
+(Ruang Keluarga, Undang Pasangan → `/household?focus=invite`, and the
 notify switch), AKUN (Preferensi tampilan and Keamanan & privasi, rendered
 disabled with a "Segera" badge rather than as dead links), and sign out.
 
-**`app/ruang-keluarga.tsx` — Ruang Keluarga (Screen 14).** Name + payday form
+**`app/household.tsx` — Ruang Keluarga (Screen 14).** Name + payday form
 behind the pencil; invite card with copy (2s "Tersalin"), WhatsApp, and a QR
 toggle; roster with per-member avatar/name/role/email; a notify switch; and a
 footer count.
@@ -153,7 +153,7 @@ would look like it worked when it did not.
 - `npx expo lint` — the 2 pre-existing problems
   (`app/(auth)/setup-choice.tsx:27`, `app/_layout.tsx:32`). One new finding was
   introduced and fixed during this phase: `react-hooks/set-state-in-effect` in
-  `ruang-keluarga.tsx`, resolved by initialising `showQr` from the route param
+  `household.tsx`, resolved by initialising `showQr` from the route param
   instead of syncing it in an effect.
 
 ## Not done in this phase

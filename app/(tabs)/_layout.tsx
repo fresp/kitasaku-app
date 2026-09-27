@@ -13,7 +13,7 @@ import { useHouseholdRealtime } from '../../lib/realtime';
 /**
  * The design's bottom nav is four destinations: Home, Tanggungan, Riwayat,
  * My Profile (`BottomNavigation / main-4` in design.pen). Budget Health moved
- * to `app/budget-health.tsx` and Kelola Kategori stays at `app/kelola-kategori.tsx`
+ * to `app/budget-health.tsx` and Kelola Kategori stays at `app/manage-categories.tsx`
  * — both reached from the screens that need them, which is where the design
  * puts them too (Budget Health from Tanggungan, Kelola Kategori from My
  * Profile's breadcrumb).

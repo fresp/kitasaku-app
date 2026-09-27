@@ -94,49 +94,49 @@ export default function ProfileScreen() {
     }
   }
 
-  const keuangan: MenuRow[] = [
+  const financeRows: MenuRow[] = [
     {
       key: 'insight',
       icon: Landmark,
       title: 'Insight & Aset 2026',
       sub: 'Analisis tren bulanan, cashflow, aset likuid & kewajiban',
       tone: 'paid',
-      onPress: () => router.push('/insight-aset'),
+      onPress: () => router.push('/asset-insight'),
     },
     {
-      key: 'kategori',
+      key: 'categories',
       icon: Sparkles,
       title: 'Kelola Kategori',
       sub: 'Atur kategori pengeluaran dan ikon',
       tone: 'alert',
-      onPress: () => router.push('/kelola-kategori'),
+      onPress: () => router.push('/manage-categories'),
     },
   ];
 
-  const ruangKeluarga: MenuRow[] = [
+  const householdRows: MenuRow[] = [
     {
-      key: 'rumah',
+      key: 'household',
       icon: Users,
       title: 'Ruang Keluarga',
       sub: household
         ? `${household.name} · ${household.payday_day ? paydayLabel(household.payday_day, 'meta') : 'payday belum diatur'}`
         : 'Belum terhubung',
       tone: 'default',
-      onPress: () => router.push('/ruang-keluarga'),
+      onPress: () => router.push('/household'),
     },
     {
-      key: 'undang',
+      key: 'invite',
       icon: Users,
       title: 'Undang Pasangan',
       sub: 'Bagikan kode atau QR untuk bergabung',
       tone: 'default',
-      onPress: () => router.push({ pathname: '/ruang-keluarga', params: { focus: 'invite' } }),
+      onPress: () => router.push({ pathname: '/household', params: { focus: 'invite' } }),
     },
   ];
 
-  const akun: MenuRow[] = [
-    { key: 'tampilan', icon: Palette, title: 'Preferensi tampilan', tone: 'default' },
-    { key: 'keamanan', icon: ShieldCheck, title: 'Keamanan & privasi', tone: 'default' },
+  const accountRows: MenuRow[] = [
+    { key: 'appearance', icon: Palette, title: 'Preferensi tampilan', tone: 'default' },
+    { key: 'security', icon: ShieldCheck, title: 'Keamanan & privasi', tone: 'default' },
   ];
 
   return (
@@ -214,14 +214,14 @@ export default function ProfileScreen() {
 
         <Text style={styles.section}>KEUANGAN</Text>
         <View style={styles.group}>
-          {keuangan.map((r, i) => (
+          {financeRows.map((r, i) => (
             <MenuRowView key={r.key} row={r} first={i === 0} />
           ))}
         </View>
 
         <Text style={styles.section}>RUANG KELUARGA</Text>
         <View style={styles.group}>
-          {ruangKeluarga.map((r, i) => (
+          {householdRows.map((r, i) => (
             <MenuRowView key={r.key} row={r} first={i === 0} />
           ))}
           <View style={[styles.row, styles.rowBordered]}>
@@ -246,7 +246,7 @@ export default function ProfileScreen() {
 
         <Text style={styles.section}>AKUN</Text>
         <View style={styles.group}>
-          {akun.map((r, i) => (
+          {accountRows.map((r, i) => (
             <MenuRowView key={r.key} row={r} first={i === 0} soon />
           ))}
         </View>

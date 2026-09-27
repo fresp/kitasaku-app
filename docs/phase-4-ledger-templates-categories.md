@@ -99,7 +99,7 @@ writing `categories.monthly_budget`, plus a separate insight for the no-pagu
 case. It keeps the pending/paid split visible: the paid count is what the health
 figure is measured against, and the screen states how many rows are excluded.
 
-**Kelola Kategori** (`app/kelola-kategori.tsx`, new) is the category manager.
+**Kelola Kategori** (`app/manage-categories.tsx`, new) is the category manager.
 System categories are listed **first and separately**, because they are not the
 family's data — they are the app's vocabulary, and burying them among custom
 rows invites an attempt to delete one. They can be renamed, not removed.

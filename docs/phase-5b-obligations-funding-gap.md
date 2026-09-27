@@ -146,7 +146,7 @@ move until a payment is recorded. The panel text spells that out, because
 conflating the two is how a family ends up thinking a debt is paid when only
 the budget was reserved.
 
-### `app/detail-pinjaman.tsx` — Screen - Detail Pinjaman
+### `app/loan-detail.tsx` — Screen - Detail Pinjaman
 
 Loan hero (`SISA PINJAMAN`, "N% dibayar", amount, track, "Diterima 25 September
 2026 • Dana masuk ke Mandiri"), the RINGKASAN KEWAJIBAN card (total principal /

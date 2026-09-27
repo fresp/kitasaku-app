@@ -93,7 +93,7 @@ function expenseTone(actual: number, planned: number): string {
   return Colors.chartIncome;
 }
 
-export default function InsightAsetScreen() {
+export default function AssetInsightScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;

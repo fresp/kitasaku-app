@@ -106,7 +106,7 @@ export default function BudgetHealthScreen() {
             <Text style={styles.eyebrow}>RINGKASAN ANGGARAN</Text>
             <Text style={styles.title}>Budget Health</Text>
           </View>
-          <Pressable onPress={() => router.push('/kelola-kategori')} style={styles.manageBtn}>
+          <Pressable onPress={() => router.push('/manage-categories')} style={styles.manageBtn}>
             <SlidersHorizontal size={13} color={Colors.textPrimary} />
             <Text style={styles.manageText}>Kelola</Text>
           </Pressable>
@@ -167,7 +167,7 @@ export default function BudgetHealthScreen() {
               Belum ada kategori pengeluaran. Buat ruang keluarga untuk seed otomatis,
               atau tambahkan sendiri di Kelola Kategori.
             </Text>
-            <Pressable onPress={() => router.push('/kelola-kategori')}>
+            <Pressable onPress={() => router.push('/manage-categories')}>
               <Text style={styles.emptyLink}>Kelola kategori →</Text>
             </Pressable>
           </View>

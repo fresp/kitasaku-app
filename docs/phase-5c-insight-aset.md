@@ -136,7 +136,7 @@ two years with data and a three-year range.
 
 ## 6. Screen
 
-`app/insight-aset.tsx` lays out the seven sections. Controls use the existing
+`app/asset-insight.tsx` lays out the seven sections. Controls use the existing
 `SegmentedTabs` (range, asset view, plan-vs-actual metric) and chips. The
 category chip in the expenses section re-derives its buckets with
 `expenseCategoryId` rather than filtering the finished ones — filtering after
