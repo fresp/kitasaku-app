@@ -67,6 +67,24 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           qc.invalidateQueries({ queryKey: ['accs'] });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cycle_allocations', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['alloc'] });
+          qc.invalidateQueries({ queryKey: ['zero-summary'] });
+          qc.invalidateQueries({ queryKey: ['oblig'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'obligation_installments', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['alloc'] });
+          qc.invalidateQueries({ queryKey: ['zero-summary'] });
+          qc.invalidateQueries({ queryKey: ['oblig'] });
+        }
+      )
       .subscribe();
 
     return () => {
