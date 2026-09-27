@@ -5,7 +5,8 @@ import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { useAccounts, useCategories, useCreateCycle, useTemplates } from '../lib/queries';
+import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
+import { calculateFundingGap, calculateUnallocatedFunds } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
@@ -20,6 +21,7 @@ export default function NewCycleScreen() {
   const tmplQ = useTemplates(householdId);
   const catsQ = useCategories(householdId);
   const accsQ = useAccounts(householdId);
+  const obligQ = useObligations(householdId);
   const createCycle = useCreateCycle();
 
   const activeTemplates = useMemo(
@@ -33,6 +35,10 @@ export default function NewCycleScreen() {
   const [end, setEnd] = useState('2026-11-24');
   const [incomeText, setIncomeText] = useState('15844000');
   const [err, setErr] = useState<string | null>(null);
+  // Obligations settled within this cycle. All open ones are selected by
+  // default because a carried-over debt is not optional spending — leaving one
+  // out is what creates a silent funding gap.
+  const [obligChecked, setObligChecked] = useState<Record<string, boolean> | null>(null);
 
   const isChecked = (id: string, fallback = true) =>
     checked ? (checked[id] ?? fallback) : fallback;
@@ -41,15 +47,36 @@ export default function NewCycleScreen() {
 
   const selected = activeTemplates.filter((t) => isChecked(t.id));
   const totalRecurring = selected.reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+
+  const openObligations = useMemo(
+    () => (obligQ.data ?? []).filter((o) => o.remaining_amount > 0 && o.status !== 'SETTLED' && o.status !== 'CANCELLED'),
+    [obligQ.data]
+  );
+  const isObligChecked = (id: string) => (obligChecked ? (obligChecked[id] ?? true) : true);
+  const selectedObligations = openObligations.filter((o) => isObligChecked(o.id));
+  const totalDebtPayment = selectedObligations.reduce((s, o) => s + o.remaining_amount, 0);
+
   const income = parseAmount(incomeText);
-  const remaining = income - totalRecurring;
+  // The planned allocation is everything this cycle has already committed to,
+  // before any voluntary savings. What is left is unallocated, not "sisa bersih"
+  // — zero-based means it still needs a purpose.
+  const requiredAllocation = totalRecurring + totalDebtPayment;
+  const fundingGap = calculateFundingGap(requiredAllocation, income);
+  const unallocated = calculateUnallocatedFunds(income, requiredAllocation);
+  const canOpen = fundingGap === 0;
 
   async function submit() {
     setErr(null);
     if (!householdId) { setErr('Login dulu untuk membuka siklus.'); return; }
     if (selected.length === 0 && income <= 0) { setErr('Pilih minimal 1 pos rutin atau isi pemasukan.'); return; }
+    if (!canOpen) {
+      setErr(
+        `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas aset, atau catat pinjaman baru dulu.`
+      );
+      return;
+    }
     try {
-      await createCycle.mutateAsync({
+      const cycle = await createCycle.mutateAsync({
         householdId,
         name: cycleName.trim() || 'Siklus Baru',
         start, end,
@@ -63,6 +90,7 @@ export default function NewCycleScreen() {
           direction: t.direction,
         })),
       });
+      void cycle;
       router.replace('/(tabs)');
     } catch (e: any) { setErr(e?.message ?? 'Gagal membuka siklus.'); }
   }
@@ -120,9 +148,71 @@ export default function NewCycleScreen() {
           );
         })}
 
+        <Text style={styles.label}>
+          PEMBAYARAN KEWAJIBAN SIKLUS INI ({openObligations.length} TANGGUNGAN AKTIF)
+        </Text>
+        {openObligations.length === 0 ? (
+          <Text style={styles.muted}>Tidak ada tanggungan terbuka yang dibawa ke siklus ini.</Text>
+        ) : (
+          openObligations.map((o) => {
+            const on = isObligChecked(o.id);
+            return (
+              <Pressable
+                key={o.id}
+                onPress={() => setObligChecked((p) => ({ ...(p ?? {}), [o.id]: !on }))}
+                style={styles.obligRow}
+              >
+                <View style={[styles.check, on && styles.checkOn]}>
+                  <Text style={[styles.checkText, on && styles.checkTextOn]}>{on ? '✓' : ''}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tplName}>{o.title}</Text>
+                  <Text style={styles.muted}>
+                    {o.type} • Sisa {formatRupiah(o.remaining_amount)}
+                    {o.due_date ? ` • Jatuh tempo ${o.due_date}` : ''}
+                  </Text>
+                </View>
+                <Text style={styles.obligAmt}>{formatRupiah(o.remaining_amount)}</Text>
+              </Pressable>
+            );
+          })
+        )}
+        <Text style={styles.note}>
+          Penerimaan pinjaman tidak dianggap income rutin dan tidak di-clone ke siklus berikutnya.
+        </Text>
+
         <View style={styles.projection}>
-          <Text style={styles.muted}>Pemasukan {formatRupiah(income)} − Rutin {formatRupiah(totalRecurring)}</Text>
-          <Text style={styles.remaining}>Estimasi Sisa Bersih {formatRupiah(remaining)}</Text>
+          <Text style={styles.projLabel}>ZERO-BASED ALLOCATION SIKLUS INI</Text>
+          <ProjRow label={`+ Pemasukan (${selected.length} pos rutin)`} value={income} />
+          <ProjRow label={`− Pengeluaran rutin`} value={-totalRecurring} />
+          <ProjRow label={`− Pembayaran kewajiban (${selectedObligations.length})`} value={-totalDebtPayment} />
+          <View style={styles.projDivider} />
+          {fundingGap > 0 ? (
+            <>
+              <ProjRow label="= Funding Gap (Kebutuhan Pendanaan)" value={fundingGap} tone="gap" />
+              <Text style={styles.projNote}>
+                Kebutuhan {formatRupiah(requiredAllocation)} melebihi sumber dana {formatRupiah(income)}.
+                Siklus tidak dapat dibuka selama Funding Gap belum tertutup.
+              </Text>
+              <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
+              <Text style={styles.strategy}>• Tambah Pendapatan</Text>
+              <Text style={styles.strategy}>• Pencairan Aset (Asset Release) — catat lewat Quick Add</Text>
+              <Text style={styles.strategy}>• Pinjaman Baru (Financing Inflow) — catat lewat Quick Add</Text>
+            </>
+          ) : (
+            <>
+              <ProjRow
+                label="= Dana belum dialokasikan"
+                value={unallocated}
+                tone={unallocated > 0 ? 'warn' : 'ok'}
+              />
+              <Text style={styles.projNote}>
+                {unallocated > 0
+                  ? `${formatRupiah(unallocated)} belum punya tujuan. Alokasikan penuh ke Belanja, Pelunasan Utang, & Tabungan/Aset hingga tersisa Rp 0.`
+                  : 'Seluruh dana telah dialokasikan penuh (Unallocated Funds = Rp 0).'}
+              </Text>
+            </>
+          )}
         </View>
 
         {err && (
@@ -131,11 +221,40 @@ export default function NewCycleScreen() {
           </View>
         )}
 
-        <PrimaryButton label={createCycle.isPending ? 'Membuka…' : `Buka ${cycleName}`} onPress={submit} />
+        <PrimaryButton
+          label={createCycle.isPending ? 'Membuka…' : canOpen ? `Buka ${cycleName}` : 'Tutup Funding Gap Dulu'}
+          onPress={submit}
+        />
         <SecondaryButton label="Kembali" onPress={() => router.back()} />
         <Badge label="Pos COMPLETED otomatis tidak muncul di daftar ini" />
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function ProjRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: 'gap' | 'warn' | 'ok';
+}) {
+  const color = tone === 'gap'
+    ? Colors.pendingBorder
+    : tone === 'warn'
+      ? Colors.financingBorder
+      : tone === 'ok'
+        ? Colors.paidBg
+        : Colors.white;
+  return (
+    <View style={styles.projRow}>
+      <Text style={styles.projRowLabel}>{label}</Text>
+      <Text style={[styles.projRowValue, { color }]}>
+        {value < 0 ? `−${formatRupiah(Math.abs(value))}` : formatRupiah(value)}
+      </Text>
+    </View>
   );
 }
 
@@ -158,7 +277,17 @@ const styles = StyleSheet.create({
   tplName: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
   amtInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.sm, paddingHorizontal: 10, height: 40, marginTop: 6, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.surface },
   projection: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.md, padding: 14, gap: 4 },
-  remaining: { color: Colors.white, fontWeight: '700', fontSize: 16, fontVariant: ['tabular-nums'] },
+  projLabel: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
+  projRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  projRowLabel: { color: Colors.borderStrong, fontSize: FontSize.caption, flex: 1 },
+  projRowValue: { fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  projDivider: { height: 1, backgroundColor: Colors.heroFooter, marginVertical: 4 },
+  projNote: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16, marginTop: 2 },
+  strategiesTitle: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginTop: 8 },
+  strategy: { color: Colors.borderStrong, fontSize: FontSize.caption, lineHeight: 18 },
+  obligRow: { flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, alignItems: 'center' },
+  obligAmt: { color: Colors.textPrimary, fontWeight: '600', fontSize: FontSize.body, fontVariant: ['tabular-nums'] },
+  note: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
 });

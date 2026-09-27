@@ -38,6 +38,7 @@ function Gate() {
       <Stack.Screen name="new-cycle" options={{ presentation: 'card' }} />
       <Stack.Screen name="templates" options={{ presentation: 'card' }} />
       <Stack.Screen name="category-detail" options={{ presentation: 'card' }} />
+      <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
       <Stack.Screen
         name="payment-confirm"
         options={{ presentation: 'modal', animation: 'slide_from_bottom' }}

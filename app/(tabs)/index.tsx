@@ -3,12 +3,13 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
+import Calendar from 'lucide-react-native/icons/calendar';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../../constants/theme';
-import { formatRupiahShort } from '../../lib/format';
 import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockData';
 import { useAuth } from '../../lib/auth-context';
-import { calcCashflow, useActiveCycle, useTransactions } from '../../lib/queries';
-import { HeroSplitCard } from '../../components/ui/HeroSplitCard';
+import { calcCashflow, useActiveCycle, useTransactions, useZeroBasedSummary } from '../../lib/queries';
+import { AllocationHeroCard } from '../../components/ui/AllocationHeroCard';
 import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
 import { TransactionRow, type RowItem } from '../../components/ui/TransactionRow';
 
@@ -44,6 +45,10 @@ export default function HomeScreen() {
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
   const txnsQ = useTransactions(householdId, cycleId);
+  // Planned mode: the hero answers "is this month's plan sound?" while there
+  // are still decisions to make. Actual mode would report zero allocatable
+  // funds on day one of the cycle, which is true but useless for planning.
+  const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
   // Realtime is mounted once in app/(tabs)/_layout.tsx so it stays alive on every tab.
 
   const live = !!householdId && !!cycleId && !!txnsQ.data;
@@ -61,13 +66,10 @@ export default function HomeScreen() {
   }, [live, txns, tab]);
 
   const cycleName = live ? (cycleQ.data!.name ?? 'Siklus Aktif') : mockCycle.name;
-  const cycleRange = live
-    ? `${cycleQ.data!.start_date} – ${cycleQ.data!.end_date}`
-    : mockCycle.dayLabel;
-  const actualCash = live ? flow.actualCash : mockCycle.actualCash;
-  const projected = live ? flow.projectedRemaining : mockCycle.projectedRemaining;
   const pendingCount = live ? flow.pendingCount : mockCycle.pendingCount;
   const paidCount = live ? flow.paidCount : mockCycle.paidCount;
+
+  const hasSummary = !!summaryQ.data;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -76,10 +78,10 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing || txnsQ.isFetching}
+            refreshing={refreshing || txnsQ.isFetching || summaryQ.isFetching}
             onRefresh={async () => {
               setRefreshing(true);
-              await Promise.all([cycleQ.refetch(), txnsQ.refetch()]);
+              await Promise.all([cycleQ.refetch(), txnsQ.refetch(), summaryQ.refetch()]);
               setRefreshing(false);
             }}
           />
@@ -102,11 +104,16 @@ export default function HomeScreen() {
         </View>
 
         <Pressable onPress={() => router.push('/new-cycle')} style={styles.cyclePill}>
-          <View>
-            <Text style={styles.cycleTitle}>{cycleName}</Text>
-            <Text style={styles.cycleRange}>{cycleRange} • Payday-to-Payday</Text>
+          <View style={styles.cycleLeft}>
+            <Calendar size={16} color={Colors.textSecondary} />
+            <View>
+              <Text style={styles.cycleTitle}>{cycleName}</Text>
+              <Text style={styles.cycleRange}>
+                {live ? `${cycleQ.data!.start_date} – ${cycleQ.data!.end_date}` : mockCycle.dayLabel} • Payday-to-Payday
+              </Text>
+            </View>
           </View>
-          <Text style={styles.chevron}>›</Text>
+          <ChevronRight size={16} color={Colors.textMuted} />
         </Pressable>
 
         {!householdId && (
@@ -117,12 +124,30 @@ export default function HomeScreen() {
           </Pressable>
         )}
 
-        <HeroSplitCard
-          actualCash={actualCash}
-          projectedRemaining={projected}
-          projectedSub={`Setelah ${pendingCount} tanggungan`}
-          footLeft={`● Terproyeksi ${projected >= 0 ? 'aman' : 'minus'} • Buffer ${formatRupiahShort(Math.abs(projected))}`}
-        />
+        {hasSummary ? (
+          <AllocationHeroCard
+            summary={summaryQ.data!}
+            cycleName={cycleName}
+            onPressDetail={() => router.push('/allocation')}
+          />
+        ) : (
+          <View style={styles.heroPlaceholder}>
+            <Text style={styles.heroPlaceholderText}>
+              {householdId && cycleId
+                ? 'Menghitung alokasi siklus…'
+                : 'Login untuk melihat alokasi zero-based siklus ini.'}
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.aksi}>
+          <Text style={styles.aksiTitle}>Aksi siklus ini</Text>
+          <AksiRow label="Tambah transaksi" onPress={() => router.push('/quick-add')} />
+          <AksiRow label="Catat pemasukan" onPress={() => router.push('/quick-add')} />
+          <AksiRow label="Alokasikan dana" onPress={() => router.push('/allocation')} />
+          <AksiRow label="Catat pinjaman" onPress={() => router.push('/quick-add')} />
+          <AksiRow label="Kelola tanggungan" onPress={() => router.push('/(tabs)/obligations')} />
+        </View>
 
         <SegmentedTabs
           activeKey={tab}
@@ -184,6 +209,16 @@ export default function HomeScreen() {
   );
 }
 
+function AksiRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={styles.aksiRow}>
+      <Text style={styles.aksiDot}>•</Text>
+      <Text style={styles.aksiLabel}>{label}</Text>
+      <ChevronRight size={14} color={Colors.textMuted} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.surface },
   container: { padding: 16, gap: 12, paddingBottom: 96 },
@@ -196,17 +231,29 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 16 },
   cyclePill: {
-    backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 12,
+    backgroundColor: Colors.subtle, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
-  cycleTitle: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
-  cycleRange: { color: Colors.textSecondary, fontSize: FontSize.body, marginTop: 2 },
-  chevron: { color: Colors.textMuted, fontSize: 22 },
+  cycleLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cycleTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.body },
+  cycleRange: { color: Colors.textSecondary, fontSize: FontSize.caption, marginTop: 1 },
   offline: { backgroundColor: Colors.alertBg, borderRadius: Radius.md, padding: 10 },
   offlineText: { color: Colors.alertText, fontSize: FontSize.body, fontWeight: '600' },
+  heroPlaceholder: {
+    backgroundColor: Colors.subtle, borderRadius: Radius.xl, padding: 24,
+  },
+  heroPlaceholderText: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
+  aksi: { backgroundColor: Colors.surface, borderRadius: Radius.md, padding: 12, gap: 4 },
+  aksiTitle: {
+    color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700',
+    letterSpacing: 0.8, marginBottom: 2,
+  },
+  aksiRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7 },
+  aksiDot: { color: Colors.brandPrimary, fontSize: FontSize.body },
+  aksiLabel: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '600' },
   listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  listTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  sort: { color: Colors.textMuted, fontSize: FontSize.body },
+  listTitle: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700' },
+  sort: { color: Colors.textMuted, fontSize: FontSize.caption },
   list: { gap: 10 },
   empty: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
   emptyBox: { gap: 8, paddingVertical: 16 },
