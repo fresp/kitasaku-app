@@ -39,6 +39,8 @@ function Gate() {
       <Stack.Screen name="templates" options={{ presentation: 'card' }} />
       <Stack.Screen name="category-detail" options={{ presentation: 'card' }} />
       <Stack.Screen name="kelola-kategori" options={{ presentation: 'card' }} />
+      <Stack.Screen name="ruang-keluarga" options={{ presentation: 'card' }} />
+      <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
       <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
       <Stack.Screen
         name="payment-confirm"

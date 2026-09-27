@@ -1,3 +1,4 @@
+import { displayNameFromEmail } from './profile';
 import { requireSupabase } from './supabase';
 
 export interface Membership {
@@ -5,12 +6,18 @@ export interface Membership {
   household_id: string;
   user_id: string;
   role: 'OWNER' | 'PARTNER';
+  /** Migration 007. Null on a database that has not run it yet. */
+  display_name?: string | null;
+  notify_partner_expense?: boolean;
 }
 
 export interface Household {
   id: string;
   name: string;
   invite_code: string | null;
+  /** Day of month the family gets paid; null = never set (migration 007). */
+  payday_day?: number | null;
+  created_at?: string;
 }
 
 export function generateInviteCode(name: string): string {
@@ -44,6 +51,155 @@ export async function getHousehold(id: string): Promise<Household | null> {
   const { data, error } = await sb.from('households').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return (data as Household | null) ?? null;
+}
+
+export interface HouseholdMember {
+  id: string;
+  user_id: string;
+  role: 'OWNER' | 'PARTNER';
+  display_name: string | null;
+  email: string | null;
+  notify_partner_expense: boolean;
+  joined_at: string;
+  is_me: boolean;
+}
+
+/**
+ * The family roster for Ruang Keluarga.
+ *
+ * The email comes from `auth.users` via a SECURITY DEFINER RPC (migration 007)
+ * because the client cannot read that table and the 001 policy on
+ * household_members only exposes the caller's own row. If 007 has not been run
+ * yet the RPC is missing, so this falls back to the direct select — which
+ * returns just the caller. That is a truthful degradation (a roster of one)
+ * rather than an empty screen, and `useHouseholdMembers` marks it as partial so
+ * the UI can say why.
+ */
+export async function listHouseholdMembers(householdId: string): Promise<{
+  members: HouseholdMember[];
+  partial: boolean;
+}> {
+  const sb = requireSupabase();
+  try {
+    const { data, error } = await sb.rpc('list_household_members', {
+      p_household_id: householdId,
+    });
+    if (error) throw error;
+    const rows = (Array.isArray(data) ? data : []) as HouseholdMember[];
+    if (rows.length > 0) {
+      return {
+        members: rows.map((r) => ({
+          ...r,
+          notify_partner_expense: r.notify_partner_expense ?? true,
+          display_name: r.display_name ?? null,
+          email: r.email ?? null,
+          is_me: r.is_me ?? false,
+        })),
+        partial: false,
+      };
+    }
+  } catch {
+    // migration 007 not run — fall through to the caller's own row.
+  }
+
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  const { data, error } = await sb
+    .from('household_members')
+    .select('*')
+    .eq('household_id', householdId);
+  if (error) throw error;
+  const rows = ((data ?? []) as Partial<HouseholdMember>[]).map((r) => ({
+    id: r.id!,
+    user_id: r.user_id!,
+    role: (r.role as 'OWNER' | 'PARTNER') ?? 'PARTNER',
+    display_name: r.display_name ?? null,
+    email: null,
+    notify_partner_expense: r.notify_partner_expense ?? true,
+    joined_at: r.joined_at ?? '',
+    is_me: r.user_id === user?.id,
+  }));
+  return { members: rows, partial: true };
+}
+
+/**
+ * Rename the household and/or set the payday day.
+ *
+ * 001 gave `households` a SELECT policy only, so this needs the UPDATE policy
+ * added in 007. Empty strings are rejected here as well as in the UI: the
+ * household name is the title of every screen that mentions the family, and a
+ * blank one would render as an empty header.
+ */
+export async function updateHousehold(args: {
+  id: string;
+  name?: string;
+  paydayDay?: number | null;
+}): Promise<Household> {
+  const sb = requireSupabase();
+  const patch: Record<string, string | number | null> = {};
+  if (args.name !== undefined) {
+    const name = args.name.trim();
+    if (name.length < 3) throw new Error('Nama ruang keluarga minimal 3 huruf.');
+    patch.name = name;
+  }
+  if (args.paydayDay !== undefined) {
+    if (args.paydayDay !== null && (args.paydayDay < 1 || args.paydayDay > 31)) {
+      throw new Error('Tanggal payday harus antara 1 dan 31.');
+    }
+    patch.payday_day = args.paydayDay;
+  }
+  if (Object.keys(patch).length === 0) {
+    const current = await getHousehold(args.id);
+    if (!current) throw new Error('Ruang keluarga tidak ditemukan.');
+    return current;
+  }
+  const { data, error } = await sb
+    .from('households')
+    .update(patch)
+    .eq('id', args.id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as Household;
+}
+
+/**
+ * Save the caller's own display name and/or expense-notification preference.
+ *
+ * Both columns live on household_members, and 001's `members_manage_household_tables`
+ * policy is `user_id = auth.uid()` — so this can only ever touch the caller's
+ * own row. It deliberately does NOT take a member id: passing someone else's id
+ * would silently no-op under RLS, which is a confusing failure.
+ */
+export async function updateMyMemberProfile(args: {
+  householdId: string;
+  displayName?: string;
+  notifyPartnerExpense?: boolean;
+}): Promise<void> {
+  const sb = requireSupabase();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) throw new Error('Belum login.');
+
+  const patch: Record<string, string | boolean> = {};
+  if (args.displayName !== undefined) {
+    const name = args.displayName.trim();
+    if (name.length < 2) throw new Error('Nama minimal 2 huruf.');
+    patch.display_name = name;
+  }
+  if (args.notifyPartnerExpense !== undefined) {
+    patch.notify_partner_expense = args.notifyPartnerExpense;
+  }
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await sb
+    .from('household_members')
+    .update(patch)
+    .eq('household_id', args.householdId)
+    .eq('user_id', user.id);
+  if (error) throw error;
 }
 
 export interface HouseholdPreview {
@@ -105,6 +261,10 @@ export async function createHousehold(name: string): Promise<Household> {
     household_id: (hh as Household).id,
     user_id: user.id,
     role: 'OWNER',
+    // The RPC seeds this from the email local-part (007); the fallback path
+    // (only reached when the RPC is missing) mirrors it so the profile is not
+    // nameless on a database that has not run 007 yet.
+    display_name: displayNameFromEmail(user.email),
   });
   if (mErr) throw mErr;
   return hh as Household;
@@ -142,6 +302,7 @@ export async function joinHouseholdByCode(code: string): Promise<Household> {
       household_id: (hh as Household).id,
       user_id: user.id,
       role: 'PARTNER',
+      display_name: displayNameFromEmail(user.email),
     },
     { onConflict: 'household_id,user_id' }
   );

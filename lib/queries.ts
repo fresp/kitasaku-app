@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { requireSupabase } from './supabase';
+import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
 import {
   calculateZeroBasedSummary,
   canMarkAsPaid,
@@ -950,5 +951,60 @@ export function useDeleteCategory() {
       // stale and must refetch.
       invalidateMoneyKeys(qc);
     },
+  });
+}
+
+// ============ Phase 5A: household roster and profile ============
+
+/**
+ * The family roster for Ruang Keluarga.
+ *
+ * `partial` is true when migration 007 has not been run: the RPC is missing, so
+ * the fallback can only return the caller's own row. The screen says so rather
+ * than presenting a roster of one as the whole truth — a silently short list
+ * would look like the partner had left the household.
+ */
+export function useHouseholdMembers(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['members', householdId],
+    enabled: !!householdId,
+    queryFn: () => listHouseholdMembers(householdId!),
+  });
+}
+
+/**
+ * Rename the household / set the payday day. Through `updateHousehold` so the
+ * validation and the 007 UPDATE policy are exercised in one place — the
+ * household name is the header on every screen that names the family, and a
+ * blank one renders as an empty title.
+ *
+ * Note the household row itself does NOT live in React Query: `AuthProvider`
+ * holds it in state and every screen reads it from `useAuth()`. So this
+ * mutation cannot refresh the title on its own — the caller must `await
+ * refresh()` from `useAuth()` after success, which is what Ruang Keluarga does.
+ */
+export function useUpdateHousehold() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; name?: string; paydayDay?: number | null }) =>
+      updateHousehold(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['members'] }),
+  });
+}
+
+/**
+ * The caller's own display name and notification preference. Scoped to
+ * `user_id = auth.uid()` by the 001 policy, so it can never touch the partner's
+ * row — the name shown against the partner is whatever they set for themselves.
+ */
+export function useUpdateMyMemberProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      householdId: string;
+      displayName?: string;
+      notifyPartnerExpense?: boolean;
+    }) => updateMyMemberProfile(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['members'] }),
   });
 }

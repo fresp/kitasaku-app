@@ -415,7 +415,12 @@ export function budgetFillPct(health: BudgetHealth): number {
   return Math.max(2, Math.min(100, health.ratioPct));
 }
 
-const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+/**
+ * Indonesian short months. Exported because `profile.ts` formats dates too
+ * ("Dibuat Sep 2026", "25 Sep – 24 Okt"); a second copy of this array is how
+ * one screen ends up saying "Agu" while another says "Aug".
+ */
+export const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 /** `2026-09-25` -> `25 Sep`. Returns null for anything unparseable. */
 export function formatShortDate(iso: string | null | undefined): string | null {

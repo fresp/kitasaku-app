@@ -2,18 +2,24 @@ import { useMemo } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
-import { Colors, FontSize, Radius } from '../../constants/theme';
-import { formatRupiah, formatRupiahShort } from '../../lib/format';
-import { useAuth } from '../../lib/auth-context';
-import { useActiveCycle, useCategories, useTransactionLedger } from '../../lib/queries';
-import { budgetFillPct, budgetHealthStatus } from '../../lib/zero-based';
-import type { BudgetHealthStatus } from '../../lib/zero-based';
-import { Badge } from '../../components/ui/Badge';
-import { BudgetRing } from '../../components/ui/BudgetRing';
+import { Colors, FontSize, Radius } from '../constants/theme';
+import { formatRupiah, formatRupiahShort } from '../lib/format';
+import { useAuth } from '../lib/auth-context';
+import { useActiveCycle, useCategories, useTransactionLedger } from '../lib/queries';
+import { budgetFillPct, budgetHealthStatus } from '../lib/zero-based';
+import type { BudgetHealthStatus } from '../lib/zero-based';
+import { Badge } from '../components/ui/Badge';
+import { BudgetRing } from '../components/ui/BudgetRing';
 
 /**
  * Screen 5 — Budget Health.
+ *
+ * Reached from Tanggungan ("Kewajiban & Reimburse") rather than from the bottom
+ * nav: the design's nav is Home / Tanggungan / Riwayat / My Profile, and the
+ * budget verdict belongs next to the obligations that consume it, not as a
+ * fourth destination competing with the ledger.
  *
  * Reads in `actual` mode: this screen judges what has been spent against the
  * pagu, so a PENDING row must not count as money already gone. The verdict for
@@ -28,7 +34,7 @@ const FILL_COLORS: Record<BudgetHealthStatus, string> = {
   NO_BUDGET: Colors.chartAxis,
 };
 
-export default function CategoriesScreen() {
+export default function BudgetHealthScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;
@@ -83,6 +89,13 @@ export default function CategoriesScreen() {
           />
         }
       >
+        <View style={styles.topBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <ArrowLeft size={18} color={Colors.textPrimary} />
+          </Pressable>
+          <Text style={styles.crumb}>Tanggungan / Budget Health</Text>
+        </View>
+
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.eyebrow}>RINGKASAN ANGGARAN</Text>
@@ -153,6 +166,12 @@ export default function CategoriesScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.canvas },
   container: { padding: 16, gap: 12, paddingBottom: 32 },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  backBtn: {
+    width: 32, height: 32, borderRadius: Radius.md, backgroundColor: Colors.surface,
+    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  },
+  crumb: { color: Colors.textSecondary, fontSize: FontSize.caption },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
   title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700' },

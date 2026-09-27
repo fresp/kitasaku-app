@@ -9,6 +9,7 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockData';
 import { useAuth } from '../../lib/auth-context';
 import { calcCashflow, useActiveCycle, useTransactions, useZeroBasedSummary } from '../../lib/queries';
+import { memberInitials } from '../../lib/profile';
 import { AllocationHeroCard } from '../../components/ui/AllocationHeroCard';
 import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
 import { TransactionRow, type RowItem } from '../../components/ui/TransactionRow';
@@ -71,6 +72,12 @@ export default function HomeScreen() {
 
   const hasSummary = !!summaryQ.data;
 
+  // Same glyph rule as My Profile and the roster, so the person who sees "AN"
+  // in the corner sees the same two letters on the profile screen they land on.
+  const avatarInitial = memberInitials(
+    membership?.display_name ?? household?.name ?? 'Keluarga'
+  );
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -96,10 +103,11 @@ export default function HomeScreen() {
               Halo{membership?.role === 'OWNER' ? ', Owner' : ''}
             </Text>
           </View>
-          <Pressable onPress={() => router.push('/(auth)/invite')} style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {(household?.name ?? 'A').slice(0, 1).toUpperCase()}
-            </Text>
+          {/* The avatar is the way into My Profile — the design's nav has a
+              My Profile tab, but tapping your own face is the reflex, and this
+              used to jump to the one-off post-signup invite screen. */}
+          <Pressable onPress={() => router.push('/(tabs)/profile')} style={styles.avatar}>
+            <Text style={styles.avatarText}>{avatarInitial}</Text>
           </Pressable>
         </View>
 
