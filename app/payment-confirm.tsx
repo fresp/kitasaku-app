@@ -9,6 +9,7 @@ import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
 function parseAmount(text: string): number {
@@ -80,12 +81,15 @@ export default function PaymentConfirmScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.settledBox}>
+          <BrandIcon name="context-payment" size={84} label="" />
           <Text style={styles.settledTitle}>Transaksi ini sudah lunas</Text>
           <Text style={styles.settledBody}>
             Tidak ada yang perlu dibayar lagi. Sisa tanggungan sudah diperbarui saat pembayaran
             pertama dicatat.
           </Text>
-          <PrimaryButton label="Kembali" onPress={() => router.back()} />
+          <View style={styles.settledAction}>
+            <PrimaryButton label="Kembali" onPress={() => router.back()} />
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -224,7 +228,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, fontVariant: ['tabular-nums'],
   },
   amountHint: { color: Colors.textMuted, fontSize: FontSize.body },
-  settledBox: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
+  settledBox: { flex: 1, padding: 24, gap: 12, justifyContent: 'center', alignItems: 'center' },
+  settledAction: { alignSelf: 'stretch', marginTop: 4 },
   settledTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
   settledBody: { color: Colors.textSecondary, fontSize: FontSize.body },
   row: {

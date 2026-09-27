@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
+import { BrandIcon } from '../../components/ui/BrandIcon';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useCreateObligation, useObligations } from '../../lib/queries';
@@ -137,6 +138,15 @@ export default function ObligationsScreen() {
 
         {!obligQ.isLoading && visible.length === 0 && (
           <View style={styles.emptyBox}>
+            <BrandIcon
+              name={
+                obligations.length === 0
+                  ? 'empty-tidak-ada-tagihan'
+                  : 'empty-data-tidak-ditemukan'
+              }
+              size={72}
+              label=""
+            />
             <Text style={styles.muted}>
               {obligations.length === 0
                 ? 'Belum ada tanggungan tercatat. Pinjaman yang kamu terima lewat Quick Add otomatis muncul di sini.'
@@ -205,7 +215,7 @@ const styles = StyleSheet.create({
   total: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '700', fontVariant: ['tabular-nums'] },
   sub: { color: Colors.borderStrong, fontSize: FontSize.body },
 
-  emptyBox: { paddingVertical: 16, paddingHorizontal: 4 },
+  emptyBox: { paddingVertical: 16, paddingHorizontal: 4, alignItems: 'center', gap: 10 },
   muted: { color: Colors.textMuted, fontSize: FontSize.body, lineHeight: 18 },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },

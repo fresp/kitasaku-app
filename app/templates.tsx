@@ -6,6 +6,8 @@ import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Plus from 'lucide-react-native/icons/plus';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../constants/theme';
+import { categoryIconName } from '../lib/category-icon';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
@@ -277,10 +279,16 @@ export default function TemplatesScreen() {
           return (
             <View key={t.id} style={[styles.card, t.status === 'ACTIVE' && styles.cardActive]}>
               <View style={styles.cardTop}>
-                <View style={[styles.cardIcon, t.status === 'ACTIVE' && styles.cardIconActive]}>
-                  <Text style={[styles.cardGlyph, t.status === 'ACTIVE' && styles.cardGlyphActive]}>
-                    {t.direction === 'INCOME' ? '↓' : '↑'}
-                  </Text>
+                <View style={styles.cardIcon}>
+                  <BrandIcon
+                    name={categoryIconName({
+                      name: t.categories?.name ?? '',
+                      type: t.direction,
+                      icon: t.categories?.icon,
+                    })}
+                    size={19}
+                    label=""
+                  />
                 </View>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.cardName}>{t.name}</Text>
@@ -327,6 +335,15 @@ export default function TemplatesScreen() {
 
         {!tmplQ.isLoading && list.length === 0 && (
           <View style={styles.emptyBox}>
+            <BrandIcon
+              name={
+                filter === 'ACTIVE'
+                  ? 'empty-belum-ada-rencana'
+                  : 'empty-data-tidak-ditemukan'
+              }
+              size={72}
+              label=""
+            />
             <Text style={styles.empty}>
               {filter === 'ACTIVE'
                 ? 'Belum ada template aktif. Tambahkan pos rutin supaya siklus baru terisi otomatis.'
@@ -416,15 +433,13 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   cardIconActive: { backgroundColor: Colors.brandPrimary },
-  cardGlyph: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  cardGlyphActive: { color: Colors.white },
   cardName: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
   cardMeta: { color: Colors.textSecondary, fontSize: FontSize.caption },
   cardAmount: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
   cardBottom: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   actionLink: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
   actionMuted: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700' },
-  emptyBox: { paddingVertical: 12 },
+  emptyBox: { paddingVertical: 16, alignItems: 'center', gap: 10 },
   empty: { color: Colors.textMuted, fontSize: FontSize.body },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },

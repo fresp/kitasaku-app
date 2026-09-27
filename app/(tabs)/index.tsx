@@ -10,17 +10,30 @@ import { activeCycle as mockCycle, pendingTransactions } from '../../lib/mockDat
 import { useAuth } from '../../lib/auth-context';
 import { calcCashflow, useActiveCycle, useTransactions, useZeroBasedSummary } from '../../lib/queries';
 import { memberInitials } from '../../lib/profile';
-import { AllocationHeroCard } from '../../components/ui/AllocationHeroCard';
-import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
-import { TransactionRow, type RowItem } from '../../components/ui/TransactionRow';
+import { formatRupiah } from '../../lib/format';
+import { categoryIconName } from '../../lib/category-icon';
+import { BrandIcon } from '../../components/ui/BrandIcon';
+import type { Txn } from '../../lib/queries';
+import type { RowItem } from '../../components/ui/TransactionRow';
 
-function toRow(t: any): RowItem {
+type HomeRow = RowItem & {
+  direction?: Txn['direction'];
+  /** The picker's choice, so both lists agree on the icon. */
+  categoryIcon?: string | null;
+  categoryType?: Txn['direction'];
+};
+
+function toRow(t: Txn): HomeRow {
   const planned = t.planned_amount ?? t.actual_amount ?? 0;
   const amount = t.status === 'PAID' ? (t.actual_amount ?? planned) : planned;
   return {
     id: t.id,
     name: t.name,
     category: t.categories?.name ?? 'Lainnya',
+    // Carried through so the row renders the same icon Riwayat does for this
+    // transaction, rather than re-deriving one from the name alone.
+    categoryIcon: t.categories?.icon ?? null,
+    categoryType: t.direction,
     account: t.accounts?.name ?? '—',
     amount,
     dueLabel: t.release_date
@@ -33,50 +46,58 @@ function toRow(t: any): RowItem {
     deltaText: t.obligation_id ? 'Tanggungan' : t.recurring_template_id ? 'Rutin' : 'Ad-hoc',
     obligationId: t.obligation_id ?? null,
     flowType: t.flow_type ?? null,
+    direction: t.direction,
   };
+}
+
+function signedRupiah(value: number): string {
+  return value < 0 ? `−${formatRupiah(Math.abs(value))}` : formatRupiah(value);
 }
 
 export default function HomeScreen() {
   const router = useRouter();
   const { household, membership } = useAuth();
   const householdId = household?.id;
-  const [tab, setTab] = useState('pending');
   const [refreshing, setRefreshing] = useState(false);
 
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
   const txnsQ = useTransactions(householdId, cycleId);
-  // Planned mode: the hero answers "is this month's plan sound?" while there
-  // are still decisions to make. Actual mode would report zero allocatable
-  // funds on day one of the cycle, which is true but useless for planning.
+  // The summary is still used by the cycle selector to route a funding gap to
+  // its explanation screen. The Home hero itself is intentionally lighter:
+  // it answers the cash question first, while allocation detail lives in its
+  // own screen.
   const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
-  // Realtime is mounted once in app/(tabs)/_layout.tsx so it stays alive on every tab.
 
   const live = !!householdId && !!cycleId && !!txnsQ.data;
   const txns = useMemo(() => (live ? txnsQ.data! : []), [live, txnsQ.data]);
   const flow = useMemo(() => calcCashflow(txns), [txns]);
-
-  const rows: RowItem[] = useMemo(() => {
-    if (live) {
-      const mapped = txns.map(toRow);
-      if (tab === 'pending') return mapped.filter((r) => r.status === 'PENDING');
-      if (tab === 'paid') return mapped.filter((r) => r.status === 'PAID');
-      return mapped;
+  const liveTotals = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    for (const txn of txns) {
+      if (txn.status !== 'PAID') continue;
+      if (txn.direction === 'INCOME') income += txn.actual_amount;
+      else expense += txn.actual_amount;
     }
-    return pendingTransactions as unknown as RowItem[];
-  }, [live, txns, tab]);
+    return { income, expense };
+  }, [txns]);
+
+  const homeRows = useMemo<HomeRow[]>(
+    () => (live ? txns.map(toRow).slice(0, 4) : (pendingTransactions.slice(0, 4) as HomeRow[])),
+    [live, txns]
+  );
 
   const cycleName = live ? (cycleQ.data!.name ?? 'Siklus Aktif') : mockCycle.name;
   const pendingCount = live ? flow.pendingCount : mockCycle.pendingCount;
   const paidCount = live ? flow.paidCount : mockCycle.paidCount;
+  const income = live ? liveTotals.income : 15_844_000;
+  const expense = live ? liveTotals.expense : 9_810_000;
+  const actualCash = live ? flow.actualCash : mockCycle.actualCash;
+  const projectedRemaining = live ? flow.projectedRemaining : mockCycle.projectedRemaining;
 
-  const hasSummary = !!summaryQ.data;
-
-  // Same glyph rule as My Profile and the roster, so the person who sees "AN"
-  // in the corner sees the same two letters on the profile screen they land on.
-  const avatarInitial = memberInitials(
-    membership?.display_name ?? household?.name ?? 'Keluarga'
-  );
+  const displayName = membership?.display_name?.trim() || 'Andra';
+  const avatarInitial = memberInitials(membership?.display_name ?? household?.name ?? 'Keluarga');
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -95,26 +116,23 @@ export default function HomeScreen() {
         }
       >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>
-              {(household?.name ?? 'KELUARGA ANDRA').toUpperCase()} • ACTION CENTER
-            </Text>
-            <Text style={styles.title}>
-              Halo{membership?.role === 'OWNER' ? ', Owner' : ''}
-            </Text>
+          <View style={styles.headerLeft}>
+            <BrandIcon name="context-home" size={34} label="" />
+            <View>
+              <Text style={styles.roomLabel}>Ruang keluarga</Text>
+              <Text style={styles.title}>Halo, {displayName}</Text>
+            </View>
           </View>
-          {/* The avatar is the way into My Profile — the design's nav has a
-              My Profile tab, but tapping your own face is the reflex, and this
-              used to jump to the one-off post-signup invite screen. */}
-          <Pressable onPress={() => router.push('/(tabs)/profile')} style={styles.avatar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Buka profil"
+            onPress={() => router.push('/(tabs)/profile')}
+            style={styles.avatar}
+          >
             <Text style={styles.avatarText}>{avatarInitial}</Text>
           </Pressable>
         </View>
 
-        {/* A cycle whose required allocation exceeds its source funds cannot be
-            planned against, so the pill opens the Funding Gap explanation
-            instead of the blank "open a cycle" form — landing someone on a form
-            when the answer is "you are short Rp 5jt" hides the actual problem. */}
         <Pressable
           onPress={() =>
             summaryQ.data?.status === 'FUNDING_GAP'
@@ -124,175 +142,229 @@ export default function HomeScreen() {
           style={styles.cyclePill}
         >
           <View style={styles.cycleLeft}>
-            <Calendar size={16} color={Colors.textSecondary} />
-            <View>
+            <View style={styles.calendarIcon}>
+              <Calendar size={14} color={Colors.textSecondary} />
+            </View>
+            <View style={styles.cycleCopy}>
               <Text style={styles.cycleTitle}>{cycleName}</Text>
               <Text style={styles.cycleRange}>
                 {live ? `${cycleQ.data!.start_date} – ${cycleQ.data!.end_date}` : mockCycle.dayLabel} • Payday-to-Payday
               </Text>
             </View>
           </View>
-          <ChevronRight size={16} color={Colors.textMuted} />
+          <ChevronRight size={17} color={Colors.textMuted} />
         </Pressable>
 
         {!householdId && (
           <Pressable onPress={() => router.push('/(auth)/setup-choice')} style={styles.offline}>
-            <Text style={styles.offlineText}>
-              Mode offline (mock) — ketuk untuk login & sinkron dengan pasangan →
-            </Text>
+            <Text style={styles.offlineText}>Mode offline — ketuk untuk login &amp; sinkron dengan pasangan</Text>
+            <ChevronRight size={15} color={Colors.alertText} />
           </Pressable>
         )}
 
-        {hasSummary ? (
-          <AllocationHeroCard
-            summary={summaryQ.data!}
-            cycleName={cycleName}
-            onPressDetail={() => router.push('/allocation')}
-          />
-        ) : (
-          <View style={styles.heroPlaceholder}>
-            <Text style={styles.heroPlaceholderText}>
-              {householdId && cycleId
-                ? 'Menghitung alokasi siklus…'
-                : 'Login untuk melihat alokasi zero-based siklus ini.'}
-            </Text>
+        <View style={styles.hero}>
+          <Text style={styles.heroLabel}>SALDO KAS RIIL</Text>
+          <Text style={styles.heroAmount}>{signedRupiah(actualCash)}</Text>
+          <Text style={styles.heroHelper}>Pemasukan cair dikurangi pengeluaran riil</Text>
+          <View style={styles.heroRule} />
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.incomeValue}>{formatRupiah(income)}</Text>
+              <Text style={styles.statLabel}>Pemasukan</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.expenseValue}>− {formatRupiah(expense)}</Text>
+              <Text style={styles.statLabel}>Pengeluaran</Text>
+            </View>
+          </View>
+          <Pressable onPress={() => router.push('/allocation')} style={styles.heroFooter}>
+            <Text style={styles.heroFooterLabel}>Estimasi sisa akhir</Text>
+            <Text style={styles.heroFooterValue}>{signedRupiah(projectedRemaining)} ›</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.quickActions}>
+          <Pressable onPress={() => router.push('/quick-add')} style={styles.primaryAction}>
+            <Plus size={15} color={Colors.white} />
+            <Text style={styles.primaryActionText}>Tambah transaksi</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/quick-add')} style={styles.secondaryAction}>
+            <Text style={styles.secondaryActionText}>Catat pemasukan</Text>
+          </Pressable>
+        </View>
+
+        {pendingCount > 0 && (
+          <View>
+            <SectionHeader title="Perlu perhatian" onPress={() => router.push('/(tabs)/history')} />
+            <Pressable onPress={() => router.push('/(tabs)/history')} style={styles.attention}>
+              <View style={styles.attentionIcon}><Text style={styles.attentionIconText}>!</Text></View>
+              <View style={styles.attentionCopy}>
+                <Text style={styles.attentionTitle}>{pendingCount} transaksi belum dibayar</Text>
+                <Text style={styles.attentionSubtitle} numberOfLines={1}>
+                  Terdekat · {homeRows.find((row) => row.status === 'PENDING')?.name ?? 'Periksa daftar transaksi'}
+                </Text>
+              </View>
+              <ChevronRight size={16} color={Colors.alertText} />
+            </Pressable>
           </View>
         )}
 
-        <View style={styles.aksi}>
-          <Text style={styles.aksiTitle}>Aksi siklus ini</Text>
-          <AksiRow label="Tambah transaksi" onPress={() => router.push('/quick-add')} />
-          <AksiRow label="Catat pemasukan" onPress={() => router.push('/quick-add')} />
-          <AksiRow label="Alokasikan dana" onPress={() => router.push('/allocation')} />
-          <AksiRow label="Catat pinjaman" onPress={() => router.push('/quick-add')} />
-          <AksiRow label="Kelola tanggungan" onPress={() => router.push('/(tabs)/obligations')} />
-        </View>
+        <SectionHeader title="Aktivitas terbaru" onPress={() => router.push('/(tabs)/history')} />
 
-        <SegmentedTabs
-          activeKey={tab}
-          onChange={setTab}
-          items={[
-            { key: 'pending', label: 'Belum Bayar', count: pendingCount },
-            { key: 'paid', label: 'Sudah Bayar', count: paidCount },
-            { key: 'all', label: 'Semua', count: pendingCount + paidCount },
-          ]}
-        />
-
-        <View style={styles.listHeader}>
-          <Text style={styles.listTitle}>
-            {tab === 'pending' ? 'Perlu dibayar minggu ini' : tab === 'paid' ? 'Sudah lunas' : 'Semua transaksi siklus'}
-          </Text>
-          <Text style={styles.sort}>Jatuh tempo ↓</Text>
-        </View>
-
-        {txnsQ.isLoading && live === false && householdId ? (
-          <Text style={styles.empty}>Memuat data keluarga…</Text>
-        ) : rows.length === 0 ? (
+        {txnsQ.isLoading && householdId ? (
+          <Text style={styles.empty}>Memuat aktivitas keluarga…</Text>
+        ) : homeRows.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.empty}>
-              {tab === 'pending'
-                ? 'Semua kewajiban lunas. Nikmati ketenangannya 🎉'
-                : 'Belum ada transaksi di tab ini.'}
-            </Text>
+            <BrandIcon name="empty-belum-ada-transaksi" size={72} label="" />
+            <Text style={styles.empty}>Belum ada aktivitas di siklus ini.</Text>
             <Pressable onPress={() => router.push('/quick-add')}>
-              <Text style={styles.emptyLink}>+ Catat transaksi ad-hoc</Text>
+              <Text style={styles.emptyLink}>+ Catat transaksi pertama</Text>
             </Pressable>
           </View>
         ) : (
-          <View style={styles.list}>
-            {rows.map((t) => (
-              <TransactionRow
-                key={t.id}
-                item={t}
-                onPay={(item) =>
-                  router.push({ pathname: '/payment-confirm', params: { id: item.id } })
+          <View style={styles.activityList}>
+            {homeRows.map((item) => (
+              <ActivityRow
+                key={item.id}
+                item={item}
+                onPress={() =>
+                  item.status === 'PENDING'
+                    ? router.push({ pathname: '/payment-confirm', params: { id: item.id } })
+                    : router.push('/(tabs)/history')
                 }
               />
             ))}
           </View>
         )}
 
-        <Pressable onPress={() => router.push('/templates')} style={styles.tplLink}>
-          <Text style={styles.tplLinkText}>Kelola Template Rutin →</Text>
+        <Pressable onPress={() => router.push('/(tabs)/history')} style={styles.allLink}>
+          <Text style={styles.allLinkText}>Lihat semua transaksi ({pendingCount + paidCount})</Text>
+          <ChevronRight size={14} color={Colors.textSecondary} />
         </Pressable>
       </ScrollView>
 
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="Tambah transaksi"
         onPress={() => router.push('/quick-add')}
         style={styles.fab}
       >
-        <Plus size={24} color={Colors.white} />
+        <Plus size={23} color={Colors.white} />
       </Pressable>
     </SafeAreaView>
   );
 }
 
-function AksiRow({ label, onPress }: { label: string; onPress: () => void }) {
+function SectionHeader({ title, onPress }: { title: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.aksiRow}>
-      <Text style={styles.aksiDot}>•</Text>
-      <Text style={styles.aksiLabel}>{label}</Text>
-      <ChevronRight size={14} color={Colors.textMuted} />
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Pressable onPress={onPress} hitSlop={8}>
+        <Text style={styles.sectionLink}>Lihat semua</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ActivityRow({ item, onPress }: { item: HomeRow; onPress: () => void }) {
+  const isIncome = item.direction === 'INCOME';
+  const isPaid = item.status === 'PAID';
+  const status = isPaid ? 'Lunas' : 'Belum dibayar';
+  const amount = `${isIncome ? '+' : '−'} ${formatRupiah(item.amount)}`;
+
+  return (
+    <Pressable onPress={onPress} style={styles.activityRow}>
+      <View style={styles.activityIcon}>
+        <BrandIcon
+          name={categoryIconName({
+            name: item.category,
+            type: item.categoryType ?? 'EXPENSE',
+            icon: item.categoryIcon,
+          })}
+          size={19}
+          label=""
+        />
+      </View>
+      <View style={styles.activityMain}>
+        <Text style={styles.activityName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.activityMeta} numberOfLines={1}>
+          {item.category} · {item.account} · {status}
+        </Text>
+      </View>
+      <View style={styles.activityAmount}>
+        <Text style={[styles.amountText, isIncome && styles.incomeText]} numberOfLines={1}>{amount}</Text>
+        <Text style={[styles.amountStatus, isPaid && styles.paidStatus]}>{isPaid ? 'Lunas' : 'Rencana'}</Text>
+      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.surface },
-  container: { padding: 16, gap: 12, paddingBottom: 96 },
+  safe: { flex: 1, backgroundColor: Colors.canvas },
+  container: { padding: 16, gap: 14, paddingBottom: 104 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 0.6 },
-  title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600', marginTop: 2 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  roomLabel: { color: Colors.textSecondary, fontSize: FontSize.caption, marginBottom: 2 },
+  title: { color: Colors.textPrimary, fontSize: 21, fontWeight: '700', letterSpacing: -0.4 },
   avatar: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.subtle,
+    width: 38, height: 38, borderRadius: 19, backgroundColor: '#DCEBE5',
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 16 },
+  avatarText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 13 },
   cyclePill: {
-    backgroundColor: Colors.subtle, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle,
+    paddingVertical: 9, paddingHorizontal: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
-  cycleLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cycleLeft: { flexDirection: 'row', alignItems: 'center', gap: 9, flex: 1 },
+  calendarIcon: { width: 26, height: 26, borderRadius: 8, backgroundColor: Colors.subtle, alignItems: 'center', justifyContent: 'center' },
+  cycleCopy: { flex: 1 },
   cycleTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.body },
-  cycleRange: { color: Colors.textSecondary, fontSize: FontSize.caption, marginTop: 1 },
-  offline: { backgroundColor: Colors.alertBg, borderRadius: Radius.md, padding: 10 },
-  offlineText: { color: Colors.alertText, fontSize: FontSize.body, fontWeight: '600' },
-  heroPlaceholder: {
-    backgroundColor: Colors.subtle, borderRadius: Radius.xl, padding: 24,
-  },
-  heroPlaceholderText: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
-  aksi: { backgroundColor: Colors.surface, borderRadius: Radius.md, padding: 12, gap: 4 },
-  aksiTitle: {
-    color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700',
-    letterSpacing: 0.8, marginBottom: 2,
-  },
-  aksiRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7 },
-  aksiDot: { color: Colors.brandPrimary, fontSize: FontSize.body },
-  aksiLabel: { flex: 1, color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '600' },
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  listTitle: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700' },
-  sort: { color: Colors.textMuted, fontSize: FontSize.caption },
-  list: { gap: 10 },
-  empty: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
-  emptyBox: { gap: 8, paddingVertical: 16 },
-  emptyLink: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center' },
-  tplLink: { paddingVertical: 8 },
-  tplLinkText: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center' },
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.brandPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-  },
+  cycleRange: { color: Colors.textSecondary, fontSize: 10, marginTop: 1 },
+  offline: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  offlineText: { color: Colors.alertText, fontSize: FontSize.caption, fontWeight: '600', flex: 1 },
+  hero: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16 },
+  heroLabel: { color: '#AEBCCD', fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.7, marginBottom: 7 },
+  heroAmount: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
+  heroHelper: { color: '#AEBCCD', fontSize: FontSize.caption, marginTop: 3 },
+  heroRule: { height: 1, backgroundColor: '#2E3E51', marginVertical: 14 },
+  statsRow: { flexDirection: 'row', gap: 22 },
+  stat: { flex: 1 },
+  incomeValue: { color: '#9DD9C2', fontSize: FontSize.currencyLarge, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  expenseValue: { color: Colors.white, fontSize: FontSize.currencyLarge, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  statLabel: { color: '#AEBCCD', fontSize: FontSize.caption, marginTop: 2 },
+  heroFooter: { marginTop: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  heroFooterLabel: { color: '#C8D5E0', fontSize: FontSize.caption },
+  heroFooterValue: { color: '#9DD9C2', fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  quickActions: { flexDirection: 'row', gap: 8 },
+  primaryAction: { flex: 1, minHeight: 38, borderRadius: 10, backgroundColor: Colors.brandPrimary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 10 },
+  primaryActionText: { color: Colors.white, fontSize: FontSize.caption, fontWeight: '700' },
+  secondaryAction: { minHeight: 38, borderRadius: 10, borderWidth: 1, borderColor: Colors.borderSubtle, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  secondaryActionText: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 },
+  sectionTitle: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700', letterSpacing: -0.2 },
+  sectionLink: { color: Colors.textSecondary, fontSize: FontSize.caption, fontWeight: '700' },
+  attention: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  attentionIcon: { width: 23, height: 23, borderRadius: 7, backgroundColor: '#FFEFC7', alignItems: 'center', justifyContent: 'center' },
+  attentionIconText: { color: Colors.alertText, fontWeight: '800', fontSize: FontSize.body },
+  attentionCopy: { flex: 1 },
+  attentionTitle: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  attentionSubtitle: { color: '#93651F', fontSize: 10, marginTop: 2 },
+  activityList: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, overflow: 'hidden' },
+  activityRow: { minHeight: 62, paddingHorizontal: 11, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: '#EEF2F5' },
+  activityIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: Colors.subtle, alignItems: 'center', justifyContent: 'center' },
+  activityGlyph: { color: Colors.textSecondary, fontSize: 12, fontWeight: '800' },
+  activityMain: { flex: 1, minWidth: 0 },
+  activityName: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  activityMeta: { color: Colors.textMuted, fontSize: 9.5, marginTop: 3 },
+  activityAmount: { alignItems: 'flex-end', maxWidth: 122 },
+  amountText: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  incomeText: { color: Colors.paidText },
+  amountStatus: { color: Colors.textMuted, fontSize: 9, marginTop: 3 },
+  paidStatus: { color: Colors.paidText },
+  empty: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center', paddingVertical: 12 },
+  emptyBox: { gap: 8, paddingVertical: 14 },
+  emptyLink: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center', fontSize: FontSize.body },
+  allLink: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 3, paddingVertical: 2 },
+  allLinkText: { color: Colors.textSecondary, fontSize: FontSize.caption, fontWeight: '700' },
+  fab: { position: 'absolute', right: 16, bottom: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 6 },
 });

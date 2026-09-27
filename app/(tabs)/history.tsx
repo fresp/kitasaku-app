@@ -8,6 +8,8 @@ import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
+import { categoryIconName } from '../../lib/category-icon';
+import { BrandIcon } from '../../components/ui/BrandIcon';
 import { useAuth } from '../../lib/auth-context';
 import { useAccounts, useActiveCycle, useTransactionLedger } from '../../lib/queries';
 import type { LedgerRow } from '../../lib/queries';
@@ -323,9 +325,15 @@ function LedgerRowView({ row, first }: { row: LedgerRow; first: boolean }) {
   return (
     <View style={[styles.row, !first && styles.rowBordered]}>
       <View style={[styles.iconBox, { backgroundColor: tone.bg, borderColor: tone.border }]}>
-        <Text style={[styles.iconGlyph, { color: tone.text }]}>
-          {isIncome ? '↓' : '↑'}
-        </Text>
+        <BrandIcon
+          name={categoryIconName({
+            name: row.categories?.name ?? '',
+            type: isIncome ? 'INCOME' : 'EXPENSE',
+            icon: row.categories?.icon,
+          })}
+          size={20}
+          label=""
+        />
       </View>
       <View style={styles.rowMid}>
         <Text style={styles.rowTitle} numberOfLines={1}>

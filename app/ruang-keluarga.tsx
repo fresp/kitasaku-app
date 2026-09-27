@@ -11,6 +11,7 @@ import Pencil from 'lucide-react-native/icons/pencil';
 import QrCode from 'lucide-react-native/icons/qr-code';
 import Share2 from 'lucide-react-native/icons/share-2';
 import { Colors, FontSize, Radius } from '../constants/theme';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { useAuth } from '../lib/auth-context';
 import { buildInviteMessage } from '../lib/household';
 import { useHouseholdMembers, useUpdateHousehold, useUpdateMyMemberProfile } from '../lib/queries';
@@ -157,7 +158,7 @@ export default function RuangKeluargaScreen() {
         <View style={styles.card}>
           <View style={styles.cardTop}>
             <View style={styles.familyBox}>
-              <Text style={styles.familyGlyph}>{memberInitials(household?.name ?? 'Keluarga')}</Text>
+              <BrandIcon name="context-family" size={40} label="" />
             </View>
             <View style={{ flex: 1, gap: 4 }}>
               <View style={styles.nameRow}>
@@ -365,7 +366,6 @@ const styles = StyleSheet.create({
     width: 48, height: 48, borderRadius: Radius.md, backgroundColor: Colors.subtle,
     alignItems: 'center', justifyContent: 'center',
   },
-  familyGlyph: { color: Colors.brandPrimary, fontSize: 18, fontWeight: '700' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700', flexShrink: 1 },
   meta: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 15 },

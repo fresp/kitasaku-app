@@ -10,7 +10,9 @@ import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useActiveCycle, useCategories, useTransactionLedger, useUpdateCategory } from '../lib/queries';
 import { budgetHealthStatus, formatShortDate } from '../lib/zero-based';
+import { categoryIconName } from '../lib/category-icon';
 import { Badge } from '../components/ui/Badge';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
 /**
@@ -72,7 +74,17 @@ export default function CategoryDetailScreen() {
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <ArrowLeft size={20} color={Colors.textPrimary} />
           </Pressable>
-          <Text style={styles.title} numberOfLines={1}>
+          <BrandIcon
+            name={categoryIconName({
+              name: cat?.name ?? '',
+              type: cat?.type ?? 'EXPENSE',
+              systemRole: cat?.system_role ?? null,
+              icon: cat?.icon,
+            })}
+            size={22}
+            label=""
+          />
+          <Text style={[styles.title, { flexShrink: 1 }]} numberOfLines={1}>
             {cat?.name ?? 'Kategori'}
           </Text>
           <View style={{ flex: 1 }} />
@@ -191,7 +203,10 @@ export default function CategoryDetailScreen() {
         })}
 
         {!ledgerQ.isLoading && items.length === 0 && (
-          <Text style={styles.muted}>Belum ada transaksi di kategori ini.</Text>
+          <View style={styles.emptyBox}>
+            <BrandIcon name="empty-belum-ada-transaksi" size={72} label="" />
+            <Text style={styles.muted}>Belum ada transaksi di kategori ini.</Text>
+          </View>
         )}
 
         {over > 0 && (
@@ -287,6 +302,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, padding: 12,
   },
   insightText: { flex: 1, color: Colors.alertText, fontSize: 13, lineHeight: 18 },
+  emptyBox: { alignItems: 'center', paddingVertical: 16, gap: 10 },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },

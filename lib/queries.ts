@@ -35,6 +35,13 @@ export type CategorySystemRole = 'DEBT_PAYMENT' | 'FINANCING_INFLOW';
 export interface Category {
   id: string; household_id: string; name: string; monthly_budget: number; type: string;
   is_system?: boolean; system_role?: CategorySystemRole | null;
+  /**
+   * The icon the family picked in Kelola Kategori (migration 009), or null when
+   * they have not picked one. Never read directly by a screen: pass it to
+   * `categoryIconName`, which falls back to a name-derived icon when this is
+   * null or names something the shipped pack does not have.
+   */
+  icon?: string | null;
 }
 export interface Account { id: string; household_id: string; name: string; type: string; }
 export interface Txn {
@@ -46,7 +53,7 @@ export interface Txn {
   created_by: string | null; executed_by: string | null;
   recipient: string | null; is_final_payment: boolean; created_at: string;
   // joined
-  categories?: { name: string } | null;
+  categories?: { name: string; icon?: string | null } | null;
   accounts?: { name: string } | null;
 }
 export interface Obligation {
@@ -69,7 +76,7 @@ export interface Template {
   status: 'ACTIVE' | 'COMPLETED'; notes: string | null;
   /** Day of month the bill is due; null = no known due day (migration 006). */
   due_day?: number | null;
-  categories?: { name: string } | null; accounts?: { name: string } | null;
+  categories?: { name: string; icon?: string | null } | null; accounts?: { name: string } | null;
 }
 export interface ObligationInstallment {
   id: string; household_id: string; obligation_id: string; cycle_id: string | null;
@@ -122,7 +129,7 @@ export function useTransactions(householdId: string | undefined, cycleId: string
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name), accounts(name)')
+        .select('*, categories(name, icon), accounts(name)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!)
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw error;
@@ -174,7 +181,7 @@ export function useTemplates(householdId: string | undefined) {
     queryFn: async (): Promise<Template[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('recurring_templates')
-        .select('*, categories(name), accounts(name)')
+        .select('*, categories(name, icon), accounts(name)')
         .eq('household_id', householdId!).order('name');
       if (error) throw error;
       return (data ?? []) as Template[];
@@ -419,7 +426,7 @@ export interface CycleAllocation {
   allocation_type: AllocationType; amount: number;
   category_id: string | null; obligation_id: string | null; account_id: string | null;
   note: string | null; created_by: string | null; created_at: string;
-  categories?: { name: string } | null;
+  categories?: { name: string; icon?: string | null } | null;
   obligations?: { title: string } | null;
   accounts?: { name: string } | null;
 }
@@ -481,7 +488,7 @@ export function useCycleAllocations(householdId: string | undefined, cycleId: st
     queryFn: async (): Promise<CycleAllocation[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('cycle_allocations')
-        .select('*, categories(name), obligations(title), accounts(name)')
+        .select('*, categories(name, icon), obligations(title), accounts(name)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!);
       if (error) throw error;
       return (data ?? []) as CycleAllocation[];
@@ -594,12 +601,12 @@ export function useYearInsight(householdId: string | undefined, year: number) {
       const cycleIds = cycles.map((c) => c.id);
       const [txnRes, allocRes] = await Promise.all([
         sb.from('transactions')
-          .select('*, categories(name), accounts(name)')
+          .select('*, categories(name, icon), accounts(name)')
           .eq('household_id', householdId!)
           .in('cycle_id', cycleIds)
           .limit(2000),
         sb.from('cycle_allocations')
-          .select('*, categories(name), obligations(title), accounts(name)')
+          .select('*, categories(name, icon), obligations(title), accounts(name)')
           .eq('household_id', householdId!)
           .in('cycle_id', cycleIds)
           .limit(2000),
@@ -833,7 +840,7 @@ export function useTransactionById(householdId: string | undefined, txnId: strin
     queryFn: async (): Promise<Txn | null> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name), accounts(name)')
+        .select('*, categories(name, icon), accounts(name)')
         .eq('household_id', householdId!).eq('id', txnId!).maybeSingle();
       if (error) throw error;
       return (data as Txn | null) ?? null;
@@ -858,7 +865,7 @@ export function useObligationPayments(
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name), accounts(name)')
+        .select('*, categories(name, icon), accounts(name)')
         .eq('household_id', householdId!).eq('obligation_id', obligationId!)
         .eq('status', 'PAID')
         .order('release_date', { ascending: false, nullsFirst: false })
@@ -1078,6 +1085,8 @@ export function useSetTemplateStatus() {
 
 export interface CategoryInput {
   name: string; monthlyBudget: number; type: 'EXPENSE' | 'INCOME' | 'INVESTMENT';
+  /** The picker's choice. Omitted or null = derive the icon from the name. */
+  icon?: string | null;
 }
 
 export function useCreateCategory() {
@@ -1091,6 +1100,7 @@ export function useCreateCategory() {
       const { data, error } = await sb.from('categories').insert({
         household_id: args.householdId, name,
         monthly_budget: args.monthlyBudget, type: args.type,
+        icon: args.icon ?? null,
         is_system: false, system_role: null,
       }).select('*').single();
       if (error) throw error;
@@ -1121,6 +1131,10 @@ export function useUpdateCategory() {
       if (args.name !== undefined) patch.name = args.name.trim();
       if (args.monthlyBudget !== undefined) patch.monthly_budget = args.monthlyBudget;
       if (args.type !== undefined) patch.type = args.type;
+      // Explicitly assignable to null so the family can clear a pick and go back
+      // to the name-derived icon. `?? null` in the create path is stricter on
+      // purpose: a new category never starts with a stale choice.
+      if (args.icon !== undefined) patch.icon = args.icon;
       if (Object.keys(patch).length === 0) return null;
       const { data, error } = await sb.from('categories')
         .update(patch).eq('id', args.id).select('*').single();

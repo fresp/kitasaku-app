@@ -7,6 +7,7 @@ import ArrowLeftRight from 'lucide-react-native/icons/arrow-left-right';
 import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import { Colors, FontSize, Radius } from '../constants/theme';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useCategories, useCycleYears, useObligations, useYearInsight } from '../lib/queries';
@@ -483,6 +484,9 @@ export default function InsightAsetScreen() {
 
         {!loading && annual.monthsWithCycle === 0 && (
           <SectionCard>
+            <View style={styles.emptyArt}>
+              <BrandIcon name="empty-data-tidak-ditemukan" size={72} label="" />
+            </View>
             <SectionHeader
               title="Belum ada data tahun ini"
               subtitle={`Tidak ada siklus anggaran di ${activeYear}. Buka siklus dulu supaya trennya bisa dihitung.`}
@@ -978,6 +982,14 @@ export default function InsightAsetScreen() {
                   barWidth={12}
                   colGap={3}
                 />
+                {/* The chart draws an empty grid when nothing was borrowed, and
+                    an empty grid is easy to read as a rendering failure. The
+                    illustration says which state this is. */}
+                {!buckets.some((b) => b.financingInflow > 0) && (
+                  <View style={styles.emptyArt}>
+                    <BrandIcon name="empty-belum-ada-pemasukan" size={72} label="" />
+                  </View>
+                )}
               </View>
               <RuleBanner
                 icon="alert"
@@ -1133,6 +1145,7 @@ const styles = StyleSheet.create({
   figLabel: { fontSize: FontSize.microLabel, color: Colors.textMuted },
   figValue: { fontSize: FontSize.microValue, fontWeight: '600' },
 
+  emptyArt: { alignItems: 'center', paddingTop: 8 },
   chartSurface: { backgroundColor: Colors.canvas, borderRadius: Radius.md, padding: 10 },
   footNotes: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   footNote: { fontSize: FontSize.microLabel, color: Colors.textSecondary, flexShrink: 1 },

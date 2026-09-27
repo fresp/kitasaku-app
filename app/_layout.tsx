@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../lib/auth-context';
+import { hasSeenWelcome } from '../lib/onboarding';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -18,17 +19,42 @@ function Gate() {
 
   useEffect(() => {
     if (loading) return;
-    SplashScreen.hideAsync().catch(() => {});
-    const inAuth = segments[0] === '(auth)';
-    if (!session) {
-      if (!inAuth) router.replace('/(auth)/sign-in');
-    } else if (!membership) {
-      if (segments[1] !== 'setup-choice' && segments[1] !== 'sign-in' && segments[1] !== 'invite') {
-        router.replace('/(auth)/setup-choice');
+    let cancelled = false;
+    (async () => {
+      // Re-read on every navigation instead of holding the answer in state:
+      // tapping "Mulai" writes the flag and pushes to sign-in in the same tick,
+      // so a `seenWelcome` captured in state would still say false when this
+      // effect re-ran for the new route and would bounce the family back to the
+      // slide they just finished. `hasSeenWelcome` caches, so this is a boolean
+      // read, not storage I/O.
+      const seen = await hasSeenWelcome();
+      if (cancelled) return;
+      SplashScreen.hideAsync().catch(() => {});
+      const inAuth = segments[0] === '(auth)';
+      const onWelcome = segments[1] === 'welcome';
+      if (!session) {
+        // The three onboarding illustrations are the family's first sight of the
+        // app, so they come before sign-in — and only once: `seen` is what
+        // WelcomeScreen's "Mulai"/"Lewati" writes.
+        const wanted = seen ? '/(auth)/sign-in' : '/(auth)/welcome';
+        if (!inAuth) router.replace(wanted);
+        else if (seen && onWelcome) router.replace('/(auth)/sign-in');
+        else if (!seen && !onWelcome) router.replace('/(auth)/welcome');
+      } else if (!membership) {
+        if (
+          segments[1] !== 'setup-choice' &&
+          segments[1] !== 'sign-in' &&
+          segments[1] !== 'invite'
+        ) {
+          router.replace('/(auth)/setup-choice');
+        }
+      } else {
+        if (inAuth) router.replace('/(tabs)');
       }
-    } else {
-      if (inAuth) router.replace('/(tabs)');
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [session, membership, loading, rawSegments]);
 
   return (

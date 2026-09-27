@@ -15,7 +15,9 @@ import {
   useZeroBasedSummary,
 } from '../lib/queries';
 import type { AllocationType, CycleAllocation } from '../lib/queries';
+import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { BrandIcon } from '../components/ui/BrandIcon';
 
 const ALLOCATION_LABELS: Record<AllocationType, string> = {
   EXPENSE: 'Belanja',
@@ -119,6 +121,7 @@ export default function AllocationScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
+          <BrandIcon name="context-goal" size={44} label="" />
           <View style={{ flex: 1 }}>
             <Text style={styles.eyebrow}>ZERO-BASED ALLOCATION</Text>
             <Text style={styles.title}>Detail Alokasi</Text>
@@ -228,6 +231,11 @@ export default function AllocationScreen() {
                     onPress={() => setCategoryId(active ? null : c.id)}
                     style={[styles.chip, active && styles.chipOutline]}
                   >
+                    <BrandIcon
+                      name={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
+                      size={15}
+                      label=""
+                    />
                     <Text style={styles.chipText}>{c.name}</Text>
                   </Pressable>
                 );
@@ -247,6 +255,7 @@ export default function AllocationScreen() {
         {allocsQ.isLoading && <Text style={styles.muted}>Memuat alokasi…</Text>}
         {!allocsQ.isLoading && allocations.length === 0 && (
           <View style={styles.emptyBox}>
+            <BrandIcon name="empty-belum-ada-tabungan" size={72} label="" />
             <Text style={styles.muted}>
               Belum ada alokasi di siklus ini. Seluruh sumber dana masih menganggur.
             </Text>

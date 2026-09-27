@@ -6,6 +6,8 @@ import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
+import { categoryIconName } from '../lib/category-icon';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { useAuth } from '../lib/auth-context';
 import { useActiveCycle, useCategories, useTransactionLedger } from '../lib/queries';
 import { budgetFillPct, budgetHealthStatus } from '../lib/zero-based';
@@ -59,6 +61,9 @@ export default function BudgetHealthScreen() {
       return {
         id: c.id,
         name: c.name,
+        // The icon the family picked, carried into the row so this screen and
+        // Kelola Kategori cannot disagree about what a category looks like.
+        icon: c.icon ?? null,
         spent,
         budget,
         health,
@@ -108,6 +113,7 @@ export default function BudgetHealthScreen() {
         </View>
 
         <View style={styles.health}>
+          <BrandIcon name="context-budget" size={44} label="" />
           <BudgetRing pct={pct} color={overallColor} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={styles.healthCycle}>
@@ -133,7 +139,14 @@ export default function BudgetHealthScreen() {
             style={styles.card}
           >
             <View style={styles.head}>
-              <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
+              <View style={styles.headLeft}>
+                <BrandIcon
+                  name={categoryIconName({ name: c.name, type: 'EXPENSE', icon: c.icon })}
+                  size={18}
+                  label=""
+                />
+                <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
+              </View>
               <Badge label={c.health.label} tone={c.health.tone} />
             </View>
             <Text style={styles.nums}>
@@ -149,6 +162,7 @@ export default function BudgetHealthScreen() {
 
         {!catsQ.isLoading && rows.length === 0 && (
           <View style={styles.emptyBox}>
+            <BrandIcon name="empty-data-tidak-ditemukan" size={72} label="" />
             <Text style={styles.muted}>
               Belum ada kategori pengeluaran. Buat ruang keluarga untuk seed otomatis,
               atau tambahkan sendiri di Kelola Kategori.
@@ -198,7 +212,8 @@ const styles = StyleSheet.create({
   nums: { color: Colors.textPrimary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
   track: { height: 6, borderRadius: 3, backgroundColor: Colors.subtle, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
-  emptyBox: { gap: 8, paddingVertical: 12 },
+  emptyBox: { alignItems: 'center', gap: 10, paddingVertical: 16 },
+  headLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   emptyLink: { color: Colors.textPrimary, fontWeight: '600' },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },
 });

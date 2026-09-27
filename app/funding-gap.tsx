@@ -12,6 +12,7 @@ import TrendingUp from 'lucide-react-native/icons/trending-up';
 import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import Wallet from 'lucide-react-native/icons/wallet';
 import { Colors, FontSize, Radius } from '../constants/theme';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
@@ -217,9 +218,12 @@ export default function FundingGapScreen() {
             </Text>
           )}
           {activeTemplates.length === 0 && (
-            <Text style={styles.rowSub}>
-              Belum ada pos rutin aktif. Buat lewat Riwayat → Template Rutin.
-            </Text>
+            <View style={styles.emptyArt}>
+              <BrandIcon name="empty-belum-ada-rencana" size={72} label="" />
+              <Text style={styles.rowSub}>
+                Belum ada pos rutin aktif. Buat lewat Riwayat → Template Rutin.
+              </Text>
+            </View>
           )}
         </View>
 
@@ -415,6 +419,8 @@ function longDate(iso: string): string {
 }
 
 const styles = StyleSheet.create({
+  emptyArt: { alignItems: 'center', gap: 10, paddingVertical: 12 },
+
   safe: { flex: 1, backgroundColor: Colors.canvas },
   container: { padding: 16, gap: 12, paddingBottom: 40 },
 

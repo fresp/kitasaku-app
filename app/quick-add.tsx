@@ -15,7 +15,9 @@ import {
 } from '../lib/queries';
 import type { LoanRepaymentMethod } from '../lib/queries';
 import { splitInstallments } from '../lib/zero-based';
+import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton } from '../components/ui/Button';
+import { BrandIcon } from '../components/ui/BrandIcon';
 
 function parseAmount(text: string): number {
   const digits = text.replace(/[^0-9]/g, '');
@@ -234,6 +236,13 @@ export default function QuickAddScreen() {
                 const active = (selectedCategoryId ?? '') === c.id;
                 return (
                   <Pressable key={c.id} onPress={() => setCategoryId(c.id)} style={[styles.chip, active && styles.chipActive]}>
+                    {/* The chip is how the family picks a category, so it shows
+                        the icon that will end up on the transaction row. */}
+                    <BrandIcon
+                      name={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
+                      size={15}
+                      label=""
+                    />
                     <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.name}</Text>
                   </Pressable>
                 );

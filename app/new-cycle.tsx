@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
@@ -98,8 +99,13 @@ export default function NewCycleScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <Text style={styles.eyebrow}>TRANSAKSI PAYDAY-TO-PAYDAY • SETUP OTOMATIS</Text>
-        <Text style={styles.title}>Buka Siklus Anggaran Baru</Text>
+        <View style={styles.headerRow}>
+          <BrandIcon name="context-calendar" size={44} label="" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>TRANSAKSI PAYDAY-TO-PAYDAY • SETUP OTOMATIS</Text>
+            <Text style={styles.title}>Buka Siklus Anggaran Baru</Text>
+          </View>
+        </View>
 
         <Text style={styles.label}>NAMA SIKLUS</Text>
         <TextInput value={cycleName} onChangeText={setCycleName} style={styles.input} />
@@ -152,7 +158,10 @@ export default function NewCycleScreen() {
           PEMBAYARAN KEWAJIBAN SIKLUS INI ({openObligations.length} TANGGUNGAN AKTIF)
         </Text>
         {openObligations.length === 0 ? (
-          <Text style={styles.muted}>Tidak ada tanggungan terbuka yang dibawa ke siklus ini.</Text>
+          <View style={styles.emptyArt}>
+            <BrandIcon name="empty-tidak-ada-tagihan" size={72} label="" />
+            <Text style={styles.muted}>Tidak ada tanggungan terbuka yang dibawa ke siklus ini.</Text>
+          </View>
         ) : (
           openObligations.map((o) => {
             const on = isObligChecked(o.id);
@@ -259,8 +268,11 @@ function ProjRow({
 }
 
 const styles = StyleSheet.create({
+  emptyArt: { alignItems: 'center', gap: 10, paddingVertical: 12 },
+
   safe: { flex: 1, backgroundColor: Colors.surface },
   container: { padding: 20, gap: 10, paddingBottom: 32 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 0.6 },
   title: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700' },
   label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1, marginTop: 6 },

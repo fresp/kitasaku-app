@@ -6,6 +6,7 @@ import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Plus from 'lucide-react-native/icons/plus';
 import Pencil from 'lucide-react-native/icons/pencil';
 import Trash2 from 'lucide-react-native/icons/trash';
+import Check from 'lucide-react-native/icons/check';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
@@ -16,7 +17,9 @@ import {
   useUpdateCategory,
 } from '../lib/queries';
 import type { Category, CategorySystemRole } from '../lib/queries';
+import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { BrandIcon } from '../components/ui/BrandIcon';
 
 /**
  * Screen "Kelola Kategori".
@@ -40,16 +43,55 @@ const TYPE_LABELS: Record<'EXPENSE' | 'INCOME' | 'INVESTMENT', string> = {
   INVESTMENT: 'Investasi',
 };
 
+/**
+ * Screen 2B's "Pilih ikon" grid.
+ *
+ * The design's own grid shows eight tiles, but four of them (Keluarga, Sekolah,
+ * Transport, Dana Aman) are stand-ins drawn with Lucide glyphs — the asset
+ * library's "02 — CATEGORY ICONS" section is the real set, and it has these 13.
+ * Offering the library rather than the mockup's sample is what makes the picker
+ * able to reach every icon the ledger can show.
+ *
+ * The label is what the family reads; the icon name is what migration 009
+ * stores. They are listed together so a rename of one cannot silently desync
+ * from the other.
+ */
+const ICON_CHOICES: { icon: string; label: string }[] = [
+  { icon: 'category-pemasukan', label: 'Pemasukan' },
+  { icon: 'category-belanja', label: 'Belanja' },
+  { icon: 'category-makan-minum', label: 'Makan & Minum' },
+  { icon: 'category-rumah', label: 'Rumah' },
+  { icon: 'category-tagihan', label: 'Tagihan' },
+  { icon: 'category-pendidikan', label: 'Pendidikan' },
+  { icon: 'category-kesehatan', label: 'Kesehatan' },
+  { icon: 'category-transportasi', label: 'Transportasi' },
+  { icon: 'category-tabungan', label: 'Tabungan' },
+  { icon: 'category-hutang', label: 'Hutang' },
+  { icon: 'category-hiburan', label: 'Hiburan' },
+  { icon: 'category-travel', label: 'Travel' },
+  { icon: 'category-lainnya', label: 'Lainnya' },
+];
+
 interface Draft {
   id: string | null;
   name: string;
   budgetText: string;
   type: 'EXPENSE' | 'INCOME' | 'INVESTMENT';
   isSystem: boolean;
+  /**
+   * The picker's choice, or null for "no explicit choice".
+   *
+   * Kept separate from the icon actually displayed: the grid highlights
+   * `icon ?? derived`, so a category with no pick still shows which icon it is
+   * using, and tapping that same tile is what turns the suggestion into a
+   * stored choice. Collapsing the two would make it impossible to tell a
+   * deliberate pick from a name-derived default.
+   */
+  icon: string | null;
 }
 
 const EMPTY_DRAFT: Draft = {
-  id: null, name: '', budgetText: '', type: 'EXPENSE', isSystem: false,
+  id: null, name: '', budgetText: '', type: 'EXPENSE', isSystem: false, icon: null,
 };
 
 function parseAmount(t: string): number {
@@ -86,6 +128,10 @@ export default function KelolaKategoriScreen() {
           name: draft.name,
           monthlyBudget: parseAmount(draft.budgetText),
           type: draft.type,
+          // Sent even when unchanged, and sent as an explicit null when the
+          // family cleared the pick: leaving it out would make "no choice"
+          // indistinguishable from "not editing the choice".
+          icon: draft.icon,
         });
       } else {
         await createCategory.mutateAsync({
@@ -93,6 +139,7 @@ export default function KelolaKategoriScreen() {
           name: draft.name,
           monthlyBudget: parseAmount(draft.budgetText),
           type: draft.type,
+          icon: draft.icon,
         });
       }
       setDraft(null);
@@ -187,6 +234,48 @@ export default function KelolaKategoriScreen() {
                 : 'Biarkan 0 kalau kategori ini tidak dipagui.'}
             </Text>
 
+            <Text style={styles.label}>PILIH IKON</Text>
+            {/* Screen 2B's grid. The selected tile is `draft.icon` when the
+                family has picked one, and the name-derived icon otherwise — so
+                a new category starts with the icon it would get anyway already
+                highlighted, and the family only has to tap when they disagree. */}
+            <View style={styles.iconGrid}>
+              {ICON_CHOICES.map((choice) => {
+                const shown = draft.icon ?? categoryIconName({
+                  name: draft.name,
+                  type: draft.type,
+                });
+                const active = shown === choice.icon;
+                return (
+                  <Pressable
+                    key={choice.icon}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ikon ${choice.label}`}
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setDraft({ ...draft, icon: choice.icon })}
+                    style={styles.iconTile}
+                  >
+                    <View style={[styles.iconTileBox, active && styles.iconTileBoxOn]}>
+                      <BrandIcon name={choice.icon} size={22} label="" />
+                      {active && (
+                        <View style={styles.iconTileCheck}>
+                          <Check size={10} color={Colors.white} strokeWidth={3} />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.iconTileLabel, active && styles.iconTileLabelOn]} numberOfLines={1}>
+                      {choice.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.hint}>
+              {draft.icon
+                ? 'Ikon ini disimpan untuk kategori tersebut dan tetap dipakai walau namanya diubah.'
+                : 'Belum dipilih — ikon di atas diturunkan dari nama. Ketuk salah satu untuk mengunci pilihan.'}
+            </Text>
+
             <PrimaryButton
               label={saving ? 'Menyimpan…' : draft.id ? 'Simpan Perubahan' : 'Simpan Kategori'}
               onPress={save}
@@ -201,14 +290,16 @@ export default function KelolaKategoriScreen() {
           {systemCats.map((c, i) => (
             <View key={c.id} style={[styles.row, i > 0 && styles.rowBordered]}>
               <View style={[styles.iconBox, c.system_role === 'FINANCING_INFLOW' && styles.iconBoxFinancing]}>
-                <Text
-                  style={[
-                    styles.iconGlyph,
-                    c.system_role === 'FINANCING_INFLOW' && styles.iconGlyphFinancing,
-                  ]}
-                >
-                  {c.type === 'INCOME' ? '↓' : '↑'}
-                </Text>
+                <BrandIcon
+                  name={categoryIconName({
+                    name: c.name,
+                    type: c.type,
+                    systemRole: c.system_role,
+                    icon: c.icon,
+                  })}
+                  size={22}
+                  label=""
+                />
               </View>
               <View style={{ flex: 1, gap: 2 }}>
                 <View style={styles.nameRow}>
@@ -238,6 +329,7 @@ export default function KelolaKategoriScreen() {
                   setDraft({
                     id: c.id, name: c.name, budgetText: String(c.monthly_budget),
                     type: c.type as Draft['type'], isSystem: true,
+                    icon: c.icon ?? null,
                   });
                   setErr(null);
                 }}
@@ -251,7 +343,11 @@ export default function KelolaKategoriScreen() {
           {customCats.map((c, i) => (
             <View key={c.id} style={[styles.row, (i > 0 || systemCats.length > 0) && styles.rowBordered]}>
               <View style={styles.iconBox}>
-                <Text style={styles.iconGlyph}>{c.type === 'INCOME' ? '↓' : '↑'}</Text>
+                <BrandIcon
+                  name={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
+                  size={22}
+                  label=""
+                />
               </View>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={styles.name}>{c.name}</Text>
@@ -265,6 +361,7 @@ export default function KelolaKategoriScreen() {
                   setDraft({
                     id: c.id, name: c.name, budgetText: String(c.monthly_budget),
                     type: c.type as Draft['type'], isSystem: false,
+                    icon: c.icon ?? null,
                   });
                   setErr(null);
                 }}
@@ -288,6 +385,7 @@ export default function KelolaKategoriScreen() {
 
         {!catsQ.isLoading && customCats.length === 0 && (
           <View style={styles.emptyBox}>
+            <BrandIcon name="empty-data-tidak-ditemukan" size={72} label="" />
             <Text style={styles.emptyTitle}>Belum ada kategori tambahan</Text>
             <Text style={styles.emptySub}>
               Tambahkan pos khusus seperti Hobi, Liburan, atau Renovasi.
@@ -359,9 +457,24 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.subtle,
     borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
   },
+  iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  iconTile: { alignItems: 'center', gap: 5, width: 62 },
+  iconTileBox: {
+    width: 48, height: 48, borderRadius: Radius.md, backgroundColor: Colors.subtle,
+    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  },
+  // The selected tile takes the brand border, matching Screen 2B's
+  // "Icon Box Rumah Selected" rather than a background fill: the icon art is
+  // dark on a light plate, so inverting the plate would hide the drawing.
+  iconTileBoxOn: { borderColor: Colors.brandPrimary, borderWidth: 1.5 },
+  iconTileCheck: {
+    position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9,
+    backgroundColor: Colors.paidText, borderWidth: 1.5, borderColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  iconTileLabel: { color: Colors.textMuted, fontSize: 10.5, fontWeight: '500', textAlign: 'center' },
+  iconTileLabelOn: { color: Colors.textPrimary, fontWeight: '700' },
   iconBoxFinancing: { backgroundColor: Colors.financingBg, borderColor: Colors.financingBorder },
-  iconGlyph: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  iconGlyphFinancing: { color: Colors.financingText },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: { color: Colors.textPrimary, fontSize: 13.5, fontWeight: '600' },
   type: { color: Colors.textMuted, fontSize: FontSize.caption },
