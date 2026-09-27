@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
@@ -7,8 +7,14 @@ import { formatRupiah } from '../lib/format';
 import { pendingTransactions } from '../lib/mockData';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
+import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+
+function parseAmount(text: string): number {
+  const digits = text.replace(/[^0-9]/g, '');
+  return digits ? parseInt(digits, 10) : 0;
+}
 
 export default function PaymentConfirmScreen() {
   const router = useRouter();
@@ -31,15 +37,24 @@ export default function PaymentConfirmScreen() {
   const category = liveTxn?.categories?.name ?? mock.category;
   const accountName = liveTxn?.accounts?.name ?? mock.account;
   const planned = liveTxn?.planned_amount ?? mock.amount;
+  // A settled row must never be reachable here — the route is public, so a
+  // stale link or a back-navigation could otherwise re-confirm it and
+  // decrement the obligation twice.
+  const payable = !liveTxn || canMarkAsPaid(liveTxn);
 
   const accountOptions = (accsQ.data ?? []).map((a) => ({ id: a.id, name: a.name }));
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isFinal, setIsFinal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The amount actually paid is often not the planned amount. Empty means
+  // "same as planned"; anything typed becomes the recorded actual.
+  const [amountText, setAmountText] = useState('');
+  const actualAmount = amountText.trim() === '' ? planned : parseAmount(amountText);
 
   const selectedAccountId = accountId ?? liveTxn?.account_id ?? null;
   const selectedAccountName =
     accountOptions.find((a) => a.id === selectedAccountId)?.name ?? accountName;
+  const differs = actualAmount !== planned;
 
   async function confirm() {
     setErr(null);
@@ -47,10 +62,11 @@ export default function PaymentConfirmScreen() {
       router.back();
       return;
     }
+    if (actualAmount <= 0) { setErr('Nominal pembayaran harus lebih dari Rp 0.'); return; }
     try {
       await markPaid.mutateAsync({
         txn: liveTxn,
-        actualAmount: planned,
+        actualAmount,
         accountId: selectedAccountId,
         isFinal,
       });
@@ -58,6 +74,21 @@ export default function PaymentConfirmScreen() {
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
     }
+  }
+
+  if (!payable) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.settledBox}>
+          <Text style={styles.settledTitle}>Transaksi ini sudah lunas</Text>
+          <Text style={styles.settledBody}>
+            Tidak ada yang perlu dibayar lagi. Sisa tanggungan sudah diperbarui saat pembayaran
+            pertama dicatat.
+          </Text>
+          <PrimaryButton label="Kembali" onPress={() => router.back()} />
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -72,7 +103,22 @@ export default function PaymentConfirmScreen() {
 
         <View style={styles.amountBlock}>
           <Text style={styles.amountLabel}>Nominal pembayaran</Text>
-          <Text style={styles.amountValue}>{formatRupiah(planned)}</Text>
+          <Text style={styles.amountValue}>{formatRupiah(actualAmount)}</Text>
+          <TextInput
+            value={amountText}
+            onChangeText={setAmountText}
+            placeholder={`Rencana ${formatRupiah(planned)}`}
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="number-pad"
+            style={styles.amountInput}
+          />
+          <Text style={styles.amountHint}>
+            {amountText.trim() === ''
+              ? 'Kosongkan untuk memakai nominal rencana.'
+              : differs
+                ? `Beda ${formatRupiah(Math.abs(actualAmount - planned))} dari rencana.`
+                : 'Sama dengan nominal rencana.'}
+          </Text>
           <View style={styles.guideRow}>
             <Badge label={`Rencana ${formatRupiah(planned)}`} />
             {typeof mock.prevAmount === 'number' && !liveTxn && (
@@ -172,6 +218,15 @@ const styles = StyleSheet.create({
     fontWeight: '700', fontVariant: ['tabular-nums'],
   },
   guideRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  amountInput: {
+    borderWidth: 1, borderColor: Colors.borderStrong, borderRadius: Radius.md,
+    paddingHorizontal: 14, height: 48, fontSize: 16, color: Colors.textPrimary,
+    backgroundColor: Colors.surface, fontVariant: ['tabular-nums'],
+  },
+  amountHint: { color: Colors.textMuted, fontSize: FontSize.body },
+  settledBox: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
+  settledTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
+  settledBody: { color: Colors.textSecondary, fontSize: FontSize.body },
   row: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12,
