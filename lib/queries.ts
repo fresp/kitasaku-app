@@ -56,6 +56,16 @@ export interface Template {
   status: 'ACTIVE' | 'COMPLETED'; notes: string | null;
   categories?: { name: string } | null; accounts?: { name: string } | null;
 }
+export interface ObligationInstallment {
+  id: string; household_id: string; obligation_id: string; cycle_id: string | null;
+  planned_amount: number; due_date: string | null;
+  status: 'OPEN' | 'PARTIAL' | 'OVERDUE' | 'SETTLED' | 'CANCELLED';
+  paid_amount: number; paid_transaction_id: string | null; created_at: string;
+  obligations?: { title: string } | null;
+}
+
+export const LOAN_REPAYMENT_METHODS = ['TRANSFER', 'CASH', 'AUTO_DEBIT', 'PAYROLL', 'OTHER'] as const;
+export type LoanRepaymentMethod = (typeof LOAN_REPAYMENT_METHODS)[number];
 
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 
@@ -617,6 +627,16 @@ export function useDeleteAllocation() {
   });
 }
 
+/**
+ * Records a financing inflow together with the obligation that repays it, in
+ * one SQL transaction (see migration 005). `interestFeeAmount` is added to the
+ * repayment total, so the obligation's `total_amount` is what the family
+ * actually owes — principal plus cost of borrowing.
+ *
+ * `installmentCount` is optional; when given, the RPC also generates the
+ * schedule. Validation lives in SQL so a direct RPC call cannot bypass it, and
+ * only the obvious client-side cases are mirrored here for faster feedback.
+ */
 export function useCreateFinancingLoan() {
   const qc = useQueryClient();
   return useMutation({
@@ -624,23 +644,120 @@ export function useCreateFinancingLoan() {
       householdId: string; cycleId: string; amount: number; name: string;
       obligationTitle: string; obligationType: 'BILL' | 'LOAN' | 'REIMBURSEMENT' | 'INSTALLMENT';
       accountId?: string | null; dueDate?: string | null;
+      repaymentMethod?: LoanRepaymentMethod | null; installmentCount?: number | null;
+      startDate?: string | null; interestFeeAmount?: number;
     }) => {
       if (!(args.amount > 0)) throw new Error('Nominal pembiayaan harus lebih dari 0.');
+      if ((args.interestFeeAmount ?? 0) < 0) throw new Error('Bunga/biaya tidak boleh negatif.');
+      if (args.installmentCount != null && (args.installmentCount < 1 || args.installmentCount > 600)) {
+        throw new Error('Jumlah angsuran harus antara 1 dan 600.');
+      }
       const sb = requireSupabase();
       const { data, error } = await sb.rpc('create_financing_with_obligation', {
         p_household_id: args.householdId, p_cycle_id: args.cycleId, p_amount: args.amount,
         p_name: args.name, p_obligation_title: args.obligationTitle,
         p_obligation_type: args.obligationType, p_account_id: args.accountId ?? null,
         p_due_date: args.dueDate ?? null,
+        p_repayment_method: args.repaymentMethod ?? null,
+        p_installment_count: args.installmentCount ?? null,
+        p_start_date: args.startDate ?? null,
+        p_interest_fee_amount: args.interestFeeAmount ?? 0,
       });
       if (error) throw error;
-      return data as { transaction_id: string; obligation_id: string }[];
+      return data as {
+        transaction_id: string; obligation_id: string;
+        installment_count: number | null; total_repayment: number;
+      }[];
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['txns'] });
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['installments'] });
+    },
+  });
+}
+
+/** Installments of one obligation, ordered by due date (nulls last = backlog). */
+export function useObligationInstallments(
+  householdId: string | undefined, obligationId: string | undefined
+) {
+  return useQuery({
+    queryKey: ['installments', householdId, obligationId],
+    enabled: !!householdId && !!obligationId,
+    queryFn: async (): Promise<ObligationInstallment[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligation_installments')
+        .select('*')
+        .eq('household_id', householdId!).eq('obligation_id', obligationId!)
+        .order('due_date', { ascending: true, nullsFirst: true });
+      if (error) throw error;
+      return (data ?? []) as ObligationInstallment[];
+    },
+  });
+}
+
+/** Every installment in a cycle, for the cycle plan view. */
+export function useCycleInstallments(
+  householdId: string | undefined, cycleId: string | undefined
+) {
+  return useQuery({
+    queryKey: ['installments', householdId, 'cycle', cycleId],
+    enabled: !!householdId && !!cycleId,
+    queryFn: async (): Promise<ObligationInstallment[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligation_installments')
+        .select('*, obligations(title)')
+        .eq('household_id', householdId!).eq('cycle_id', cycleId!)
+        .order('due_date', { ascending: true, nullsFirst: true });
+      if (error) throw error;
+      return (data ?? []) as ObligationInstallment[];
+    },
+  });
+}
+
+/** Attaches a backlog installment to a cycle (or detaches it with `cycleId: null`). */
+export function useSetInstallmentCycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string; installmentId: string; cycleId: string | null }) => {
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('set_installment_cycle', {
+        p_household_id: args.householdId,
+        p_installment_id: args.installmentId,
+        p_cycle_id: args.cycleId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['installments'] });
       qc.invalidateQueries({ queryKey: ['oblig'] });
-      qc.invalidateQueries({ queryKey: ['source-funds'] });
-      qc.invalidateQueries({ queryKey: ['zero-summary'] });
+    },
+  });
+}
+
+/** Schedules (or re-reads) an obligation's installments via the SQL splitter. */
+export function useScheduleInstallments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; obligationId: string; cycleId: string | null;
+      total: number; count: number; startDate?: string | null;
+    }) => {
+      if (!(args.count >= 1 && args.count <= 600)) throw new Error('Jumlah angsuran harus antara 1 dan 600.');
+      if (!(args.total > 0)) throw new Error('Total pembiayaan harus lebih dari 0.');
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('schedule_obligation_installments', {
+        p_household_id: args.householdId,
+        p_obligation_id: args.obligationId,
+        p_cycle_id: args.cycleId,
+        p_total: args.total,
+        p_count: args.count,
+        p_start_date: args.startDate ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['installments'] });
+      qc.invalidateQueries({ queryKey: ['oblig'] });
     },
   });
 }

@@ -83,6 +83,7 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           qc.invalidateQueries({ queryKey: ['alloc'] });
           qc.invalidateQueries({ queryKey: ['zero-summary'] });
           qc.invalidateQueries({ queryKey: ['oblig'] });
+          qc.invalidateQueries({ queryKey: ['installments'] });
         }
       )
       .subscribe();

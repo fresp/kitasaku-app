@@ -6,9 +6,11 @@ import {
   calculateZeroBasedSummary,
   canMarkAsPaid,
   defaultFlowType,
+  isInstallmentOpen,
   isObligationPaydown,
   normalizeAmount,
   resolveModeAmount,
+  splitInstallments,
 } from '../zero-based';
 
 // Shared fixture: operating 10jt + financing 3jt + asset release 2jt.
@@ -205,5 +207,44 @@ describe('payment-path guards (phase 2A)', () => {
     expect(defaultFlowType('EXPENSE', null)).toBe('EXPENSE');
     // Auto-backfill is forbidden until an obligation pattern is proven.
     expect(defaultFlowType('EXPENSE', 'ob-1')).toBe('EXPENSE');
+  });
+});
+
+describe('loan installment schedule (phase 2B)', () => {
+  it('19: a divisible total splits evenly', () => {
+    expect(splitInstallments(12_000_000, 12)).toEqual(Array(12).fill(1_000_000));
+  });
+
+  it('20: an indivisible total sums exactly, remainder on the first installments', () => {
+    const parts = splitInstallments(10_000_000, 3);
+    expect(parts).toEqual([3_333_334, 3_333_333, 3_333_333]);
+    expect(parts.reduce((a, b) => a + b, 0)).toBe(10_000_000);
+  });
+
+  it('21: a single installment is the whole total', () => {
+    expect(splitInstallments(7_500_000, 1)).toEqual([7_500_000]);
+  });
+
+  it('22: invalid input yields no schedule instead of a broken one', () => {
+    expect(splitInstallments(0, 12)).toEqual([]);
+    expect(splitInstallments(1_000_000, 0)).toEqual([]);
+    expect(splitInstallments(1_000_000, -3)).toEqual([]);
+    expect(splitInstallments(1_000_000, 601)).toEqual([]);
+    // Would create a zero-amount installment, which the table forbids.
+    expect(splitInstallments(5, 10)).toEqual([]);
+  });
+
+  it('23: a schedule never contains a zero-amount row', () => {
+    for (const parts of [splitInstallments(14_000_000, 12), splitInstallments(999_999, 7)]) {
+      expect(parts.every((p) => p > 0)).toBe(true);
+    }
+  });
+
+  it('24: an installment is open until settled or cancelled', () => {
+    expect(isInstallmentOpen({ status: 'OPEN' })).toBe(true);
+    expect(isInstallmentOpen({ status: 'PARTIAL' })).toBe(true);
+    expect(isInstallmentOpen({ status: 'OVERDUE' })).toBe(true);
+    expect(isInstallmentOpen({ status: 'SETTLED' })).toBe(false);
+    expect(isInstallmentOpen({ status: 'CANCELLED' })).toBe(false);
   });
 });

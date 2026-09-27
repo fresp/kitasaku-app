@@ -283,6 +283,41 @@ export function isObligationPaydown(txn: PayableTxn): boolean {
 }
 
 /**
+ * Whether an installment row is still owed. `CANCELLED` is settled-by-decision,
+ * not outstanding, so it is excluded alongside `SETTLED`.
+ */
+export function isInstallmentOpen(installment: {
+  status: 'OPEN' | 'PARTIAL' | 'OVERDUE' | 'SETTLED' | 'CANCELLED';
+}): boolean {
+  return installment.status !== 'SETTLED' && installment.status !== 'CANCELLED';
+}
+
+/**
+ * Splits a repayment total into `count` installments of equal size, with the
+ * integer-division remainder spread one unit at a time over the FIRST
+ * installments. Returns [] for invalid input rather than throwing, so callers
+ * can render a preview while the user is still typing.
+ *
+ * MUST stay identical to `public.schedule_obligation_installments` in
+ * migration 005 — that function is the one that actually writes the rows; this
+ * one exists so the UI can show the split before anything is saved. The test
+ * suite pins the shared examples.
+ */
+export function splitInstallments(
+  total: AmountInput,
+  count: AmountInput
+): number[] {
+  const t = normalizeAmount(total);
+  if (count === null || count === undefined || !Number.isFinite(count)) return [];
+  const n = Math.floor(count);
+  if (n < 1 || n > 600) return [];
+  if (t < n) return []; // would produce a 0-amount installment
+  const base = Math.floor(t / n);
+  const remainder = t - base * n;
+  return Array.from({ length: n }, (_, i) => base + (i < remainder ? 1 : 0));
+}
+
+/**
  * Planned-vs-actual source of truth for every projection: `planned` reads
  * `planned_amount`; `actual` reads `actual_amount` only for PAID rows
  * (PENDING rows contribute 0 in actual mode).
