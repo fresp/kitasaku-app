@@ -4,6 +4,9 @@ import {
   calculateSourceFunds,
   calculateUnallocatedFunds,
   calculateZeroBasedSummary,
+  canMarkAsPaid,
+  defaultFlowType,
+  isObligationPaydown,
   normalizeAmount,
   resolveModeAmount,
 } from '../zero-based';
@@ -159,5 +162,48 @@ describe('zero-based domain contract', () => {
     ]) {
       expect(Object.is(v, -0)).toBe(false);
     }
+  });
+});
+
+describe('payment-path guards (phase 2A)', () => {
+  it('14: only a PENDING row is payable', () => {
+    expect(canMarkAsPaid({ status: 'PENDING' })).toBe(true);
+    expect(canMarkAsPaid({ status: 'PAID' })).toBe(false);
+  });
+
+  it('15: an already-PAID debt payment is never payable again (double-decrement guard)', () => {
+    // allocate_debt_payment writes its txn PAID and decrements remaining_amount
+    // in the same SQL transaction. This is the exact shape of such a row.
+    const executed = {
+      status: 'PAID' as const,
+      obligation_id: 'ob-1',
+      flow_type: 'DEBT_PAYMENT' as const,
+    };
+    expect(canMarkAsPaid(executed)).toBe(false);
+    expect(isObligationPaydown(executed)).toBe(true);
+  });
+
+  it('16: a planned DEBT_PAYMENT row is payable and is a paydown', () => {
+    const planned = {
+      status: 'PENDING' as const,
+      obligation_id: 'ob-1',
+      flow_type: 'DEBT_PAYMENT' as const,
+    };
+    expect(canMarkAsPaid(planned)).toBe(true);
+    expect(isObligationPaydown(planned)).toBe(true);
+  });
+
+  it('17: only rows carrying an obligation_id are paydowns', () => {
+    expect(isObligationPaydown({ status: 'PENDING' })).toBe(false);
+    expect(isObligationPaydown({ status: 'PENDING', obligation_id: null })).toBe(false);
+    expect(isObligationPaydown({ status: 'PENDING', obligation_id: 'ob-1' })).toBe(true);
+  });
+
+  it('18: defaultFlowType never auto-classifies an obligation row as DEBT_PAYMENT', () => {
+    expect(defaultFlowType('INCOME', null)).toBe('OPERATING_INCOME');
+    expect(defaultFlowType('INCOME', 'ob-1')).toBe('OPERATING_INCOME');
+    expect(defaultFlowType('EXPENSE', null)).toBe('EXPENSE');
+    // Auto-backfill is forbidden until an obligation pattern is proven.
+    expect(defaultFlowType('EXPENSE', 'ob-1')).toBe('EXPENSE');
   });
 });

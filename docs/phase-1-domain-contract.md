@@ -66,8 +66,11 @@ and tablename in ('cycle_allocations','obligation_installments')` → 2 rows (da
 
 ## 8. Open TODOs (decisions deferred, not silent assumptions)
 
-- When an `EXPENSE` txn with `obligation_id` may count as `DEBT_PAYMENT` (needs proven pattern).
-- Consolidating `DEBT`/`REIMBURSE` → `LOAN`/`REIMBURSEMENT` and `UNPAID` → `OPEN` (later phase).
-- Full asset-tracking scope (later phase); `allocate_debt_payment` txns are PAID — confirming them again via
-  `useMarkAsPaid` would double-decrement `remaining_amount` (phase-2 guard).
+- ~~When an `EXPENSE` txn with `obligation_id` may count as `DEBT_PAYMENT`~~ → **resolved in Phase 2A**:
+  an obligation row is always `DEBT_PAYMENT`; see `docs/phase-2-payment-paths.md`.
+- Consolidating `DEBT`/`REIMBURSE` → `LOAN`/`REIMBURSEMENT` (later phase). `UNPAID` is no longer
+  written by new rows (Phase 2A writes `OPEN`); the alias stays for old rows only.
+- Full asset-tracking scope (later phase).
+- ~~`allocate_debt_payment` txns are PAID — confirming them again via `useMarkAsPaid` would
+  double-decrement~~ → **resolved in Phase 2A**: `canMarkAsPaid()` is the single gate.
 - "Allocations = the only total" resolves txn-vs-allocation ambiguity for this phase.

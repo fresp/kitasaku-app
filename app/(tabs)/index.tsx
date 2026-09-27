@@ -29,6 +29,8 @@ function toRow(t: any): RowItem {
     status: t.status,
     deltaKind: 'neutral',
     deltaText: t.obligation_id ? 'Tanggungan' : t.recurring_template_id ? 'Rutin' : 'Ad-hoc',
+    obligationId: t.obligation_id ?? null,
+    flowType: t.flow_type ?? null,
   };
 }
 

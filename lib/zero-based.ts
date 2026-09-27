@@ -251,6 +251,37 @@ export function defaultFlowType(
   return direction === 'INCOME' ? 'OPERATING_INCOME' : 'EXPENSE';
 }
 
+/** Rows a payment may be executed against. */
+export interface PayableTxn {
+  status: 'PENDING' | 'PAID';
+  obligation_id?: string | null;
+  flow_type?: FlowType | null;
+}
+
+/**
+ * Single gate for whether a row may still be paid, i.e. whether the
+ * PENDING -> PAID transition is available.
+ *
+ * Phase 2 guard (see docs TODO): `allocate_debt_payment` writes its
+ * transaction already PAID and decrements `remaining_amount` inside the same
+ * SQL transaction. Re-confirming such a row would decrement the obligation a
+ * second time, so an already-PAID row is never payable again. This is the only
+ * place that rule lives; every caller (payment-confirm, obligation rows) must
+ * ask this function rather than checking `status` inline.
+ */
+export function canMarkAsPaid(txn: PayableTxn): boolean {
+  return txn.status === 'PENDING';
+}
+
+/**
+ * Whether executing this row must also reduce the linked obligation.
+ * A DEBT_PAYMENT row or any row carrying an `obligation_id` is a paydown;
+ * combined with `canMarkAsPaid` this keeps the decrement exactly-once.
+ */
+export function isObligationPaydown(txn: PayableTxn): boolean {
+  return !!txn.obligation_id;
+}
+
 /**
  * Planned-vs-actual source of truth for every projection: `planned` reads
  * `planned_amount`; `actual` reads `actual_amount` only for PAID rows

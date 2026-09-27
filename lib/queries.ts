@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { requireSupabase } from './supabase';
 import {
   calculateZeroBasedSummary,
+  canMarkAsPaid,
   defaultFlowType,
+  isObligationPaydown,
   resolveModeAmount,
 } from './zero-based';
 import type {
@@ -55,6 +58,21 @@ export interface Template {
 }
 
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+
+/**
+ * Every mutation that can move money must invalidate the same set of keys.
+ * Phase 1 shipped the zero-based projections but only the new mutations
+ * invalidated them, so marking something paid left `['source-funds']` and
+ * `['zero-summary']` stale. Route all invalidations through here so a future
+ * projection can never be forgotten by one mutation.
+ */
+function invalidateMoneyKeys(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: ['txns'] });
+  qc.invalidateQueries({ queryKey: ['oblig'] });
+  qc.invalidateQueries({ queryKey: ['alloc'] });
+  qc.invalidateQueries({ queryKey: ['source-funds'] });
+  qc.invalidateQueries({ queryKey: ['zero-summary'] });
+}
 
 export function useActiveCycle(householdId: string | undefined) {
   return useQuery({
@@ -142,6 +160,15 @@ export function useMarkAsPaid() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { txn: Txn; actualAmount: number; accountId?: string | null; isFinal: boolean }) => {
+      // Exactly-once guard: `allocate_debt_payment` inserts its row already PAID
+      // and reduced the obligation inside SQL. Re-confirming that row here would
+      // decrement `remaining_amount` a second time.
+      if (!canMarkAsPaid(args.txn)) {
+        throw new Error('Transaksi ini sudah lunas.');
+      }
+      if (!(args.actualAmount > 0)) {
+        throw new Error('Nominal pembayaran harus lebih dari Rp 0.');
+      }
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
       const { error: uErr } = await sb.from('transactions').update({
@@ -155,18 +182,21 @@ export function useMarkAsPaid() {
         const { error } = await sb.from('recurring_templates').update({ status: 'COMPLETED' }).eq('id', args.txn.recurring_template_id);
         if (error) throw error;
       }
-      if (args.txn.obligation_id) {
-        const { data: ob } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id).maybeSingle();
+      if (isObligationPaydown(args.txn)) {
+        const { data: ob } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id!).maybeSingle();
         if (ob) {
           const remaining = Math.max(0, (ob as Obligation).remaining_amount - args.actualAmount);
           await sb.from('obligations').update({
             remaining_amount: remaining,
             status: remaining <= 0 ? 'SETTLED' : 'PARTIAL',
-          }).eq('id', args.txn.obligation_id);
+          }).eq('id', args.txn.obligation_id!);
         }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['txns'] }); qc.invalidateQueries({ queryKey: ['oblig'] }); qc.invalidateQueries({ queryKey: ['tmpl'] }); },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['tmpl'] });
+    },
   });
 }
 
@@ -200,10 +230,30 @@ export function useQuickAdd() {
         }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['txns'] }); qc.invalidateQueries({ queryKey: ['tmpl'] }); },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['tmpl'] });
+    },
   });
 }
 
+/**
+ * Planning path: pull part of an obligation into this cycle as a PENDING bill.
+ * No cash moves yet — execution happens later through `useMarkAsPaid` on the
+ * returned row.
+ *
+ * Two coherence rules, both required so the Home hero is correct in Phase 3:
+ *   1. The row is classified `DEBT_PAYMENT`, not `EXPENSE`. Obligation rows are
+ *      debt paydown everywhere else too, so the ledger and the
+ *      "Pembayaran Kewajiban" slot agree regardless of which path created them.
+ *   2. A `cycle_allocations` row is written at PLAN time, because committing
+ *      money to an obligation is the allocation. Without it "Total Alokasi"
+ *      would under-report until the payment was executed.
+ *
+ * Consequently `useMarkAsPaid` must NOT write another allocation when it
+ * confirms this row — one commitment, one allocation row (see allocate_debt_payment
+ * for the one-shot "pay without planning" path, which writes its own).
+ */
 export function useAllocateObligation() {
   const qc = useQueryClient();
   return useMutation({
@@ -211,21 +261,35 @@ export function useAllocateObligation() {
       householdId: string; cycleId: string; obligationId: string;
       amount: number; categoryId: string | null; accountId: string | null;
     }) => {
+      if (!(args.amount > 0)) throw new Error('Nominal alokasi harus lebih dari Rp 0.');
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
       const { data: ob } = await sb.from('obligations').select('*').eq('id', args.obligationId).maybeSingle();
-      const title = (ob as Obligation | null)?.title ?? 'Alokasi tanggungan';
+      const obligation = ob as Obligation | null;
+      if (obligation && args.amount > obligation.remaining_amount) {
+        throw new Error('Nominal alokasi melebihi sisa tanggungan.');
+      }
+      const title = obligation?.title ?? 'Alokasi tanggungan';
       const { error } = await sb.from('transactions').insert({
         household_id: args.householdId, cycle_id: args.cycleId,
         obligation_id: args.obligationId, name: title,
-        direction: 'EXPENSE', flow_type: 'EXPENSE', planned_amount: args.amount, actual_amount: args.amount,
+        direction: 'EXPENSE', flow_type: 'DEBT_PAYMENT',
+        planned_amount: args.amount, actual_amount: args.amount,
         status: 'PENDING', release_date: null,
         category_id: args.categoryId, account_id: args.accountId,
         created_by: user?.id ?? null,
       });
       if (error) throw error;
+
+      const { error: aErr } = await sb.from('cycle_allocations').insert({
+        household_id: args.householdId, cycle_id: args.cycleId,
+        allocation_type: 'DEBT_PAYMENT', amount: args.amount,
+        obligation_id: args.obligationId, account_id: args.accountId,
+        category_id: args.categoryId, created_by: user?.id ?? null,
+      });
+      if (aErr) throw aErr;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['txns'] }); },
+    onSuccess: () => invalidateMoneyKeys(qc),
   });
 }
 
@@ -272,23 +336,32 @@ export function useCreateCycle() {
       }
       return cycle as Cycle;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycle'] }); qc.invalidateQueries({ queryKey: ['txns'] }); },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['cycle'] });
+    },
   });
 }
 
+/**
+ * Creates an obligation in the canonical `OPEN` state. `UNPAID` is only kept
+ * as a legacy read alias (migration 004) — new rows must not write it, or the
+ * "is this still owed?" checks would need two spellings.
+ */
 export function useCreateObligation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { householdId: string; title: string; type: string; total: number; recipient?: string }) => {
+      if (!(args.total > 0)) throw new Error('Total tanggungan harus lebih dari Rp 0.');
       const sb = requireSupabase();
       const { error } = await sb.from('obligations').insert({
         household_id: args.householdId, title: args.title, type: args.type,
-        total_amount: args.total, remaining_amount: args.total, status: 'UNPAID',
+        total_amount: args.total, remaining_amount: args.total, status: 'OPEN',
         recipient: args.recipient ?? null,
       });
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['oblig'] }); },
+    onSuccess: () => invalidateMoneyKeys(qc),
   });
 }
 
