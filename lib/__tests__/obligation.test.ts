@@ -17,6 +17,7 @@ import {
   obligationTypeLabel,
   overdueNote,
   paidAmount,
+  planInfo,
   principalInterestText,
   progressPct,
   repaymentModeLabel,
@@ -290,5 +291,53 @@ describe('long date labels for prose (phase 5b)', () => {
     expect(longDateFullLabel('2026-13-01')).toBeNull();
     expect(longDateFullLabel('2026-02-31')).toBeNull();
     expect(longDateFullLabel('25/09/2026')).toBeNull();
+  });
+
+  it('85: Plan Info Row names the chosen plan, not the derived one', () => {
+    const r = planInfo({
+      repayment_mode: 'INSTALLMENT',
+      installment_count: 5,
+      planned_installment_amount: 2_000_000,
+      total_amount: 10_000_000,
+      due_date: '2026-10-25',
+      interest_fee_amount: 0,
+    });
+    expect(r.plan).toBe('Rencana: Rp 2.000.000 / siklus (5x)');
+    expect(r.due).toBe('Jatuh tempo: 25 Okt 2026');
+    expect(r.interest).toBe('Bunga: Rp 0');
+  });
+
+  it('86: an unchosen INSTALLMENT-shaped loan is not advertised as a schedule', () => {
+    // No repayment_mode, but installment_count 5 would derive as INSTALLMENT.
+    // The derived shape is fine for display elsewhere; printing "(5x)" here
+    // would present a plan nobody picked as though it were chosen.
+    const derived = planInfo({ installment_count: 5, planned_installment_amount: 2_000_000 });
+    expect(derived.plan).toBe('Rencana: Rp 2.000.000 / siklus (5x)');
+
+    // The real guard: a single-installment loan derives MANUAL, so it must not
+    // claim a per-cycle figure.
+    const single = planInfo({ installment_count: 1, planned_installment_amount: 10_000_000 });
+    expect(single.plan).toBe('Rencana: Manual, nominal ditentukan saat bayar');
+  });
+
+  it('87: LUMP and MANUAL plans read differently from INSTALLMENT', () => {
+    const lump = planInfo({ repayment_mode: 'LUMP_NEXT_MONTH', total_amount: 10_000_000 });
+    expect(lump.plan).toBe('Rencana: Lunas Rp 10.000.000 di siklus berikutnya');
+
+    const manual = planInfo({ repayment_mode: 'MANUAL' });
+    expect(manual.plan).toBe('Rencana: Manual, nominal ditentukan saat bayar');
+  });
+
+  it('88: interest is named, and a dateless obligation omits the due line', () => {
+    const r = planInfo({
+      repayment_mode: 'INSTALLMENT',
+      installment_count: 3,
+      planned_installment_amount: 1_100_000,
+      total_amount: 3_300_000,
+      interest_fee_amount: 300_000,
+    });
+    expect(r.interest).toBe('Bunga: Rp 300.000');
+    // null rather than an empty "Jatuh tempo: " — the card drops the element.
+    expect(r.due).toBeNull();
   });
 });

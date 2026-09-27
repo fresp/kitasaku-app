@@ -329,17 +329,22 @@ export default function FundingGapScreen() {
               <StrategyRow
                 icon={<TrendingUp size={14} color={Colors.paidText} />}
                 text={`Tambah Pendapatan · +${formatRupiah(fundingGap)}`}
-                onPress={() => router.push('/quick-add')}
+                onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
               />
+              {/* Asset release is a flow_type with no capture path yet: quick add
+                  writes OPERATING_INCOME for every income and the insert never
+                  sends ASSET_RELEASE. Shown as unavailable rather than routed to
+                  a form that would silently record the wrong flow type. */}
               <StrategyRow
-                icon={<Wallet size={14} color={Colors.alertText} />}
+                icon={<Wallet size={14} color={Colors.textMuted} />}
                 text="Pencairan Aset (Asset Release) · Dana Darurat"
-                onPress={() => router.push('/quick-add')}
+                note="Belum tersedia — catat lewat penyesuaian saldo akun"
+                disabled
               />
               <StrategyRow
                 icon={<Landmark size={14} color={Colors.loanText} />}
                 text="Pinjaman Baru (Financing Inflow) · +Liabilitas"
-                onPress={() => router.push('/quick-add')}
+                onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'loan' } })}
               />
             </View>
           )}
@@ -371,16 +376,27 @@ export default function FundingGapScreen() {
 function StrategyRow({
   icon,
   text,
+  note,
   onPress,
+  disabled,
 }: {
   icon: React.ReactNode;
   text: string;
-  onPress: () => void;
+  note?: string;
+  onPress?: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.strategyRow}>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.strategyRow, disabled && styles.strategyRowDisabled]}
+    >
       {icon}
-      <Text style={styles.strategyText} numberOfLines={2}>{text}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.strategyText} numberOfLines={2}>{text}</Text>
+        {!!note && <Text style={styles.strategyNote}>{note}</Text>}
+      </View>
     </Pressable>
   );
 }
@@ -514,7 +530,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: Colors.heroFooter, borderRadius: Radius.sm, padding: 10,
   },
-  strategyText: { color: Colors.white, fontSize: FontSize.caption, fontWeight: '600', flex: 1 },
+  // `strategyText` dropped its `flex: 1` for the wrapping View the note needs.
+  strategyText: { color: Colors.white, fontSize: FontSize.caption, fontWeight: '600' },
+  // A strategy that cannot be run yet stays visible — the family should know the
+  // option exists — but stops looking tappable.
+  strategyRowDisabled: { opacity: 0.55 },
+  strategyNote: { color: Colors.textMuted, fontSize: FontSize.microLabel, marginTop: 2 },
 
   lockRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   lockText: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16, flex: 1 },

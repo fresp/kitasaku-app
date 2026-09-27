@@ -193,11 +193,17 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.quickActions}>
-          <Pressable onPress={() => router.push('/quick-add')} style={styles.primaryAction}>
+          <Pressable
+            onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}
+            style={styles.primaryAction}
+          >
             <Plus size={15} color={Colors.white} />
             <Text style={styles.primaryActionText}>Tambah transaksi</Text>
           </Pressable>
-          <Pressable onPress={() => router.push('/quick-add')} style={styles.secondaryAction}>
+          <Pressable
+            onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
+            style={styles.secondaryAction}
+          >
             <Text style={styles.secondaryActionText}>Catat pemasukan</Text>
           </Pressable>
         </View>
@@ -226,7 +232,7 @@ export default function HomeScreen() {
           <View style={styles.emptyBox}>
             <BrandIcon name="empty-belum-ada-transaksi" size={72} label="" />
             <Text style={styles.empty}>Belum ada aktivitas di siklus ini.</Text>
-            <Pressable onPress={() => router.push('/quick-add')}>
+            <Pressable onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}>
               <Text style={styles.emptyLink}>+ Catat transaksi pertama</Text>
             </Pressable>
           </View>
@@ -255,7 +261,7 @@ export default function HomeScreen() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Tambah transaksi"
-        onPress={() => router.push('/quick-add')}
+        onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}
         style={styles.fab}
       >
         <Plus size={23} color={Colors.white} />

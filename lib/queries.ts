@@ -980,11 +980,22 @@ export function useCreateFinancingLoan() {
       accountId?: string | null; dueDate?: string | null;
       repaymentMethod?: LoanRepaymentMethod | null; installmentCount?: number | null;
       startDate?: string | null; interestFeeAmount?: number;
+      /**
+       * Plan shape. Written after the financing RPC because
+       * `create_financing_with_obligation` does not take it, and only when the
+       * caller passes one — a null here leaves the column NULL, which is the
+       * honest "nobody chose yet" state `repaymentModeOf` derives a display
+       * default from. Never guessed on the family's behalf.
+       */
+      repaymentMode?: RepaymentMode | null;
     }) => {
       if (!(args.amount > 0)) throw new Error('Nominal pembiayaan harus lebih dari 0.');
       if ((args.interestFeeAmount ?? 0) < 0) throw new Error('Bunga/biaya tidak boleh negatif.');
       if (args.installmentCount != null && (args.installmentCount < 1 || args.installmentCount > 600)) {
         throw new Error('Jumlah angsuran harus antara 1 dan 600.');
+      }
+      if (args.repaymentMode != null && !isRepaymentMode(args.repaymentMode)) {
+        throw new Error('Mode pembayaran tidak dikenal.');
       }
       const sb = requireSupabase();
       const { data, error } = await sb.rpc('create_financing_with_obligation', {
@@ -998,10 +1009,30 @@ export function useCreateFinancingLoan() {
         p_interest_fee_amount: args.interestFeeAmount ?? 0,
       });
       if (error) throw error;
-      return data as {
+      const rows = data as {
         transaction_id: string; obligation_id: string;
         installment_count: number | null; total_repayment: number;
       }[];
+
+      // Separate RPC, and deliberately after the money rows exist, because
+      // `create_financing_with_obligation` has no repayment_mode parameter. A
+      // failure here is logged rather than thrown: the loan was in fact
+      // created, so reporting failure would invite a retry that creates a
+      // second one. The obligation simply keeps repayment_mode NULL — the same
+      // "nobody chose yet" state migration 008 models — and Detail Pinjaman
+      // still lets the family set it from its Mode Pembayaran card.
+      const obligationId = rows[0]?.obligation_id;
+      if (args.repaymentMode != null && obligationId) {
+        const { error: modeErr } = await sb.rpc('set_obligation_repayment_mode', {
+          p_household_id: args.householdId,
+          p_obligation_id: obligationId,
+          p_mode: args.repaymentMode,
+        });
+        if (modeErr) {
+          console.warn('Pinjaman tersimpan tetapi mode pembayaran gagal diset:', modeErr.message);
+        }
+      }
+      return rows;
     },
     onSuccess: () => {
       invalidateMoneyKeys(qc);

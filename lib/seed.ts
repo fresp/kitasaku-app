@@ -10,6 +10,8 @@ const DEFAULT_CATEGORIES = [
   { name: 'Rumah Tangga', type: 'EXPENSE', monthly_budget: 5000000 },
   { name: 'Utilitas', type: 'EXPENSE', monthly_budget: 1000000 },
   { name: 'Gaji & Pemasukan', type: 'INCOME', monthly_budget: 0 },
+  { name: 'Bonus', type: 'INCOME', monthly_budget: 0 },
+  { name: 'Side Hustle', type: 'INCOME', monthly_budget: 0 },
 ];
 
 const DEFAULT_ACCOUNTS = [

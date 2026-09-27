@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Gauge from 'lucide-react-native/icons/gauge';
 import Plus from 'lucide-react-native/icons/plus';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { BrandIcon } from '../../components/ui/BrandIcon';
@@ -66,10 +67,25 @@ export default function ObligationsScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>Kewajiban &amp; Reimburse</Text>
-          <Pressable onPress={() => setShowForm(true)} style={styles.addBtn}>
-            <Plus size={14} color={Colors.white} />
-            <Text style={styles.addText}>Tambah</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            {/* Budget Health was reachable only by URL: it is registered in
+                app/_layout.tsx but nothing pushed to it, so the screen shipped
+                dead. An icon rather than a second labelled button because
+                design's top bar is Title + Tambah, and the verdict belongs
+                beside the obligations without competing with that action. */}
+            <Pressable
+              onPress={() => router.push('/budget-health')}
+              style={styles.iconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Kesehatan anggaran"
+            >
+              <Gauge size={16} color={Colors.textSecondary} />
+            </Pressable>
+            <Pressable onPress={() => setShowForm(true)} style={styles.addBtn}>
+              <Plus size={14} color={Colors.textPrimary} />
+              <Text style={styles.addText}>Tambah</Text>
+            </Pressable>
+          </View>
         </View>
 
         <ObligationFormSheet
@@ -85,14 +101,30 @@ export default function ObligationsScreen() {
         >
           {FILTERS.map((f) => {
             const active = f.key === filter;
+            const loan = f.key === 'loan';
             const n = counts[f.key];
             return (
               <Pressable
                 key={f.key}
                 onPress={() => setFilter(f.key)}
-                style={[styles.chip, active && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  // Design outlines the Pinjaman tab in the loan state colour
+                  // even when it is not the active one: the tab is a standing
+                  // reminder that this slice of the list is debt, which the
+                  // neutral grey of the other four would not carry.
+                  loan && styles.chipLoan,
+                  active && styles.chipActive,
+                  active && loan && styles.chipActiveLoan,
+                ]}
               >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                <Text
+                  style={[
+                    styles.chipText,
+                    loan && styles.chipTextLoan,
+                    active && styles.chipTextActive,
+                  ]}
+                >
                   {f.label}
                   {n > 0 ? ` ${n}` : ''}
                 </Text>
@@ -152,12 +184,22 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.canvas },
   container: { padding: 16, gap: 12, paddingBottom: 96 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '600' },
+  // Design's Screen 3 title is 24/700, a step above the 18 sectionTitle used
+  // inside cards — the screen header is not a section header.
+  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700' },
+  // Surface + border, not a filled brand button: "+ Tambah" is a secondary
+  // action here, and a filled button competed with the overview card.
   addBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: Colors.brandPrimary,
-    borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surface,
+    borderWidth: 1, borderColor: Colors.borderSubtle,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
   },
-  addText: { color: Colors.white, fontWeight: '600', fontSize: FontSize.body },
+  addText: { color: Colors.textPrimary, fontWeight: '600', fontSize: FontSize.body },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  iconBtn: {
+    width: 36, height: 36, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle,
+  },
 
   form: {
     backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
@@ -171,14 +213,20 @@ const styles = StyleSheet.create({
   },
   hint: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
 
-  filterRow: { gap: 8, paddingVertical: 2, paddingRight: 8 },
+  filterRow: { gap: 4, paddingVertical: 2, paddingRight: 8 },
   chip: {
-    backgroundColor: Colors.subtle, borderRadius: Radius.pill,
-    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: Colors.surface, borderRadius: Radius.pill,
+    borderWidth: 1, borderColor: Colors.borderSubtle,
+    paddingHorizontal: 14, paddingVertical: 7,
   },
-  chipActive: { backgroundColor: Colors.brandPrimary },
-  chipText: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
-  chipTextActive: { color: Colors.white },
+  chipLoan: { backgroundColor: Colors.loanBg, borderColor: Colors.loanBorder },
+  chipActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  // Active wins over the loan tint: an active tab is filled brand, as design
+  // shows for "Semua", regardless of which type it filters.
+  chipActiveLoan: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  chipText: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '500' },
+  chipTextLoan: { color: Colors.loanText, fontWeight: '600' },
+  chipTextActive: { color: Colors.white, fontWeight: '600' },
 
   overview: { backgroundColor: Colors.textPrimary, borderRadius: Radius.lg, padding: 16, gap: 4 },
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 0.6 },

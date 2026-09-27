@@ -330,6 +330,57 @@ export function principalInterestText(o: {
   return `Pokok: ${formatRupiah(principal)} · Bunga: ${formatRupiah(interest)} · Sisa: ${formatRupiah(remaining)}`;
 }
 
+export interface PlanInfo {
+  /** "Rencana: Rp 2.000.000 / siklus", or a plan with no fixed amount. */
+  plan: string;
+  /** "Jatuh tempo: 25 Okt 2026" — the whole string, since it is coloured apart. */
+  due: string | null;
+  /** "Bunga: Rp 0". */
+  interest: string;
+}
+
+/**
+ * Design's Plan Info Row: "Rencana: Rp 2.000.000 / siklus" • "Jatuh tempo: 25
+ * Okt 2026" • "Bunga: Rp 0".
+ *
+ * The plan column reports what the family CHOSE (`repayment_mode`), not what the
+ * numbers imply, because the two can disagree: a loan with `installment_count`
+ * of 1 and no chosen mode derives as MANUAL, and printing "Rp X / siklus" for it
+ * would invent a schedule nobody set. When a mode is INTEREST-bearing the
+ * interest is named here as well, so the row totals what the loan really costs.
+ */
+export function planInfo(o: {
+  repayment_mode?: string | null;
+  installment_count?: number | null;
+  planned_installment_amount?: number | null;
+  total_amount?: number | null;
+  due_date?: string | null;
+  interest_fee_amount?: number | null;
+}): PlanInfo {
+  const interest = Math.max(0, Number(o.interest_fee_amount) || 0);
+  const total = Math.max(0, Number(o.total_amount) || 0);
+  const count = Number(o.installment_count) || 0;
+  const perCycle = Number(o.planned_installment_amount) || 0;
+  const { mode } = repaymentModeOf(o);
+
+  const plan =
+    mode === 'INSTALLMENT'
+      ? perCycle > 0
+        ? `Rencana: ${formatRupiah(perCycle)} / siklus${count > 1 ? ` (${count}x)` : ''}`
+        : 'Rencana: cicilan per siklus'
+      : mode === 'LUMP_NEXT_MONTH'
+        ? `Rencana: Lunas ${formatRupiah(total)} di siklus berikutnya`
+        : 'Rencana: Manual, nominal ditentukan saat bayar';
+
+  const due = longDateLabel(o.due_date);
+
+  return {
+    plan,
+    due: due ? `Jatuh tempo: ${due}` : null,
+    interest: `Bunga: ${formatRupiah(interest)}`,
+  };
+}
+
 /** "2 dari 5 cicilan" — null when the obligation has no schedule. */
 export function installmentProgressLabel(
   installments: { status: ObligationStatus | string }[]

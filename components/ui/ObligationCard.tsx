@@ -17,6 +17,7 @@ import {
   overdueNote,
   paidAmount,
   paidCue,
+  planInfo,
   principalInterestText,
   progressPct,
   type LoanState,
@@ -52,6 +53,8 @@ export interface ObligationCardData {
   interest_fee_amount?: number | null;
   installment_count?: number | null;
   planned_installment_amount?: number | null;
+  /** Migration 008. Null means nobody chose a plan shape — see `planInfo`. */
+  repayment_mode?: string | null;
   beneficiary_id?: string | null;
   beneficiary?: Beneficiary | null;
 }
@@ -96,6 +99,8 @@ export function ObligationCard({
   const Icon = STATE_ICON[state];
   const settled = state === 'SETTLED' || state === 'CANCELLED';
   const schedule = installmentProgressLabel(installments);
+  const isLoan = normalizeObligationType(obligation.type) === 'LOAN';
+  const plan = planInfo(obligation);
   const counterparty = obligation.beneficiary
     ? `Tujuan: ${obligation.beneficiary.name} (${formatBankBadge(obligation.beneficiary.bank_name)})`
     : counterpartyLabel(obligation.type, obligation.recipient);
@@ -173,6 +178,18 @@ export function ObligationCard({
         />
       </View>
 
+      {/* Design puts this row on the loan card between the track and the
+          breakdown, and only on loans — the other variants have no plan. The
+          due line is its own colour there because the deadline is the one thing
+          on the row a person scans for. */}
+      {isLoan && (
+        <View style={styles.planRow}>
+          <Text style={styles.planText} numberOfLines={1}>{plan.plan}</Text>
+          {!!plan.due && <Text style={styles.planDue} numberOfLines={1}>{plan.due}</Text>}
+          <Text style={styles.planInterest} numberOfLines={1}>{plan.interest}</Text>
+        </View>
+      )}
+
       <Text style={styles.breakdown}>{line3}</Text>
 
       {!settled && (
@@ -240,11 +257,11 @@ function overdueBreakdown(o: ObligationCardData, installments: ObligationInstall
 const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14, gap: 10,
+    borderColor: Colors.borderSubtle, padding: 16, gap: 10,
   },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   leftTags: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
-  iconBox: { width: 28, height: 28, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
+  iconBox: { width: 26, height: 26, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
   title: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700' },
   sub: { color: Colors.textSecondary, fontSize: FontSize.body },
   amountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8 },
@@ -256,6 +273,12 @@ const styles = StyleSheet.create({
   paidHint: { color: Colors.textMuted, fontSize: FontSize.caption, fontVariant: ['tabular-nums'] },
   track: { height: 6, borderRadius: 3, backgroundColor: Colors.subtle, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
+  planRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  },
+  planText: { color: Colors.textSecondary, fontSize: FontSize.caption, flexShrink: 1 },
+  planDue: { color: Colors.financingText, fontSize: FontSize.caption, fontWeight: '600', flexShrink: 1 },
+  planInterest: { color: Colors.textSecondary, fontSize: FontSize.caption, flexShrink: 1 },
   breakdown: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
   history: { backgroundColor: Colors.canvas, borderRadius: Radius.sm, padding: 9 },
   historyText: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
