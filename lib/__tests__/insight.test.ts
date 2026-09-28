@@ -97,7 +97,11 @@ describe('year buckets (phase 5c)', () => {
         txn({ cycle_id: 'c-jan', direction: 'INCOME', flow_type: 'ASSET_RELEASE', planned_amount: 2_000_000, status: 'PENDING' }),
         txn({ cycle_id: 'c-jan', flow_type: 'EXPENSE', planned_amount: 3_000_000, actual_amount: 3_500_000, status: 'PAID' }),
         txn({ cycle_id: 'c-jan', flow_type: 'DEBT_PAYMENT', planned_amount: 1_000_000, actual_amount: 1_000_000, status: 'PAID' }),
-        txn({ cycle_id: 'c-jan', direction: 'INCOME', flow_type: 'ASSET_ALLOCATION', actual_amount: 4_000_000, status: 'PAID' }),
+        // An asset allocation is cash OUT: the money leaves the account and
+        // becomes a position. It is written with the direction it really has
+        // (EXPENSE) rather than INCOME, so this row cannot pass by accident if
+        // a reader ever starts branching on `direction`.
+        txn({ cycle_id: 'c-jan', direction: 'EXPENSE', flow_type: 'ASSET_ALLOCATION', actual_amount: 4_000_000, status: 'PAID' }),
       ],
       allocations: [],
       year: 2026,
@@ -111,6 +115,28 @@ describe('year buckets (phase 5c)', () => {
     expect(jan.plannedExpense).toBe(3_000_000);
     expect(jan.actualDebtPayment).toBe(1_000_000);
     expect(jan.actualAssetAllocation).toBe(4_000_000);
+  });
+
+  it('90b: an ASSET_ALLOCATION row counts regardless of the direction it carries', () => {
+    // The Phase 1 rule: `flow_type` classifies, `direction` does not. A row can
+    // arrive with either direction — a buggy writer, a legacy row, a CSV import
+    // — and it must still land in `actualAssetAllocation`. Locking this here is
+    // what stops the reader from silently going back to branching on direction.
+    const build = (direction: 'INCOME' | 'EXPENSE') =>
+      buildYearBuckets({
+        cycles: [CYCLE_JAN],
+        txns: [
+          txn({ cycle_id: 'c-jan', direction, flow_type: 'ASSET_ALLOCATION', actual_amount: 4_000_000, status: 'PAID' }),
+        ],
+        allocations: [],
+        year: 2026,
+      })[0];
+
+    expect(build('EXPENSE').actualAssetAllocation).toBe(4_000_000);
+    expect(build('INCOME').actualAssetAllocation).toBe(4_000_000);
+    // And it is never read as income: direction does not reclassify the row.
+    expect(build('INCOME').actualIncome).toBe(0);
+    expect(build('INCOME').sourceTotal).toBe(0);
   });
 
   it('91: a PENDING row contributes to plan but never to actual', () => {
@@ -436,7 +462,9 @@ describe('plan vs actual (phase 5c)', () => {
     txns: [
       txn({ cycle_id: 'c-feb', direction: 'INCOME', flow_type: 'OPERATING_INCOME', planned_amount: 20_000_000, actual_amount: 18_000_000, status: 'PAID' }),
       txn({ cycle_id: 'c-feb', flow_type: 'EXPENSE', planned_amount: 10_000_000, actual_amount: 12_000_000, status: 'PAID' }),
-      txn({ cycle_id: 'c-feb', direction: 'INCOME', flow_type: 'ASSET_ALLOCATION', actual_amount: 3_000_000, status: 'PAID' }),
+      // Cash out to an asset position, so EXPENSE is the honest direction; the
+      // classification still comes from `flow_type` (see test 90b).
+      txn({ cycle_id: 'c-feb', direction: 'EXPENSE', flow_type: 'ASSET_ALLOCATION', actual_amount: 3_000_000, status: 'PAID' }),
     ],
     allocations: [
       { cycle_id: 'c-feb', allocation_type: 'INVESTMENT', amount: 2_000_000 },

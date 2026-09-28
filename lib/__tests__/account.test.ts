@@ -9,6 +9,7 @@ import {
   resolveAccountIcon,
   sortAccounts,
   validateAccountNumber,
+  defaultAccountId,
 } from '../account';
 import type { AccountType } from '../account';
 
@@ -168,6 +169,55 @@ describe('account helpers and presentation rules (Flow J)', () => {
       ];
       const sorted = sortAccounts(input);
       expect(sorted.map((a) => a.name)).toEqual(['Alpha', 'First', 'Second']);
+    });
+  });
+
+  describe('defaultAccountId', () => {
+    // The four accounts lib/seed.ts writes, in the order it writes them. The
+    // sort_order values mirror migration 010's backfill.
+    const seeded = [
+      { id: 'bank', name: 'Mandiri', type: 'BANK', sort_order: 1 },
+      { id: 'card', name: 'CC Mandiri', type: 'CREDIT_CARD', sort_order: 2 },
+      { id: 'wallet', name: 'ShopeePay', type: 'E_WALLET', sort_order: 3 },
+      { id: 'cash', name: 'Tunai', type: 'CASH', sort_order: 4 },
+    ];
+
+    it('picks the bank from a seeded household, not the first row', () => {
+      expect(defaultAccountId(sortAccounts(seeded))).toBe('bank');
+    });
+
+    it('picks the bank even when it does not sort first', () => {
+      // A family that dragged its card to the top: the bank is still the
+      // account a cycle reconciles against, so it is still the honest default.
+      const reordered = [
+        { id: 'card', name: 'CC Mandiri', type: 'CREDIT_CARD', sort_order: 1 },
+        { id: 'bank', name: 'Mandiri', type: 'BANK', sort_order: 2 },
+      ];
+      expect(defaultAccountId(sortAccounts(reordered))).toBe('bank');
+    });
+
+    it('regression: the untied seed handed income rows a credit card', () => {
+      // Without sort_order every row ties at 0 and the alphabetical tie-break
+      // decides, which puts 'CC Mandiri' before 'Mandiri'. This is the bug that
+      // made a salary look like it arrived on a card.
+      const untied = seeded.map(({ sort_order, ...rest }) => rest);
+      const sorted = sortAccounts(untied);
+      expect(sorted[0].name).toBe('CC Mandiri');
+      // defaultAccountId still rescues it: the bank is chosen by type, not
+      // position, so the fix holds even if a row loses its sort_order.
+      expect(defaultAccountId(sorted)).toBe('bank');
+    });
+
+    it('falls back to the first account when there is no bank', () => {
+      const noBank = [
+        { id: 'wallet', name: 'ShopeePay', type: 'E_WALLET', sort_order: 1 },
+        { id: 'cash', name: 'Tunai', type: 'CASH', sort_order: 2 },
+      ];
+      expect(defaultAccountId(sortAccounts(noBank))).toBe('wallet');
+    });
+
+    it('returns null when there are no accounts at all', () => {
+      expect(defaultAccountId([])).toBeNull();
     });
   });
 });

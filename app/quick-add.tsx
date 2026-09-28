@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Info from 'lucide-react-native/icons/info';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
+import { defaultAccountId } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
   useAccounts,
@@ -108,7 +109,10 @@ export default function QuickAddScreen() {
   const pickedCategoryId =
     categoryId && visibleCategories.some((c) => c.id === categoryId) ? categoryId : null;
   const selectedCategoryId = pickedCategoryId ?? visibleCategories[0]?.id ?? null;
-  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
+  // `defaultAccountId` picks the bank rather than the first row: a card or
+  // wallet that happens to sort first must never become the source of an income
+  // row. See lib/account.ts for why the first row was the wrong answer.
+  const selectedAccountId = accountId ?? defaultAccountId(accounts);
 
   const perCycle = parseAmount(perCycleText);
   // No interest input in design Screen 4, so the repayment total IS the amount

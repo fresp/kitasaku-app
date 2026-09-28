@@ -130,6 +130,11 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['alloc'] });
   qc.invalidateQueries({ queryKey: ['source-funds'] });
   qc.invalidateQueries({ queryKey: ['zero-summary'] });
+  // Insight & Aset reads the same transactions and allocations through a
+  // different key. It used to be the one money screen a mutation could not
+  // refresh, so its charts kept yesterday's asset position while every other
+  // screen updated.
+  qc.invalidateQueries({ queryKey: ['year-insight'] });
 }
 
 export function useActiveCycle(householdId: string | undefined) {
@@ -480,6 +485,10 @@ export function useCreateCycle() {
     onSuccess: () => {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['cycle'] });
+      // A new cycle can be the first in a brand-new year. Insight & Aset's year
+      // selector is built from this list, so without it the year the family
+      // just opened a cycle in would be missing from the dropdown.
+      qc.invalidateQueries({ queryKey: ['cycle-years'] });
     },
   });
 }

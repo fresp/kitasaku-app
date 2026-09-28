@@ -30,6 +30,9 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['txns'] });
+          // Insight & Aset charts the same rows for a whole year under its own
+          // key; without this the partner's edits leave its charts stale.
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
         }
       )
       .on(
@@ -51,6 +54,11 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'cycles', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['cycle'] });
+          // Insight & Aset reads the cycle list directly (which cycles exist,
+          // and their dates), and lists the years to offer in its selector. A
+          // cycle the partner opens in a new year must appear on both.
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
+          qc.invalidateQueries({ queryKey: ['cycle-years'] });
         }
       )
       .on(
@@ -62,6 +70,7 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           // transaction and allocation row, so those views are stale too.
           qc.invalidateQueries({ queryKey: ['txns'] });
           qc.invalidateQueries({ queryKey: ['alloc'] });
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
         }
       )
       .on(
@@ -78,6 +87,8 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           qc.invalidateQueries({ queryKey: ['alloc'] });
           qc.invalidateQueries({ queryKey: ['zero-summary'] });
           qc.invalidateQueries({ queryKey: ['oblig'] });
+          // The asset trend and the funding-gap chart are built from these rows.
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
         }
       )
       .on(

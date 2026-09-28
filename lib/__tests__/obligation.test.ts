@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   counterpartyLabel,
+  currentInstallmentNumber,
   daysBetween,
   installmentProgressLabel,
   isRepaymentMode,
@@ -269,6 +270,34 @@ describe('backlog overview (phase 5b)', () => {
     expect(counts.reimburse).toBe(1);
     expect(counts.installment).toBe(1);
     expect(counts.bill).toBe(0);
+  });
+});
+
+describe('current installment number (derived, not stored)', () => {
+  // A 12jt loan over 12 cycles of 1jt: remaining 12jt means nothing paid yet.
+  const loan = { total_amount: 12_000_000, planned_installment_amount: 1_000_000, installment_count: 12 };
+
+  it('89: an untouched loan is on installment 1', () => {
+    expect(currentInstallmentNumber({ ...loan, remaining_amount: 12_000_000 })).toBe(1);
+  });
+
+  it('90: paid installments advance the number off remaining_amount', () => {
+    // Four cycles paid (4jt down) -> the family is on the 5th.
+    expect(currentInstallmentNumber({ ...loan, remaining_amount: 8_000_000 })).toBe(5);
+    // A partial payment inside an installment floors to that installment.
+    expect(currentInstallmentNumber({ ...loan, remaining_amount: 7_500_000 })).toBe(5);
+  });
+
+  it('91: the number is capped at the count and never overshoots on the last row', () => {
+    // The final installment's rounding remainder makes paid exceed (count-1)*per.
+    expect(currentInstallmentNumber({ ...loan, remaining_amount: 0 })).toBe(12);
+  });
+
+  it('92: no schedule means no ordinal — null, never a fabricated "ke-1"', () => {
+    expect(currentInstallmentNumber({ ...loan, installment_count: 1, remaining_amount: 12_000_000 })).toBeNull();
+    expect(currentInstallmentNumber({ ...loan, installment_count: null, remaining_amount: 12_000_000 })).toBeNull();
+    expect(currentInstallmentNumber({ ...loan, planned_installment_amount: 0, remaining_amount: 12_000_000 })).toBeNull();
+    expect(currentInstallmentNumber({})).toBeNull();
   });
 });
 

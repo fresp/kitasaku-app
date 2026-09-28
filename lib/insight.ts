@@ -280,6 +280,11 @@ export function buildYearBuckets(args: {
           (b.debtPaymentByObligation[t.obligation_id] ?? 0) + actual;
       }
     } else if (flow === 'ASSET_ALLOCATION') {
+      // Classified by `flow_type`, never by `direction` — the Phase 1 rule at
+      // the head of lib/zero-based.ts. An asset allocation is cash leaving the
+      // account to become a position, so `direction` is only a cash-sign hint
+      // that a row can carry wrong; branching on it here would silently drop
+      // the row from the asset trend instead of counting it.
       b.actualAssetAllocation += actual;
     }
   }

@@ -412,6 +412,45 @@ export function nextOpenInstallment<T extends InstallmentLike>(installments: T[]
   return dated[0] ?? open[0] ?? null;
 }
 
+/**
+ * Which installment the family is on, 1-based — derived from the money that
+ * actually moves, never from the stored counters.
+ *
+ * Two columns look like they hold this answer and do not. `current_installment`
+ * is written once as `1` when the loan is created (005:116) and has no UPDATE
+ * anywhere, so reading it pins every loan at "Cicilan ke-1 dari N" forever.
+ * `obligation_installments.status` is likewise only ever INSERTed as `'OPEN'`
+ * (005:218), with no trigger to settle a row — so counting `SETTLED` rows, the
+ * obvious alternative, is always zero. Both are systematic wrong answers on the
+ * screen a family uses to decide the cycle's allocation.
+ *
+ * `remaining_amount` is the one field every payment path decrements — both
+ * `useMarkAsPaid` (lib/queries.ts) and the `allocate_debt_payment` RPC
+ * (004:437) — so the paid-to-date it yields is the only input here that
+ * changes over time. `planned_installment_amount` is the equal per-installment
+ * split the schedule was generated from (005:114, computed as total / count),
+ * so dividing one by the other counts how many installments the money has
+ * covered. A partial payment inside an installment floors to that same
+ * installment, which is the honest reading.
+ *
+ * Returns null when there is no schedule to number — a single payment or a
+ * manual plan — so the caller drops the label rather than inventing an
+ * ordinal. The result is capped at `installment_count` so a rounding overshoot
+ * on the final installment cannot print "ke-6 dari 5".
+ */
+export function currentInstallmentNumber(o: {
+  total_amount?: number | null;
+  remaining_amount?: number | null;
+  planned_installment_amount?: number | null;
+  installment_count?: number | null;
+}): number | null {
+  const count = Math.floor(Number(o.installment_count) || 0);
+  const perCycle = Number(o.planned_installment_amount) || 0;
+  if (count <= 1 || perCycle <= 0) return null;
+  const paid = paidAmount(o.total_amount, o.remaining_amount);
+  return Math.min(count, Math.floor(paid / perCycle) + 1);
+}
+
 // ============ Repayment mode ============
 
 export interface RepaymentModeInput {

@@ -24,7 +24,7 @@ import {
   useTemplates,
 } from '../lib/queries';
 import { cycleReadiness } from '../lib/zero-based';
-import { longDateFullLabel, shortDateLabel } from '../lib/obligation';
+import { currentInstallmentNumber, longDateFullLabel, shortDateLabel } from '../lib/obligation';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
@@ -282,7 +282,11 @@ export default function FundingGapScreen() {
             const inst = openInstallments.find((i) => i.obligation_id === o.id);
             const amount = inst?.planned_amount ?? o.remaining_amount;
             const total = o.installment_count ?? 0;
-            const current = o.current_installment ?? 0;
+            // Derived from `remaining_amount` (which every payment path
+            // decrements), NOT `o.current_installment` — that column is written
+            // once as 1 and never updated, so it read "ke-1" for every loan
+            // forever. See `currentInstallmentNumber` for the full reasoning.
+            const current = currentInstallmentNumber(o);
             return (
               <View key={o.id} style={styles.kwRow}>
                 <View style={styles.checkBox}>
@@ -291,7 +295,7 @@ export default function FundingGapScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cloneName}>{o.title}</Text>
                   <Text style={styles.rowSub}>
-                    {total > 1 && current > 0 ? `Cicilan ke-${current} dari ${total} • ` : ''}
+                    {current !== null ? `Cicilan ke-${current} dari ${total} • ` : ''}
                     {o.due_date ? `Jatuh tempo ${longDate(o.due_date)}` : `Sisa ${formatRupiah(o.remaining_amount)}`}
                   </Text>
                 </View>

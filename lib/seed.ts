@@ -33,11 +33,20 @@ const DEFAULT_CATEGORIES = [
   { name: 'Side Hustle', type: 'INCOME', monthly_budget: 0 },
 ];
 
+/**
+ * `sort_order` is explicit here because migration 010 only backfills it for
+ * households that already existed when that migration ran. A household seeded
+ * afterwards leaves all four rows tied at the column default of 0, and
+ * `sortAccounts` then breaks the tie alphabetically — which puts 'CC Mandiri'
+ * first, so the bank is no longer the default account. The numbers mirror the
+ * backfill in `010_account_management.sql` so old and new households sort the
+ * same way.
+ */
 const DEFAULT_ACCOUNTS = [
-  { name: 'Mandiri', type: 'BANK' },
-  { name: 'CC Mandiri', type: 'CREDIT_CARD' },
-  { name: 'ShopeePay', type: 'E_WALLET' },
-  { name: 'Tunai', type: 'CASH' },
+  { name: 'Mandiri', type: 'BANK', sort_order: 1 },
+  { name: 'CC Mandiri', type: 'CREDIT_CARD', sort_order: 2 },
+  { name: 'ShopeePay', type: 'E_WALLET', sort_order: 3 },
+  { name: 'Tunai', type: 'CASH', sort_order: 4 },
 ];
 
 export async function seedHouseholdDefaults(householdId: string): Promise<void> {

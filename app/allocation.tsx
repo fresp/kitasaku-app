@@ -4,8 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
+import { defaultAccountId } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
+  useAccounts,
   useActiveCycle,
   useCategories,
   useCreateAllocation,
@@ -56,6 +58,7 @@ export default function AllocationScreen() {
   const allocsQ = useCycleAllocations(householdId, cycleId);
   const catsQ = useCategories(householdId);
   const obligQ = useObligations(householdId);
+  const accsQ = useAccounts(householdId);
   const createAlloc = useCreateAllocation();
   const deleteAlloc = useDeleteAllocation();
 
@@ -64,13 +67,20 @@ export default function AllocationScreen() {
   const [amountText, setAmountText] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [obligationId, setObligationId] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const summary = summaryQ.data;
   const allocations = useMemo(() => allocsQ.data ?? [], [allocsQ.data]);
   const categories = useMemo(() => catsQ.data ?? [], [catsQ.data]);
   const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
+  const accounts = useMemo(() => accsQ.data ?? [], [accsQ.data]);
   const amount = parseAmount(amountText);
+
+  // The cycle balance is reconciled against the primary account, so the form
+  // pre-selects the bank rather than whatever sorts first; a wallet or card
+  // first in the list would silently mislabel where the money actually sits.
+  const selectedAccountId = accountId ?? defaultAccountId(accounts);
 
   const grouped = useMemo(() => {
     const map = new Map<AllocationType, CycleAllocation[]>();
@@ -102,6 +112,7 @@ export default function AllocationScreen() {
         amount,
         categoryId,
         obligationId: type === 'DEBT_PAYMENT' ? obligationId : null,
+        accountId: selectedAccountId,
       });
       setAmountText(''); setShowForm(false);
     } catch (e: any) {
@@ -241,6 +252,23 @@ export default function AllocationScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+
+            <Text style={styles.formLabel}>AKUN</Text>
+            <View style={styles.chips}>
+              {accounts.map((a) => {
+                const active = a.id === selectedAccountId;
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => setAccountId(a.id)}
+                    style={[styles.chip, active && styles.chipOutline]}
+                  >
+                    <Text style={styles.chipText}>{a.name}</Text>
+                  </Pressable>
+                );
+              })}
+              {accounts.length === 0 && <Text style={styles.muted}>Memuat akun…</Text>}
             </View>
 
             <PrimaryButton

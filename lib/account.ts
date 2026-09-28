@@ -114,3 +114,19 @@ export function sortAccounts<T extends { sort_order?: number; name: string }>(
     return a.name.localeCompare(b.name, 'id');
   });
 }
+
+/**
+ * The account a money form should pre-select when the family has not picked
+ * one: the first bank, falling back to the first account, falling back to null.
+ *
+ * A bank is the only account whose balance a cycle reconciles against, so it is
+ * the honest default. Picking the first row instead used to hand a *card* to
+ * income rows — 'CC Mandiri' sorts before 'Mandiri' alphabetically, and the
+ * seeded rows shared a sort_order, so the tie-break decided it. Expects the
+ * list already ordered by `sortAccounts`.
+ */
+export function defaultAccountId<T extends { id: string; type: string }>(
+  accounts: T[]
+): string | null {
+  return accounts.find((a) => a.type === 'BANK')?.id ?? accounts[0]?.id ?? null;
+}
