@@ -143,7 +143,8 @@ begin
       when t.account_id = p_account_id and t.flow_type in ('EXPENSE','DEBT_PAYMENT','ASSET_ALLOCATION') then -t.actual_amount
       else 0
     end
-  ), 0)::bigint into v_expected_recorded_net;
+  ), 0)::bigint
+    into v_expected_recorded_net
     from public.transactions t
    where t.household_id = p_household_id and t.cycle_id = p_cycle_id
      and t.status = 'PAID';

@@ -3,8 +3,8 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, Vie
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import CheckCircle2 from 'lucide-react-native/icons/check-circle-2';
-import AlertTriangle from 'lucide-react-native/icons/alert-triangle';
+import CircleCheckBig from 'lucide-react-native/icons/circle-check-big';
+import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import Landmark from 'lucide-react-native/icons/landmark';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
@@ -133,7 +133,7 @@ export default function ReconciliationScreen() {
         {!cycle && !cycleQ.isLoading && <Text style={styles.muted}>Belum ada siklus aktif.</Text>}
         {cycle && !cycle.primary_account_id && (
           <View style={styles.warningCard}>
-            <AlertTriangle size={20} color={Colors.alertText} />
+            <TriangleAlert size={20} color={Colors.alertText} />
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>Akun primer belum dipilih</Text>
               <Text style={styles.body}>Pilih rekening BANK sebagai acuan sebelum saldo bisa dicocokkan.</Text>
@@ -154,7 +154,7 @@ export default function ReconciliationScreen() {
 
         {saved && (
           <View style={styles.successCard}>
-            <CheckCircle2 size={21} color={Colors.paidText} />
+            <CircleCheckBig size={21} color={Colors.paidText} />
             <View style={{ flex: 1 }}>
               <Text style={styles.successTitle}>Rekonsiliasi sudah tersimpan</Text>
               <Text style={styles.body}>
@@ -214,7 +214,7 @@ export default function ReconciliationScreen() {
             )}
             {closeResult && (
               <View style={styles.successCard}>
-                <CheckCircle2 size={21} color={Colors.paidText} />
+                <CircleCheckBig size={21} color={Colors.paidText} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.successTitle}>Siklus berhasil ditutup</Text>
                   <Text style={styles.body}>
@@ -228,7 +228,7 @@ export default function ReconciliationScreen() {
 
             {issues.length > 0 && (
               <View style={styles.warningCard}>
-                <AlertTriangle size={20} color={Colors.alertText} />
+                <TriangleAlert size={20} color={Colors.alertText} />
                 <View style={{ flex: 1, gap: 6 }}>
                   <Text style={styles.cardTitle}>Belum bisa ditutup</Text>
                   {issues.map((issue) => (
