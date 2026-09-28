@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Calendar from 'lucide-react-native/icons/calendar';
 import Info from 'lucide-react-native/icons/info';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
@@ -14,7 +15,7 @@ import {
   useCreateFinancingLoan,
   useQuickAdd,
 } from '../lib/queries';
-import { REPAYMENT_MODES, type RepaymentMode } from '../lib/obligation';
+import { longDateFullLabel, REPAYMENT_MODES, type RepaymentMode } from '../lib/obligation';
 import { splitInstallments } from '../lib/zero-based';
 import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton } from '../components/ui/Button';
@@ -24,6 +25,14 @@ import { LinkedEffectCard } from '../components/quick-add/LinkedEffectCard';
 function parseAmount(text: string): number {
   const digits = text.replace(/[^0-9]/g, '');
   return digits ? parseInt(digits, 10) : 0;
+}
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isValidISODate(value: string): boolean {
+  return longDateFullLabel(value) !== null;
 }
 
 type Kind = 'out' | 'in' | 'loan';
@@ -70,6 +79,8 @@ export default function QuickAddScreen() {
   }
   const [name, setName] = useState('');
   const [amountText, setAmountText] = useState('');
+  const [releaseDate, setReleaseDate] = useState(todayISO());
+  const [dateEditing, setDateEditing] = useState(false);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [recurring, setRecurring] = useState(false);
@@ -122,6 +133,7 @@ export default function QuickAddScreen() {
   // wallet that happens to sort first must never become the source of an income
   // row. See lib/account.ts for why the first row was the wrong answer.
   const selectedAccountId = accountId ?? defaultAccountId(accounts);
+  const formattedReleaseDate = longDateFullLabel(releaseDate);
 
   const perCycle = parseAmount(perCycleText);
   // No interest input in design Screen 4, so the repayment total IS the amount
@@ -169,6 +181,14 @@ export default function QuickAddScreen() {
       setErr('Belum ada siklus aktif. Pilih mode audit untuk mencatat transaksi di luar siklus.');
       return;
     }
+    if (!isValidISODate(releaseDate)) {
+      setErr('Tanggal transaksi harus menggunakan format YYYY-MM-DD yang valid.');
+      return;
+    }
+    if (releaseDate > todayISO()) {
+      setErr('Tanggal transaksi tidak boleh di masa depan.');
+      return;
+    }
     if (!isLoan && name.trim().length < 3) { setErr('Nama transaksi minimal 3 huruf.'); return; }
     if (amount <= 0) { setErr('Nominal harus lebih dari Rp 0.'); return; }
 
@@ -200,7 +220,8 @@ export default function QuickAddScreen() {
           // schedule, and asking the RPC to generate one row would give them a
           // fake plan the family never chose.
           installmentCount: repaymentMode === 'INSTALLMENT' ? installmentCount : null,
-          startDate: new Date().toISOString().slice(0, 10),
+          startDate: releaseDate,
+          releaseDate,
           interestFeeAmount: 0,
         });
         router.back();
@@ -220,6 +241,7 @@ export default function QuickAddScreen() {
         categoryId: selectedCategoryId,
         accountId: selectedAccountId,
         makeRecurring: auditMode ? false : recurring,
+        releaseDate,
       });
       router.back();
     } catch (e: any) {
@@ -285,10 +307,39 @@ export default function QuickAddScreen() {
             keyboardType="number-pad"
             style={styles.nominalInput}
           />
-          <Text style={styles.dateHint}>
-            {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-            {isLoan ? ' • Pemasukan Pendanaan' : kind === 'in' ? ' • Income Operasional' : ' • Langsung Lunas'}
-          </Text>
+          {dateEditing ? (
+            <View style={styles.dateEditor}>
+              <Text style={styles.dateEditorLabel}>TANGGAL TRANSAKSI</Text>
+              <TextInput
+                value={releaseDate}
+                onChangeText={setReleaseDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={Colors.textMuted}
+                autoFocus
+                style={styles.dateInput}
+                onSubmitEditing={() => setDateEditing(false)}
+              />
+              <Text style={styles.dateEditorHint}>Gunakan tanggal saat transaksi benar-benar terjadi.</Text>
+            </View>
+          ) : (
+            <Pressable
+              style={styles.dateRow}
+              onPress={() => setDateEditing(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Ubah tanggal transaksi"
+            >
+              <View style={styles.dateLeft}>
+                <View style={styles.dateIconBg}>
+                  <Calendar size={16} color={Colors.textPrimary} />
+                </View>
+                <View style={styles.dateTexts}>
+                  <Text style={styles.dateLabel}>Tanggal transaksi</Text>
+                  <Text style={styles.dateValue}>{formattedReleaseDate ?? releaseDate}</Text>
+                </View>
+              </View>
+              <Text style={styles.dateLink}>Ubah</Text>
+            </Pressable>
+          )}
 
           {isLoan ? (
             <>
@@ -492,7 +543,17 @@ const styles = StyleSheet.create({
   toggleTextActive: { color: Colors.textPrimary },
   amount: { color: Colors.textPrimary, fontSize: 36, fontWeight: '700', fontVariant: ['tabular-nums'] },
   nominalInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 14, height: 48, fontSize: 16, color: Colors.textPrimary, backgroundColor: Colors.canvas },
-  dateHint: { color: Colors.textMuted, fontSize: FontSize.body },
+  dateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 },
+  dateLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  dateIconBg: { width: 32, height: 32, borderRadius: 10, backgroundColor: Colors.subtle, alignItems: 'center', justifyContent: 'center' },
+  dateTexts: { gap: 1 },
+  dateLabel: { color: Colors.textMuted, fontSize: FontSize.caption },
+  dateValue: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700' },
+  dateLink: { color: Colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  dateEditor: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: 14, padding: 12, gap: 6 },
+  dateEditorLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
+  dateInput: { backgroundColor: Colors.canvas, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, height: 44, paddingHorizontal: 12, color: Colors.textPrimary, fontSize: FontSize.body },
+  dateEditorHint: { color: Colors.textMuted, fontSize: FontSize.caption },
   input: { backgroundColor: Colors.canvas, borderRadius: Radius.md, padding: 14, borderWidth: 1, borderColor: Colors.borderSubtle, fontSize: 15, color: Colors.textPrimary },
   sectionLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '600', letterSpacing: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

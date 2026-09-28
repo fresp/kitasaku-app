@@ -357,8 +357,14 @@ export function useQuickAdd() {
     mutationFn: async (args: {
       householdId: string; cycleId?: string | null; name: string; amount: number;
       direction: 'INCOME' | 'EXPENSE'; categoryId: string | null; accountId: string | null;
-      makeRecurring: boolean;
+      makeRecurring: boolean; releaseDate?: string | null;
     }) => {
+      if (args.releaseDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
+        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
+      }
+      if (args.releaseDate != null && args.releaseDate > todayISO()) {
+        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
+      }
       if (!(args.amount > 0)) throw new Error('Nominal harus lebih dari Rp 0.');
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
@@ -366,7 +372,7 @@ export function useQuickAdd() {
         household_id: args.householdId, cycle_id: args.cycleId ?? null, name: args.name,
         direction: args.direction, flow_type: args.direction === 'INCOME' ? 'OPERATING_INCOME' : 'EXPENSE',
         planned_amount: args.amount, actual_amount: args.amount,
-        status: 'PAID', release_date: todayISO(),
+        status: 'PAID', release_date: args.releaseDate ?? todayISO(),
         category_id: args.categoryId, account_id: args.accountId,
         created_by: user?.id ?? null, executed_by: user?.id ?? null,
       }).select('*').single();
@@ -1499,7 +1505,14 @@ export function useCreateFinancingLoan() {
        * default from. Never guessed on the family's behalf.
        */
       repaymentMode?: RepaymentMode | null;
+      releaseDate?: string | null;
     }) => {
+      if (args.releaseDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
+        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
+      }
+      if (args.releaseDate != null && args.releaseDate > todayISO()) {
+        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
+      }
       if (!(args.amount > 0)) throw new Error('Nominal pembiayaan harus lebih dari 0.');
       if ((args.interestFeeAmount ?? 0) < 0) throw new Error('Bunga/biaya tidak boleh negatif.');
       if (args.installmentCount != null && (args.installmentCount < 1 || args.installmentCount > 600)) {
@@ -1518,6 +1531,7 @@ export function useCreateFinancingLoan() {
         p_installment_count: args.installmentCount ?? null,
         p_start_date: args.startDate ?? null,
         p_interest_fee_amount: args.interestFeeAmount ?? 0,
+        p_release_date: args.releaseDate ?? null,
       });
       if (error) throw error;
       const rows = data as {
