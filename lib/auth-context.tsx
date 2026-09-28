@@ -27,8 +27,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!!supabase);
+  const [error, setError] = useState<string | null>(
+    supabase
+      ? null
+      : 'Supabase belum dikonfigurasi. Isi EXPO_PUBLIC_SUPABASE_URL dan EXPO_PUBLIC_SUPABASE_ANON_KEY di .env'
+  );
 
   const loadMembership = useCallback(async (userId: string | undefined) => {
     if (!userId) {
@@ -61,11 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadMembership]);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      setError('Supabase belum dikonfigurasi. Isi EXPO_PUBLIC_SUPABASE_URL dan EXPO_PUBLIC_SUPABASE_ANON_KEY di .env');
-      return;
-    }
+    if (!supabase) return;
     let mounted = true;
     (async () => {
       const {

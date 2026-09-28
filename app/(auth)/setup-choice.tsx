@@ -30,10 +30,7 @@ export default function SetupChoiceScreen() {
   useEffect(() => {
     if (mode !== 'join') return;
     const normalized = code.trim().toUpperCase();
-    if (normalized.length < 5) {
-      setPreview(null);
-      return;
-    }
+    if (normalized.length < 5) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       setChecking(true);
@@ -128,7 +125,10 @@ export default function SetupChoiceScreen() {
             <Text style={styles.label}>KODE UNDANGAN (mis. ABC-123)</Text>
             <TextInput
               value={code}
-              onChangeText={(t) => setCode(t.toUpperCase())}
+              onChangeText={(t) => {
+                setCode(t.toUpperCase());
+                setPreview(null);
+              }}
               placeholder="ABC-123"
               placeholderTextColor={Colors.textMuted}
               autoCapitalize="characters"

@@ -36,6 +36,7 @@ const FLOW_LABELS: Record<FlowType, string> = {
   EXPENSE: 'Pengeluaran',
   DEBT_PAYMENT: 'Pembayaran Kewajiban',
   ASSET_ALLOCATION: 'Alokasi Aset',
+  TRANSFER: 'Relokasi Antar Akun',
 };
 
 /** Per-flow chip colour, so a flow type keeps its identity across screens. */
@@ -46,6 +47,7 @@ const FLOW_TONES: Record<FlowType, { bg: string; border: string; text: string }>
   EXPENSE: { bg: Colors.subtle, border: Colors.borderSubtle, text: Colors.textSecondary },
   DEBT_PAYMENT: { bg: Colors.loanBg, border: Colors.loanBorder, text: Colors.loanText },
   ASSET_ALLOCATION: { bg: Colors.subtle, border: Colors.borderSubtle, text: Colors.textSecondary },
+  TRANSFER: { bg: Colors.subtle, border: Colors.borderSubtle, text: Colors.textSecondary },
 };
 
 /** Rows shown before "Muat N transaksi lainnya" is tapped. */

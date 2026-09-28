@@ -12,6 +12,7 @@ import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import Users from 'lucide-react-native/icons/users';
 import Wallet from 'lucide-react-native/icons/wallet';
+import TrendingUp from 'lucide-react-native/icons/trending-up';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import { useActiveCycle, useUpdateMyMemberProfile } from '../../lib/queries';
@@ -104,6 +105,38 @@ export default function ProfileScreen() {
       sub: 'Analisis tren bulanan, cashflow, aset likuid & kewajiban',
       tone: 'paid',
       onPress: () => router.push('/asset-insight'),
+    },
+    {
+      key: 'transfer',
+      icon: Wallet,
+      title: 'Relokasi Antar Akun',
+      sub: 'Pindahkan uang antar akun tanpa mengubah income atau pengeluaran',
+      tone: 'default',
+      onPress: () => router.push('/transfer'),
+    },
+    {
+      key: 'assets',
+      icon: TrendingUp,
+      title: 'Repository Aset & Investasi',
+      sub: 'Catat top up, pencairan, dan stated valuation tanpa akun investasi',
+      tone: 'default',
+      onPress: () => router.push('/assets'),
+    },
+    {
+      key: 'audit',
+      icon: Calendar,
+      title: 'Riwayat Audit Non-Siklus',
+      sub: 'Lihat transaksi historis yang tidak membebani siklus aktif',
+      tone: 'default',
+      onPress: () => router.push('/audit-history'),
+    },
+    {
+      key: 'account-summary',
+      icon: Wallet,
+      title: 'Zero-Based Per Akun',
+      sub: 'Lihat dana masuk, keluar, dan relokasi setiap akun',
+      tone: 'default',
+      onPress: () => router.push('/account-summary'),
     },
     {
       key: 'categories',

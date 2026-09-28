@@ -40,8 +40,15 @@ export default function QuickAddScreen() {
   // they land on ("Catat pemasukan" must not open Pengeluaran, and the Funding
   // Gap strategies must not all open it either). A missing or unknown param
   // falls back to expense, the most common entry point.
-  const params = useLocalSearchParams<{ kind?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; scope?: string }>();
   const initialKind: Kind = isKind(params.kind) ? params.kind : 'out';
+  const initialAudit = params.scope === 'audit';
+  const [auditMode, setAuditMode] = useState(initialAudit);
+  const [lastScopeParam, setLastScopeParam] = useState(initialAudit);
+  if (initialAudit !== lastScopeParam) {
+    setLastScopeParam(initialAudit);
+    setAuditMode(initialAudit);
+  }
   const { household } = useAuth();
   const householdId = household?.id;
   const cycleQ = useActiveCycle(householdId);
@@ -88,6 +95,8 @@ export default function QuickAddScreen() {
   const accounts = useMemo(() => accsQ.data ?? [], [accsQ.data]);
   const amount = parseAmount(amountText);
   const isLoan = kind === 'loan';
+  const cycleAvailable = !!cycleQ.data?.id;
+  const isAuditEntry = auditMode && !isLoan;
 
   // Income and expense categories are disjoint in the schema (migration 001:
   // type in EXPENSE/INCOME/INVESTMENT). Showing every category in both modes let
@@ -97,8 +106,8 @@ export default function QuickAddScreen() {
   const visibleCategories = useMemo(
     () =>
       kind === 'in'
-        ? categories.filter((c) => c.type === 'INCOME')
-        : categories.filter((c) => c.type !== 'INCOME'),
+        ? categories.filter((c) => c.type === 'INCOME' && c.system_role !== 'UNTRACKED')
+        : categories.filter((c) => c.type !== 'INCOME' && c.system_role !== 'UNTRACKED'),
     [categories, kind]
   );
 
@@ -152,8 +161,12 @@ export default function QuickAddScreen() {
 
   async function save() {
     setErr(null);
-    if (!householdId || !cycleQ.data?.id) {
-      setErr('Belum ada siklus aktif. Buat siklus dulu lewat "Buka Siklus Baru".');
+    if (!householdId) {
+      setErr('Login dulu untuk mencatat transaksi.');
+      return;
+    }
+    if (!isAuditEntry && !cycleAvailable) {
+      setErr('Belum ada siklus aktif. Pilih mode audit untuk mencatat transaksi di luar siklus.');
       return;
     }
     if (!isLoan && name.trim().length < 3) { setErr('Nama transaksi minimal 3 huruf.'); return; }
@@ -176,7 +189,7 @@ export default function QuickAddScreen() {
       try {
         await createLoan.mutateAsync({
           householdId,
-          cycleId: cycleQ.data.id,
+          cycleId: cycleQ.data!.id,
           amount,
           name: `Pencairan ${lender.trim()}`,
           obligationTitle: lender.trim(),
@@ -200,13 +213,13 @@ export default function QuickAddScreen() {
     try {
       await quickAdd.mutateAsync({
         householdId,
-        cycleId: cycleQ.data.id,
+        cycleId: auditMode ? null : cycleQ.data!.id,
         name: name.trim(),
         amount,
         direction: kind === 'out' ? 'EXPENSE' : 'INCOME',
         categoryId: selectedCategoryId,
         accountId: selectedAccountId,
-        makeRecurring: recurring,
+        makeRecurring: auditMode ? false : recurring,
       });
       router.back();
     } catch (e: any) {
@@ -240,16 +253,28 @@ export default function QuickAddScreen() {
           <Text style={styles.title}>Quick Add Transaksi</Text>
 
           <View style={styles.toggle}>
-            <Pressable onPress={() => setKind('out')} style={[styles.toggleOpt, kind === 'out' && styles.toggleActive]}>
-              <Text style={[styles.toggleText, kind === 'out' && styles.toggleTextActive]}>Pengeluaran</Text>
+            <Pressable onPress={() => { setAuditMode(false); setKind('out'); }} style={[styles.toggleOpt, !auditMode && kind === 'out' && styles.toggleActive]}>
+              <Text style={[styles.toggleText, !auditMode && kind === 'out' && styles.toggleTextActive]}>Pengeluaran</Text>
             </Pressable>
-            <Pressable onPress={() => setKind('in')} style={[styles.toggleOpt, kind === 'in' && styles.toggleActive]}>
-              <Text style={[styles.toggleText, kind === 'in' && styles.toggleTextActive]}>Income</Text>
+            <Pressable onPress={() => { setAuditMode(false); setKind('in'); }} style={[styles.toggleOpt, !auditMode && kind === 'in' && styles.toggleActive]}>
+              <Text style={[styles.toggleText, !auditMode && kind === 'in' && styles.toggleTextActive]}>Income</Text>
             </Pressable>
-            <Pressable onPress={() => setKind('loan')} style={[styles.toggleOpt, isLoan && styles.toggleActive]}>
-              <Text style={[styles.toggleText, isLoan && styles.toggleTextActive]}>Terima Pinjaman</Text>
+            <Pressable onPress={() => { setAuditMode(false); setKind('loan'); }} style={[styles.toggleOpt, !auditMode && isLoan && styles.toggleActive]}>
+              <Text style={[styles.toggleText, !auditMode && isLoan && styles.toggleTextActive]}>Terima Pinjaman</Text>
             </Pressable>
           </View>
+
+          <Pressable onPress={() => { setAuditMode(true); setKind('out'); setRecurring(false); }} style={[styles.auditToggle, auditMode && styles.auditToggleActive]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.auditTitle, auditMode && styles.auditTitleActive]}>Transaksi audit di luar siklus</Text>
+              <Text style={styles.auditSub}>Catat transaksi historis/non-siklus tanpa membebani saldo siklus aktif.</Text>
+            </View>
+            <Switch value={auditMode} onValueChange={(next) => { setAuditMode(next); if (next) { setKind('out'); setRecurring(false); } }} trackColor={{ true: Colors.paidText, false: Colors.borderStrong }} />
+          </Pressable>
+          {auditMode && <Text style={styles.auditNotice}>Mode audit aktif · transaksi tidak masuk perhitungan zero-based siklus.</Text>}
+          {!auditMode && !cycleAvailable && <Text style={styles.warning}>Belum ada siklus aktif. Aktifkan mode audit untuk mencatat transaksi di luar siklus.</Text>}
+
+          {auditMode && <Text style={styles.auditModeLabel}>PENGELUARAN AUDIT</Text>}
 
           <Text style={styles.amount}>{formatRupiah(amount)}</Text>
           <TextInput
@@ -500,4 +525,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.paidText, padding: 10,
   },
   zeroLiabilityText: { flex: 1, color: Colors.paidText, fontSize: FontSize.caption, lineHeight: 16 },
+  auditToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.canvas, borderRadius: Radius.md, padding: 12, borderWidth: 1, borderColor: Colors.borderSubtle },
+  auditToggleActive: { backgroundColor: Colors.paidBg, borderColor: Colors.paidText },
+  auditTitle: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600' },
+  auditTitleActive: { color: Colors.paidText },
+  auditSub: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16, marginTop: 2 },
+  auditNotice: { color: Colors.paidText, backgroundColor: Colors.paidBg, borderRadius: Radius.md, padding: 10, fontSize: FontSize.caption },
+  auditModeLabel: { color: Colors.paidText, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
+  warning: { color: Colors.alertText, backgroundColor: Colors.alertBg, borderRadius: Radius.md, padding: 10, fontSize: FontSize.caption },
 });

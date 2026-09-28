@@ -91,7 +91,12 @@ function Gate() {
         <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
         <Stack.Screen name="loan-detail" options={{ presentation: 'card' }} />
         <Stack.Screen name="funding-gap" options={{ presentation: 'card' }} />
+        <Stack.Screen name="reconciliation" options={{ presentation: 'card' }} />
+        <Stack.Screen name="transfer" options={{ presentation: 'card' }} />
         <Stack.Screen name="asset-insight" options={{ presentation: 'card' }} />
+        <Stack.Screen name="assets" options={{ presentation: 'card' }} />
+        <Stack.Screen name="audit-history" options={{ presentation: 'card' }} />
+        <Stack.Screen name="account-summary" options={{ presentation: 'card' }} />
         <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
         <Stack.Screen
           name="payment-confirm"

@@ -8,6 +8,7 @@ import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { cycleWindowFrom } from '../lib/profile';
 import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
+import { defaultAccountId } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
@@ -158,8 +159,9 @@ export default function NewCycleScreen() {
         householdId,
         name: cycleName.trim() || 'Siklus Baru',
         start, end,
+        primaryAccountId: defaultAccountId(accsQ.data ?? []),
         incomeAmount: income,
-        incomeAccountId: accsQ.data?.[0]?.id ?? null,
+        incomeAccountId: defaultAccountId(accsQ.data ?? []),
         incomeCategoryId: (catsQ.data ?? []).find((c) => c.type === 'INCOME')?.id ?? null,
         items: selected.map((t) => ({
           templateId: t.id, name: t.name,
@@ -249,7 +251,7 @@ export default function NewCycleScreen() {
             placeholderTextColor={Colors.textMuted}
             style={styles.incomeInput}
           />
-          <Text style={styles.muted}>{formatRupiah(income)} • {accsQ.data?.[0]?.name ?? 'belum ada akun'}</Text>
+          <Text style={styles.muted}>{formatRupiah(income)} • {accsQ.data?.find((a) => a.id === defaultAccountId(accsQ.data ?? []))?.name ?? 'belum ada akun'}</Text>
         </View>
 
         <View style={styles.labelRow}>

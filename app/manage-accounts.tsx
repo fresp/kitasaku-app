@@ -35,10 +35,8 @@ import { useAuth } from '../lib/auth-context';
 import {
   ACCOUNT_ICON_CHOICES,
   ACCOUNT_TYPE_DEFAULT_ICONS,
-  ACCOUNT_TYPE_LABELS,
   accountSubline,
   maskAccountNumber,
-  normalizeAccountNumber,
   resolveAccountIcon,
   validateAccountNumber,
 } from '../lib/account';
@@ -685,7 +683,7 @@ export default function ManagedAccountScreen() {
 
                 <View style={styles.archivedNotice}>
                   <Text style={styles.archivedNoticeText}>
-                    Akun diarsipkan tidak muncul di pilihan "Bayar dari", Alokasi, atau Template Rutin.
+                    Akun diarsipkan tidak muncul di pilihan &quot;Bayar dari&quot;, Alokasi, atau Template Rutin.
                   </Text>
                 </View>
               </View>
@@ -805,7 +803,7 @@ export default function ManagedAccountScreen() {
             </View>
 
             <Text style={styles.sheetDescription}>
-              "{archiveTarget.name}" tidak akan muncul lagi di pilihan "Bayar dari",
+              &quot;{archiveTarget.name}&quot; tidak akan muncul lagi di pilihan &quot;Bayar dari&quot;,
               Alokasi, dan Template Rutin. Transaksi lama yang memakainya tetap utuh dan
               tetap menampilkan nama akun ini.
             </Text>

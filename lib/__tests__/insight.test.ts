@@ -24,7 +24,7 @@ import {
   windowEndingAt,
   yearOf,
 } from '../insight';
-import type { InsightAllocation, InsightCycle, InsightTxn } from '../insight';
+import type { InsightCycle, InsightTxn } from '../insight';
 
 // A cycle is placed on its END month (payday-to-payday cycles are named for the
 // month they close in), so "Siklus Nov" runs 25 Oct – 24 Nov and belongs in Nov.

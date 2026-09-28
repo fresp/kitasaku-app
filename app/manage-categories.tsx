@@ -35,6 +35,7 @@ import { BrandIcon } from '../components/ui/BrandIcon';
 const SYSTEM_ROLE_HINT: Record<CategorySystemRole, string> = {
   DEBT_PAYMENT: 'Kewajiban · Tidak dapat dihapus',
   FINANCING_INFLOW: 'Financing inflow · Tidak dapat dihapus',
+  UNTRACKED: 'Rekonsiliasi · Tidak dapat dihapus',
 };
 
 const TYPE_LABELS: Record<'EXPENSE' | 'INCOME' | 'INVESTMENT', string> = {

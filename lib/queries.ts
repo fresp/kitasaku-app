@@ -12,14 +12,17 @@ import {
   validateAccountNumber,
 } from './account';
 import {
+  accountZeroBased,
   calculateZeroBasedSummary,
   canMarkAsPaid,
   defaultFlowType,
   isObligationPaydown,
   ledgerDisplayAmount,
+  reconciliationPreview,
   resolveModeAmount,
 } from './zero-based';
 import type {
+  AccountZeroBasedTransaction,
   AllocationType,
   FlowType,
   FundingGapStatus,
@@ -39,8 +42,36 @@ export type {
 } from './zero-based';
 export type { Beneficiary } from './beneficiary';
 
-export interface Cycle { id: string; household_id: string; name: string; start_date: string; end_date: string; is_active: boolean; }
-export type CategorySystemRole = 'DEBT_PAYMENT' | 'FINANCING_INFLOW';
+export interface Cycle {
+  id: string;
+  household_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+  primary_account_id: string | null;
+  closed_at?: string | null;
+  closed_by?: string | null;
+  sweep_completed_at?: string | null;
+  sweep_skipped?: boolean;
+}
+
+export interface CycleReconciliation {
+  id: string;
+  household_id: string;
+  cycle_id: string;
+  account_id: string;
+  opening_stated: number | null;
+  closing_stated: number;
+  recorded_net: number;
+  delta: number;
+  adjustment_txn_id: string | null;
+  noted_at: string;
+  noted_by: string | null;
+  accounts?: { name: string; type: string } | null;
+}
+
+export type CategorySystemRole = 'DEBT_PAYMENT' | 'FINANCING_INFLOW' | 'UNTRACKED';
 export interface Category {
   id: string; household_id: string; name: string; monthly_budget: number; type: string;
   is_system?: boolean; system_role?: CategorySystemRole | null;
@@ -68,6 +99,7 @@ export interface Txn {
   recurring_template_id: string | null; obligation_id: string | null;
   name: string; category_id: string | null; account_id: string | null;
   direction: 'INCOME' | 'EXPENSE'; flow_type?: FlowType | null; planned_amount: number; actual_amount: number;
+  counter_account_id?: string | null; asset_id?: string | null;
   release_date: string | null; status: 'PENDING' | 'PAID';
   created_by: string | null; executed_by: string | null;
   recipient: string | null; is_final_payment: boolean; created_at: string;
@@ -135,6 +167,11 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   // refresh, so its charts kept yesterday's asset position while every other
   // screen updated.
   qc.invalidateQueries({ queryKey: ['year-insight'] });
+  qc.invalidateQueries({ queryKey: ['assets'] });
+  qc.invalidateQueries({ queryKey: ['asset-valuations'] });
+  qc.invalidateQueries({ queryKey: ['audit-txns'] });
+  qc.invalidateQueries({ queryKey: ['reconciliation'] });
+  qc.invalidateQueries({ queryKey: ['cycle-sweep'] });
 }
 
 export function useActiveCycle(householdId: string | undefined) {
@@ -168,6 +205,24 @@ export function useTransactions(householdId: string | undefined, cycleId: string
   });
 }
 
+/** Explicit audit stream for transactions that are not assigned to a cycle. */
+export function useNonCycleTransactions(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['audit-txns', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Txn[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, categories(name, icon), accounts(name)')
+        .eq('household_id', householdId!)
+        .is('cycle_id', null)
+        .order('created_at', { ascending: false }).limit(200);
+      if (error) throw error;
+      return (data ?? []) as Txn[];
+    },
+  });
+}
+
 export function useCategories(householdId: string | undefined) {
   return useQuery({
     queryKey: ['cats', householdId], enabled: !!householdId,
@@ -176,6 +231,26 @@ export function useCategories(householdId: string | undefined) {
       const { data, error } = await sb.from('categories').select('*').eq('household_id', householdId!).order('name');
       if (error) throw error;
       return (data ?? []) as Category[];
+    },
+  });
+}
+
+export function useBankAccounts(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['bank-accounts', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Account[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb
+        .from('accounts')
+        .select('*')
+        .eq('household_id', householdId!)
+        .eq('type', 'BANK')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Account[];
     },
   });
 }
@@ -279,14 +354,15 @@ export function useQuickAdd() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
-      householdId: string; cycleId: string; name: string; amount: number;
+      householdId: string; cycleId?: string | null; name: string; amount: number;
       direction: 'INCOME' | 'EXPENSE'; categoryId: string | null; accountId: string | null;
       makeRecurring: boolean;
     }) => {
+      if (!(args.amount > 0)) throw new Error('Nominal harus lebih dari Rp 0.');
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
       const { data: txn, error } = await sb.from('transactions').insert({
-        household_id: args.householdId, cycle_id: args.cycleId, name: args.name,
+        household_id: args.householdId, cycle_id: args.cycleId ?? null, name: args.name,
         direction: args.direction, flow_type: args.direction === 'INCOME' ? 'OPERATING_INCOME' : 'EXPENSE',
         planned_amount: args.amount, actual_amount: args.amount,
         status: 'PAID', release_date: todayISO(),
@@ -295,15 +371,19 @@ export function useQuickAdd() {
       }).select('*').single();
       if (error) throw error;
       if (args.makeRecurring) {
-        const { data: t } = await sb.from('recurring_templates').insert({
+        if (!args.cycleId) throw new Error('Transaksi di luar siklus tidak dapat dijadikan transaksi rutin.');
+        const { data: t, error: templateErr } = await sb.from('recurring_templates').insert({
           household_id: args.householdId, name: args.name,
           category_id: args.categoryId, account_id: args.accountId,
           direction: args.direction, default_amount: args.amount, status: 'ACTIVE',
         }).select('*').single();
+        if (templateErr) throw templateErr;
         if (t) {
-          await sb.from('transactions').update({ recurring_template_id: (t as Template).id }).eq('id', (txn as Txn).id);
+          const { error: linkErr } = await sb.from('transactions').update({ recurring_template_id: (t as Template).id }).eq('id', (txn as Txn).id);
+          if (linkErr) throw linkErr;
         }
       }
+      return txn as Txn;
     },
     onSuccess: () => {
       invalidateMoneyKeys(qc);
@@ -311,6 +391,206 @@ export function useQuickAdd() {
     },
   });
 }
+
+export function useCreateTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; cycleId?: string | null; name: string; amount: number;
+      fromAccountId: string; toAccountId: string;
+    }): Promise<Txn> => {
+      if (!(args.amount > 0)) throw new Error('Nominal relokasi harus lebih dari Rp 0.');
+      if (args.fromAccountId === args.toAccountId) throw new Error('Akun asal dan tujuan harus berbeda.');
+      const sb = requireSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from('transactions').insert({
+        household_id: args.householdId,
+        cycle_id: args.cycleId ?? null,
+        name: args.name.trim(),
+        direction: 'EXPENSE',
+        flow_type: 'TRANSFER',
+        planned_amount: args.amount,
+        actual_amount: args.amount,
+        status: 'PAID',
+        release_date: todayISO(),
+        account_id: args.fromAccountId,
+        counter_account_id: args.toAccountId,
+        created_by: user?.id ?? null,
+        executed_by: user?.id ?? null,
+      }).select('*').single();
+      if (error) throw error;
+      return data as Txn;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+export function useCreateAssetAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; cycleId?: string | null; name: string; amount: number;
+      accountId: string; assetId: string; categoryId: string | null;
+    }): Promise<Txn> => {
+      if (!(args.amount > 0)) throw new Error('Nominal alokasi aset harus lebih dari Rp 0.');
+      const sb = requireSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from('transactions').insert({
+        household_id: args.householdId,
+        cycle_id: args.cycleId ?? null,
+        name: args.name.trim(),
+        direction: 'EXPENSE',
+        flow_type: 'ASSET_ALLOCATION',
+        planned_amount: args.amount,
+        actual_amount: args.amount,
+        status: 'PAID',
+        release_date: todayISO(),
+        category_id: args.categoryId,
+        account_id: args.accountId,
+        asset_id: args.assetId,
+        created_by: user?.id ?? null,
+        executed_by: user?.id ?? null,
+      }).select('*').single();
+      if (error) throw error;
+      return data as Txn;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+export function useCreateAssetRelease() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; cycleId?: string | null; name: string; amount: number;
+      accountId: string; assetId: string; categoryId: string | null;
+    }): Promise<Txn> => {
+      if (!(args.amount > 0)) throw new Error('Nominal pencairan aset harus lebih dari Rp 0.');
+      const sb = requireSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from('transactions').insert({
+        household_id: args.householdId,
+        cycle_id: args.cycleId ?? null,
+        name: args.name.trim(),
+        direction: 'INCOME',
+        flow_type: 'ASSET_RELEASE',
+        planned_amount: args.amount,
+        actual_amount: args.amount,
+        status: 'PAID',
+        release_date: todayISO(),
+        category_id: args.categoryId,
+        account_id: args.accountId,
+        asset_id: args.assetId,
+        created_by: user?.id ?? null,
+        executed_by: user?.id ?? null,
+      }).select('*').single();
+      if (error) throw error;
+      return data as Txn;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+export function useAssets(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['assets', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Asset[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('assets').select('*').eq('household_id', householdId!).eq('is_active', true).order('name');
+      if (error) throw error;
+      return (data ?? []) as Asset[];
+    },
+  });
+}
+
+export interface Asset {
+  id: string;
+  household_id: string;
+  name: string;
+  band: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AssetValuation {
+  id: string;
+  household_id: string;
+  asset_id: string;
+  stated_value: number;
+  valued_at: string;
+  noted_by: string | null;
+  created_at: string;
+}
+
+export function useAssetValuations(householdId: string | undefined, assetId?: string) {
+  return useQuery({
+    queryKey: ['asset-valuations', householdId, assetId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<AssetValuation[]> => {
+      const sb = requireSupabase();
+      let query = sb.from('asset_valuations').select('*').eq('household_id', householdId!).order('valued_at', { ascending: false });
+      if (assetId) query = query.eq('asset_id', assetId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []) as AssetValuation[];
+    },
+  });
+}
+
+export function useCreateAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string; name: string; band: string }): Promise<Asset> => {
+      if (args.name.trim().length < 2) throw new Error('Nama aset minimal 2 huruf.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('assets').insert({ household_id: args.householdId, name: args.name.trim(), band: args.band, is_active: true }).select('*').single();
+      if (error) throw error;
+      return data as Asset;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+
+export function useRecordAssetValuation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string; assetId: string; statedValue: number; valuedAt: string }): Promise<AssetValuation> => {
+      if (args.statedValue < 0) throw new Error('Nilai aset tidak boleh negatif.');
+      const sb = requireSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from('asset_valuations').insert({ household_id: args.householdId, asset_id: args.assetId, stated_value: args.statedValue, valued_at: args.valuedAt, noted_by: user?.id ?? null }).select('*').single();
+      if (error) throw error;
+      return data as AssetValuation;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assets'] });
+      qc.invalidateQueries({ queryKey: ['asset-valuations'] });
+      qc.invalidateQueries({ queryKey: ['year-insight'] });
+    },
+  });
+}
+
+export function useAccountZeroBasedSummary(
+  householdId: string | undefined,
+  cycleId: string | undefined,
+  accountId: string | undefined,
+  mode: SummaryMode = 'planned',
+) {
+  return useQuery({
+    queryKey: ['zero-summary', 'account', householdId, cycleId, accountId, mode],
+    enabled: !!householdId && !!cycleId && !!accountId,
+    queryFn: async () => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('account_id, counter_account_id, flow_type, direction, planned_amount, actual_amount, status, obligation_id')
+        .eq('household_id', householdId!).eq('cycle_id', cycleId!);
+      if (error) throw error;
+      return accountZeroBased({ accountId: accountId!, transactions: (data ?? []) as AccountZeroBasedTransaction[], mode });
+    },
+  });
+}
+
 
 /**
  * Planning path: pull part of an obligation into this cycle as a PENDING bill.
@@ -393,11 +673,205 @@ export function useAllocateObligation() {
  * `allocate_debt_payment` RPCs exist precisely to avoid that pattern; folding
  * cycle creation into an RPC is the follow-up, tracked in the release audit.
  */
+export function useUpdateCyclePrimaryAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string; cycleId: string; accountId: string | null }) => {
+      const sb = requireSupabase();
+      if (args.accountId) {
+        const { data, error } = await sb.from('accounts').select('id, type, is_active')
+          .eq('id', args.accountId).eq('household_id', args.householdId).maybeSingle();
+        if (error) throw error;
+        if (!data || data.type !== 'BANK' || data.is_active === false) {
+          throw new Error('Rekening utama harus berupa rekening BANK yang aktif.');
+        }
+      }
+      const { data, error } = await sb.from('cycles')
+        .update({ primary_account_id: args.accountId })
+        .eq('id', args.cycleId).eq('household_id', args.householdId)
+        .select('*').single();
+      if (error) throw error;
+      return data as Cycle;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cycle'] });
+      qc.invalidateQueries({ queryKey: ['reconciliation'] });
+      qc.invalidateQueries({ queryKey: ['audit-txns'] });
+    },
+  });
+}
+
+export interface ReconciliationBlockingIssue {
+  kind: 'PENDING' | 'NULL_ACCOUNT' | 'OUTSIDE_CYCLE_PRIMARY';
+  count: number;
+}
+
+export interface CycleReconciliationPreview {
+  cycle: Cycle;
+  reconciliation: CycleReconciliation | null;
+  primaryAccount: Account | null;
+  preview: ReturnType<typeof reconciliationPreview>;
+  issues: ReconciliationBlockingIssue[];
+}
+
+export function useCycleReconciliation(householdId: string | undefined, cycleId: string | undefined) {
+  return useQuery({
+    queryKey: ['reconciliation', householdId, cycleId],
+    enabled: !!householdId && !!cycleId,
+    queryFn: async (): Promise<CycleReconciliation | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('cycle_reconciliations')
+        .select('*, accounts(name, type)')
+        .eq('household_id', householdId!).eq('cycle_id', cycleId!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as CycleReconciliation | null) ?? null;
+    },
+  });
+}
+
+/**
+ * Reads the active cycle's primary account and only the rows relevant to its
+ * closing movement. Non-cycle rows remain available as audit data, but are
+ * surfaced separately because they cannot be silently assigned to this cycle.
+ */
+export function useCycleReconciliationPreview(
+  householdId: string | undefined,
+  cycleId: string | undefined,
+  closingStated: number | null,
+) {
+  return useQuery({
+    queryKey: ['reconciliation-preview', householdId, cycleId, closingStated],
+    enabled: !!householdId && !!cycleId,
+    queryFn: async (): Promise<CycleReconciliationPreview> => {
+      const sb = requireSupabase();
+      const { data: cycleData, error: cycleErr } = await sb.from('cycles')
+        .select('*').eq('household_id', householdId!).eq('id', cycleId!).single();
+      if (cycleErr) throw cycleErr;
+      const cycle = cycleData as Cycle;
+      if (!cycle.primary_account_id) {
+        throw new Error('Siklus ini belum memiliki akun primer BANK.');
+      }
+
+      const [{ data: accountData, error: accountErr }, { data: txnData, error: txnErr }, { count: outsideCount, error: outsideErr }, { data: priorCycleData, error: priorCycleErr }] = await Promise.all([
+        sb.from('accounts').select('*').eq('id', cycle.primary_account_id).eq('household_id', householdId!).single(),
+        sb.from('transactions')
+          .select('account_id, counter_account_id, direction, flow_type, planned_amount, actual_amount, status, obligation_id')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!),
+        sb.from('transactions').select('id', { count: 'exact', head: true })
+          .eq('household_id', householdId!).is('cycle_id', null).eq('account_id', cycle.primary_account_id),
+        sb.from('cycles').select('id')
+          .eq('household_id', householdId!).lt('end_date', cycle.start_date)
+          .order('end_date', { ascending: false }).limit(1),
+      ]);
+      if (accountErr) throw accountErr;
+      if (txnErr) throw txnErr;
+      if (outsideErr) throw outsideErr;
+      if (priorCycleErr) throw priorCycleErr;
+
+      const primaryAccount = accountData as Account;
+      const priorCycleId = (priorCycleData ?? [])[0]?.id;
+      let openingStated: number | null = null;
+      if (priorCycleId) {
+        const { data: priorReconciliation, error: priorReconciliationErr } = await sb
+          .from('cycle_reconciliations').select('closing_stated')
+          .eq('household_id', householdId!).eq('cycle_id', priorCycleId).maybeSingle();
+        if (priorReconciliationErr) throw priorReconciliationErr;
+        openingStated = (priorReconciliation as { closing_stated?: number } | null)?.closing_stated ?? null;
+      }
+      const preview = reconciliationPreview({
+        accountId: cycle.primary_account_id,
+        openingStated,
+        closingStated,
+        transactions: (txnData ?? []) as Txn[],
+        outsideCyclePrimaryCount: outsideCount ?? 0,
+      });
+      const issues: ReconciliationBlockingIssue[] = [];
+      if (preview.pendingCount > 0) issues.push({ kind: 'PENDING', count: preview.pendingCount });
+      if (preview.nullAccountCount > 0) issues.push({ kind: 'NULL_ACCOUNT', count: preview.nullAccountCount });
+      if (preview.outsideCyclePrimaryCount > 0) {
+        issues.push({ kind: 'OUTSIDE_CYCLE_PRIMARY', count: preview.outsideCyclePrimaryCount });
+      }
+      return { cycle, reconciliation: null, primaryAccount, preview, issues };
+    },
+  });
+}
+
+export interface CycleCloseResult {
+  reconciliation_id: string;
+  adjustment_txn_id: string | null;
+  swept_amount: number;
+  swept_account_count: number;
+  sweep_skipped: boolean;
+}
+
+export function useFinalizeCycleReconciliation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      cycleId: string;
+      accountId: string;
+      openingStated: number | null;
+      closingStated: number;
+      recordedNet: number;
+      delta: number;
+      categoryId: string | null;
+      sweepRequested: boolean;
+    }): Promise<CycleCloseResult> => {
+      if (!(args.closingStated >= 0)) throw new Error('Saldo akhir tidak boleh negatif.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('close_cycle_reconciliation', {
+        p_household_id: args.householdId,
+        p_cycle_id: args.cycleId,
+        p_account_id: args.accountId,
+        p_opening_stated: args.openingStated,
+        p_closing_stated: args.closingStated,
+        p_recorded_net: args.recordedNet,
+        p_delta: args.delta,
+        p_category_id: args.categoryId,
+        p_sweep_requested: args.sweepRequested,
+      });
+      if (error) {
+        if (error.message.includes('already') || error.message.includes('ditutup')) {
+          throw new Error('Siklus ini sudah ditutup.');
+        }
+        throw error;
+      }
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.reconciliation_id) throw new Error('Penutupan siklus tidak mengembalikan hasil.');
+      return row as CycleCloseResult;
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['reconciliation-preview'] });
+      qc.invalidateQueries({ queryKey: ['cycle'] });
+    },
+  });
+}
+
+export function useRecordCycleReconciliation() {
+  // Compatibility alias for callers that still use the old name. New writes
+  // always close atomically through useFinalizeCycleReconciliation.
+  return useFinalizeCycleReconciliation();
+}
+
+// Kept as a compatibility alias for callers that only need the mutation name.
+export const useCreateReconciliationAdjustment = useRecordCycleReconciliation;
+
+/*
+ * The reconciliation RPC writes the snapshot, adjustment transaction, and
+ * OTHER allocation in one database transaction. Keeping this mutation atomic
+ * prevents a failed second request from leaving an orphaned adjustment.
+ */
+
+
 export function useCreateCycle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
       householdId: string; name: string; start: string; end: string;
+      primaryAccountId: string | null;
       incomeAmount: number; incomeAccountId: string | null; incomeCategoryId: string | null;
       items: { templateId: string; name: string; amount: number; categoryId: string | null; accountId: string | null; direction: 'INCOME' | 'EXPENSE' }[];
       /** Open obligations carried into this cycle, at their remaining amount. */
@@ -409,6 +883,7 @@ export function useCreateCycle() {
       const { data: cycle, error: cErr } = await sb.from('cycles').insert({
         household_id: args.householdId, name: args.name,
         start_date: args.start, end_date: args.end, is_active: true,
+        primary_account_id: args.primaryAccountId,
       }).select('*').single();
       if (cErr) throw cErr;
       const cid = (cycle as Cycle).id;
@@ -1439,8 +1914,12 @@ export function useHouseholdMembers(householdId: string | undefined) {
 export function useUpdateHousehold() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { id: string; name?: string; paydayDay?: number | null }) =>
-      updateHousehold(args),
+    mutationFn: (args: {
+      id: string;
+      name?: string;
+      paydayDay?: number | null;
+      sweepPolicy?: 'REQUIRED' | 'OFFERED';
+    }) => updateHousehold(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['members'] }),
   });
 }

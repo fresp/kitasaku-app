@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACCOUNT_ICON_CHOICES,
-  ACCOUNT_TYPE_DEFAULT_ICONS,
-  ACCOUNT_TYPE_LABELS,
   accountSubline,
   maskAccountNumber,
   normalizeAccountNumber,
@@ -11,7 +9,6 @@ import {
   validateAccountNumber,
   defaultAccountId,
 } from '../account';
-import type { AccountType } from '../account';
 
 describe('account helpers and presentation rules (Flow J)', () => {
   describe('maskAccountNumber', () => {

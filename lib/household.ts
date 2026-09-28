@@ -11,12 +11,16 @@ export interface Membership {
   notify_partner_expense?: boolean;
 }
 
+export type SweepPolicy = 'REQUIRED' | 'OFFERED';
+
 export interface Household {
   id: string;
   name: string;
   invite_code: string | null;
   /** Day of month the family gets paid; null = never set (migration 007). */
   payday_day?: number | null;
+  /** Cycle-close sweep treatment (migration 014). */
+  sweep_policy?: SweepPolicy;
   created_at?: string;
 }
 
@@ -135,6 +139,7 @@ export async function updateHousehold(args: {
   id: string;
   name?: string;
   paydayDay?: number | null;
+  sweepPolicy?: SweepPolicy;
 }): Promise<Household> {
   const sb = requireSupabase();
   const patch: Record<string, string | number | null> = {};
@@ -148,6 +153,12 @@ export async function updateHousehold(args: {
       throw new Error('Tanggal payday harus antara 1 dan 31.');
     }
     patch.payday_day = args.paydayDay;
+  }
+  if (args.sweepPolicy !== undefined) {
+    if (args.sweepPolicy !== 'REQUIRED' && args.sweepPolicy !== 'OFFERED') {
+      throw new Error('Kebijakan sapu akun tidak dikenal.');
+    }
+    patch.sweep_policy = args.sweepPolicy;
   }
   if (Object.keys(patch).length === 0) {
     const current = await getHousehold(args.id);

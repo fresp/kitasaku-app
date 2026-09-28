@@ -27,8 +27,8 @@ export type CategoryIconType = 'EXPENSE' | 'INCOME' | 'INVESTMENT';
 export interface CategoryIconInput {
   name: string;
   type: CategoryIconType | string;
-  /** Set on the two categories migration 006 protects. */
-  systemRole?: 'DEBT_PAYMENT' | 'FINANCING_INFLOW' | null;
+  /** Set on the system categories protected by migrations 006/012. */
+  systemRole?: 'DEBT_PAYMENT' | 'FINANCING_INFLOW' | 'UNTRACKED' | null;
   /**
    * The picker's choice, stored in `categories.icon` (migration 009).
    *
@@ -178,6 +178,7 @@ export function categoryIconName(cat: CategoryIconInput): string {
   // by role rather than by whatever the family renamed them to.
   if (cat.systemRole === 'DEBT_PAYMENT') return 'category-hutang';
   if (cat.systemRole === 'FINANCING_INFLOW') return 'category-pemasukan';
+  if (cat.systemRole === 'UNTRACKED') return 'category-lainnya';
 
   const n = normalise(cat.name ?? '');
   if (n) {

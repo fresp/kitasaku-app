@@ -608,6 +608,21 @@ Perbaikan yang benar adalah jadikan status cicilan turunan dari pembayaran
 (helper `currentInstallmentNumber` yang ditulis untuk A5 adalah pola yang sama).
 Belum dikerjakan — di luar lingkup Tahap 0.
 
+**Tahap 0.5 — parity skema lokal** ✅ **SELESAI 2026-09-28**
+
+| # | Aksi | Bukti | Hasil |
+| --- | --- | --- | --- |
+| P0 | Pulihkan migration 012 Phase 12 di repo lokal | `supabase/migrations/012_phase12_reconciliation.sql` | ✅ akun primer BANK, snapshot rekonsiliasi, `UNTRACKED`, seed kategori household baru |
+| P1 | Tambahkan migration 014 Phase 13 di repo lokal | `supabase/migrations/014_phase13_assets_transfers.sql` | ✅ `TRANSFER`, akun lawan, aset/valuasi, `sweep_policy` |
+| P2 | Samakan kosakata klien dengan skema baru | `lib/zero-based.ts`, `lib/queries.ts`, `app/quick-add.tsx`, `app/manage-categories.tsx` | ✅ tipe `TRANSFER`, role `UNTRACKED`, picker trash disembunyikan |
+| P3 | Samakan invalidasi Realtime untuk aset dan valuasi | `lib/realtime.ts`, `lib/queries.ts` | ✅ cache terkait aset/insight di-invalidasi |
+
+**Catatan batas parity:** migration telah direview dan divalidasi secara tekstual, typecheck,
+test, dan `git diff --check`. Supabase CLI tidak tersedia di environment ini, remote schema
+tidak diintrospeksi, dan migration **tidak dijalankan ulang ke Supabase** karena user telah
+menyatakan migration remote sudah dijalankan. Verifikasi SQL Editor tetap diperlukan sebelum
+mengubah migration remote yang sudah ada.
+
 **Tahap 1 — Phase 12 (rekonsiliasi tutup siklus)**
 
 | # | Aksi | Tergantung |

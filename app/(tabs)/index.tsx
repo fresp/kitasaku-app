@@ -7,7 +7,8 @@ import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
-import { calcCashflow, useActiveCycle, useTransactions, useZeroBasedSummary } from '../../lib/queries';
+import { calcCashflow, useActiveCycle, useCycleReconciliation, useTransactions, useZeroBasedSummary } from '../../lib/queries';
+import { formatShortDate } from '../../lib/zero-based';
 import { cycleRangeLabel, memberInitials } from '../../lib/profile';
 import { formatRupiah } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
@@ -68,6 +69,7 @@ export default function HomeScreen() {
   // it answers the cash question first, while allocation detail lives in its
   // own screen.
   const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
+  const reconciliationQ = useCycleReconciliation(householdId, cycleId);
 
   // This screen used to fall back to `lib/mockData` whenever a live query had
   // not resolved — which is not a rare state but the *normal* one just after
@@ -75,7 +77,7 @@ export default function HomeScreen() {
   // amounts presented as their own. There is no longer anything to fall back
   // to: a failed read shows an error, and a missing cycle shows the honest
   // empty state below.
-  const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError;
+  const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError || reconciliationQ.isError;
   const retryAll = () => {
     cycleQ.refetch();
     txnsQ.refetch();
@@ -179,6 +181,19 @@ export default function HomeScreen() {
           <ChevronRight size={17} color={Colors.textMuted} />
         </Pressable>
 
+        {cycleQ.data?.primary_account_id && !reconciliationQ.data && (
+          <Pressable onPress={() => router.push('/reconciliation')} style={styles.reconcileBanner}>
+            <View style={styles.reconcileIcon}><Calendar size={14} color={Colors.alertText} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.reconcileTitle}>Cek saldo akun primer</Text>
+              <Text style={styles.reconcileSub}>
+                Tutup siklus dengan mencocokkan saldo {formatShortDate(cycleQ.data.end_date) ?? 'akhir periode'}.
+              </Text>
+            </View>
+            <ChevronRight size={16} color={Colors.alertText} />
+          </Pressable>
+        )}
+
         {!householdId && (
           <Pressable onPress={() => router.push('/(auth)/setup-choice')} style={styles.offline}>
             <Text style={styles.offlineText}>Mode offline — ketuk untuk login &amp; sinkron dengan pasangan</Text>
@@ -226,6 +241,12 @@ export default function HomeScreen() {
             style={styles.secondaryAction}
           >
             <Text style={styles.secondaryActionText}>Catat pemasukan</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/transfer')}
+            style={styles.secondaryAction}
+          >
+            <Text style={styles.secondaryActionText}>Relokasi</Text>
           </Pressable>
         </View>
 
@@ -375,6 +396,10 @@ const styles = StyleSheet.create({
   cycleRange: { color: Colors.textSecondary, fontSize: 10, marginTop: 1 },
   offline: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
   offlineText: { color: Colors.alertText, fontSize: FontSize.caption, fontWeight: '600', flex: 1 },
+  reconcileBanner: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  reconcileIcon: { width: 24, height: 24, borderRadius: 7, backgroundColor: '#FFEFC7', alignItems: 'center', justifyContent: 'center' },
+  reconcileTitle: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  reconcileSub: { color: '#93651F', fontSize: 10, marginTop: 2 },
   hero: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16 },
   heroLabel: { color: '#AEBCCD', fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.7, marginBottom: 7 },
   heroAmount: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },

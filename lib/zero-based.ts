@@ -17,7 +17,11 @@ export type FlowType =
   | 'ASSET_RELEASE'
   | 'EXPENSE'
   | 'DEBT_PAYMENT'
-  | 'ASSET_ALLOCATION';
+  | 'ASSET_ALLOCATION'
+  | 'TRANSFER';
+
+/** Account-level flow vocabulary; TRANSFER is neutral at household level. */
+export type AccountFlowType = FlowType;
 
 export type AllocationType =
   | 'EXPENSE'
@@ -61,6 +65,92 @@ export interface ZeroBasedSummary {
   requiredAllocation: number;
   fundingGap: number;
   status: ZeroBasedStatus;
+}
+
+/** One transaction projected against one cash account. */
+export interface AccountZeroBasedTransaction {
+  account_id?: string | null;
+  counter_account_id?: string | null;
+  flow_type?: AccountFlowType | null;
+  direction?: 'INCOME' | 'EXPENSE';
+  planned_amount: AmountInput;
+  actual_amount: AmountInput;
+  status: 'PENDING' | 'PAID';
+  obligation_id?: string | null;
+}
+
+export interface AccountCashBreakdown {
+  operatingIncome: number;
+  financingInflow: number;
+  assetRelease: number;
+  transferIn: number;
+  total: number;
+}
+
+export interface AccountOutflowBreakdown {
+  expense: number;
+  debtPayment: number;
+  assetAllocation: number;
+  transferOut: number;
+  total: number;
+}
+
+export interface AccountZeroBasedSummary {
+  accountId: string;
+  incoming: AccountCashBreakdown;
+  outgoing: AccountOutflowBreakdown;
+  unallocatedFunds: number;
+  netCashflow: number;
+  status: ZeroBasedStatus;
+}
+
+export interface AccountZeroBasedArgs {
+  accountId: string;
+  transactions: AccountZeroBasedTransaction[];
+  mode?: SummaryMode;
+}
+
+/**
+ * Per-account zero-based projection. Household transfers are neutral, but the
+ * source row is an outflow and its counter account is an inflow. Classification
+ * follows flow_type rather than direction because legacy asset rows may carry
+ * the opposite direction.
+ */
+export function accountZeroBased(args: AccountZeroBasedArgs): AccountZeroBasedSummary {
+  const incoming: AccountCashBreakdown = {
+    operatingIncome: 0, financingInflow: 0, assetRelease: 0, transferIn: 0, total: 0,
+  };
+  const outgoing: AccountOutflowBreakdown = {
+    expense: 0, debtPayment: 0, assetAllocation: 0, transferOut: 0, total: 0,
+  };
+  for (const txn of args.transactions) {
+    const flow = txn.flow_type ?? defaultFlowType(txn.direction ?? 'EXPENSE', txn.obligation_id ?? null);
+    const amount = resolveModeAmount(txn, args.mode ?? 'planned');
+    if (amount === 0) continue;
+    if (flow === 'TRANSFER') {
+      if (txn.account_id === args.accountId) outgoing.transferOut += amount;
+      if (txn.counter_account_id === args.accountId) incoming.transferIn += amount;
+      continue;
+    }
+    if (txn.account_id !== args.accountId) continue;
+    if (flow === 'OPERATING_INCOME') incoming.operatingIncome += amount;
+    else if (flow === 'FINANCING_INFLOW') incoming.financingInflow += amount;
+    else if (flow === 'ASSET_RELEASE') incoming.assetRelease += amount;
+    else if (flow === 'EXPENSE') outgoing.expense += amount;
+    else if (flow === 'DEBT_PAYMENT') outgoing.debtPayment += amount;
+    else if (flow === 'ASSET_ALLOCATION') outgoing.assetAllocation += amount;
+  }
+  incoming.total = incoming.operatingIncome + incoming.financingInflow + incoming.assetRelease + incoming.transferIn;
+  outgoing.total = outgoing.expense + outgoing.debtPayment + outgoing.assetAllocation + outgoing.transferOut;
+  const netCashflow = calculateUnallocatedFunds(incoming.total, outgoing.total);
+  return {
+    accountId: args.accountId,
+    incoming,
+    outgoing,
+    unallocatedFunds: netCashflow,
+    netCashflow,
+    status: netCashflow < 0 ? 'FUNDING_GAP' : netCashflow > 0 ? 'UNALLOCATED' : 'COMPLETE',
+  };
 }
 
 export interface LoanMetadata {
@@ -599,4 +689,105 @@ export function templateDueLabel(dueDay: number | null | undefined): string | nu
   if (dueDay === null || dueDay === undefined) return null;
   if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31) return null;
   return `Tgl ${Math.floor(dueDay)}`;
+}
+
+// ============ Phase 12: cycle reconciliation ============
+
+export interface ReconciliationTransaction {
+  account_id?: string | null;
+  counter_account_id?: string | null;
+  direction?: 'INCOME' | 'EXPENSE';
+  flow_type?: FlowType | null;
+  planned_amount: AmountInput;
+  actual_amount: AmountInput;
+  status: 'PENDING' | 'PAID';
+  obligation_id?: string | null;
+}
+
+export interface ReconciliationPreview {
+  accountId: string;
+  openingStated: number | null;
+  closingStated: number | null;
+  recordedNet: number;
+  delta: number | null;
+  pendingCount: number;
+  nullAccountCount: number;
+  outsideCyclePrimaryCount: number;
+  canRecord: boolean;
+}
+
+/**
+ * Reconciliation compares movement, not absolute balance. The first cycle is
+ * an anchor only: with no prior closing balance there is deliberately no delta
+ * and therefore no adjustment. `flow_type` is authoritative, with the legacy
+ * direction as a compatibility fallback for old rows.
+ */
+export function reconciliationPreview(args: {
+  accountId: string;
+  openingStated: AmountInput | null;
+  closingStated: AmountInput | null;
+  transactions: ReconciliationTransaction[];
+  outsideCyclePrimaryCount?: number;
+}): ReconciliationPreview {
+  let recordedNet = 0;
+  let pendingCount = 0;
+  let nullAccountCount = 0;
+
+  for (const txn of args.transactions) {
+    if (!txn.account_id && !txn.counter_account_id) nullAccountCount += 1;
+    if (txn.status === 'PENDING') {
+      pendingCount += 1;
+      continue;
+    }
+    if (txn.account_id !== args.accountId && txn.counter_account_id !== args.accountId) continue;
+    const amount = normalizeAmount(txn.actual_amount);
+    const flow = txn.flow_type ?? defaultFlowType(txn.direction ?? 'EXPENSE', txn.obligation_id ?? null);
+    if (flow === 'TRANSFER') {
+      // A transfer is household-neutral, but it still changes the stated
+      // balance of the account being reconciled.
+      if (txn.account_id === args.accountId) recordedNet -= amount;
+      else if (txn.counter_account_id === args.accountId) recordedNet += amount;
+      continue;
+    }
+    if (
+      flow === 'OPERATING_INCOME' ||
+      flow === 'FINANCING_INFLOW' ||
+      flow === 'ASSET_RELEASE'
+    ) {
+      recordedNet += amount;
+    } else if (
+      flow === 'EXPENSE' ||
+      flow === 'DEBT_PAYMENT' ||
+      flow === 'ASSET_ALLOCATION'
+    ) {
+      recordedNet -= amount;
+    } else if (txn.counter_account_id === args.accountId) {
+      recordedNet += amount;
+    } else if (txn.account_id === args.accountId) {
+      recordedNet -= amount;
+    }
+  }
+
+  const opening = args.openingStated === null ? null : normalizeAmount(args.openingStated);
+  const closing = args.closingStated === null ? null : normalizeAmount(args.closingStated);
+  const delta = opening === null || closing === null
+    ? null
+    : (closing - opening) - recordedNet;
+
+  return {
+    accountId: args.accountId,
+    openingStated: opening,
+    closingStated: closing,
+    recordedNet: Object.is(recordedNet, -0) ? 0 : recordedNet,
+    delta: delta !== null && Object.is(delta, -0) ? 0 : delta,
+    pendingCount,
+    nullAccountCount,
+    outsideCyclePrimaryCount: args.outsideCyclePrimaryCount ?? 0,
+    canRecord: closing !== null && pendingCount === 0 && nullAccountCount === 0,
+  };
+}
+
+/** A second reconciliation for the same cycle must never write another one. */
+export function canRecordReconciliation(existing: { id?: string } | null | undefined): boolean {
+  return !existing;
 }

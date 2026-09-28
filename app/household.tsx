@@ -13,7 +13,7 @@ import Share2 from 'lucide-react-native/icons/share-2';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { useAuth } from '../lib/auth-context';
-import { buildInviteMessage } from '../lib/household';
+import { buildInviteMessage, type SweepPolicy } from '../lib/household';
 import { useHouseholdMembers, useUpdateHousehold, useUpdateMyMemberProfile } from '../lib/queries';
 import {
   householdMeta,
@@ -56,6 +56,7 @@ export default function HouseholdScreen() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(household?.name ?? '');
   const [paydayDraft, setPaydayDraft] = useState('');
+  const [sweepDraft, setSweepDraft] = useState<SweepPolicy>(household?.sweep_policy ?? 'OFFERED');
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // "Undang Pasangan" on My Profile opens this screen with focus=invite. The
@@ -108,6 +109,7 @@ export default function HouseholdScreen() {
         // Only send the payday when a value was typed. An empty box must not
         // clear a payday the family already set.
         paydayDay: paydayDraft.trim() === '' ? undefined : parseInt(paydayDraft, 10),
+        sweepPolicy: sweepDraft,
       });
       await refresh();
       setEditingName(false);
@@ -168,6 +170,7 @@ export default function HouseholdScreen() {
                 <Pressable
                   onPress={() => {
                     setNameDraft(household?.name ?? '');
+                    setSweepDraft(household?.sweep_policy ?? 'OFFERED');
                     setEditingName((v) => !v);
                     setErr(null);
                   }}
@@ -203,6 +206,23 @@ export default function HouseholdScreen() {
                 Payday menentukan batas siklus (payday-to-payday). Kosongkan kalau belum mau
                 diatur — nilai yang sudah ada tidak akan terhapus.
               </Text>
+              <Text style={styles.label}>PENANGANAN SAPU AKUN SAAT TUTUP SIKLUS</Text>
+              <View style={styles.policyRow}>
+                {(['OFFERED', 'REQUIRED'] as const).map((policy) => (
+                  <Pressable
+                    key={policy}
+                    onPress={() => setSweepDraft(policy)}
+                    style={[styles.policyOption, sweepDraft === policy && styles.policyOptionActive]}
+                  >
+                    <Text style={[styles.policyText, sweepDraft === policy && styles.policyTextActive]}>
+                      {policy === 'REQUIRED' ? 'Wajib' : 'Ditawarkan'}
+                    </Text>
+                    <Text style={styles.policyHint}>
+                      {policy === 'REQUIRED' ? 'Tutup siklus tertahan sampai selesai.' : 'Boleh dilewati saat tutup siklus.'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
               <PrimaryButton
                 label={updateHousehold.isPending ? 'Menyimpan…' : 'Simpan'}
                 onPress={saveName}
@@ -378,6 +398,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.canvas,
   },
   hint: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
+  policyRow: { flexDirection: 'row', gap: 8 },
+  policyOption: {
+    flex: 1, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
+    padding: 10, gap: 4, backgroundColor: Colors.canvas,
+  },
+  policyOptionActive: { borderColor: Colors.brandPrimary, backgroundColor: Colors.subtle },
+  policyText: { color: Colors.textSecondary, fontWeight: '700', fontSize: FontSize.body },
+  policyTextActive: { color: Colors.textPrimary },
+  policyHint: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 15 },
 
   invite: {
     backgroundColor: Colors.subtle, borderRadius: Radius.lg, borderWidth: 1,

@@ -30,6 +30,8 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['txns'] });
+          qc.invalidateQueries({ queryKey: ['audit-txns'] });
+          qc.invalidateQueries({ queryKey: ['reconciliation'] });
           // Insight & Aset charts the same rows for a whole year under its own
           // key; without this the partner's edits leave its charts stale.
           qc.invalidateQueries({ queryKey: ['year-insight'] });
@@ -54,6 +56,8 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'cycles', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['cycle'] });
+          qc.invalidateQueries({ queryKey: ['reconciliation'] });
+          qc.invalidateQueries({ queryKey: ['audit-txns'] });
           // Insight & Aset reads the cycle list directly (which cycles exist,
           // and their dates), and lists the years to offer in its selector. A
           // cycle the partner opens in a new year must appear on both.
@@ -78,6 +82,32 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'accounts', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['accs'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'assets', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['assets'] });
+          qc.invalidateQueries({ queryKey: ['asset-valuations'] });
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asset_valuations', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['assets'] });
+          qc.invalidateQueries({ queryKey: ['asset-valuations'] });
+          qc.invalidateQueries({ queryKey: ['year-insight'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cycle_reconciliations', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['reconciliation'] });
+          qc.invalidateQueries({ queryKey: ['cycle'] });
         }
       )
       .on(
