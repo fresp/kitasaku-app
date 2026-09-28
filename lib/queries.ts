@@ -197,7 +197,7 @@ export function useTransactions(householdId: string | undefined, cycleId: string
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts(name)')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!)
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw error;
@@ -214,7 +214,7 @@ export function useNonCycleTransactions(householdId: string | undefined) {
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts(name)')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!)
         .is('cycle_id', null)
         .order('created_at', { ascending: false }).limit(200);
@@ -1320,7 +1320,7 @@ export function useYearInsight(householdId: string | undefined, year: number) {
       const cycleIds = cycles.map((c) => c.id);
       const [txnRes, allocRes] = await Promise.all([
         sb.from('transactions')
-          .select('*, categories(name, icon), accounts(name)')
+          .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
           .eq('household_id', householdId!)
           .in('cycle_id', cycleIds)
           .limit(2000),
@@ -1599,7 +1599,7 @@ export function useTransactionById(householdId: string | undefined, txnId: strin
     queryFn: async (): Promise<Txn | null> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts(name)')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!).eq('id', txnId!).maybeSingle();
       if (error) throw error;
       return (data as Txn | null) ?? null;
@@ -1624,7 +1624,7 @@ export function useObligationPayments(
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts(name)')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!).eq('obligation_id', obligationId!)
         .eq('status', 'PAID')
         .order('release_date', { ascending: false, nullsFirst: false })
