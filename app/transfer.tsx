@@ -91,7 +91,6 @@ export default function TransferScreen() {
 
         {accountsQ.isError && <QueryError onRetry={() => accountsQ.refetch()} retrying={accountsQ.isFetching} message="Daftar akun belum bisa dibaca. Relokasi belum dapat dicatat." />}
 
-        {accountsQ.isError && <QueryError onRetry={() => accountsQ.refetch()} retrying={accountsQ.isFetching} message="Daftar akun belum bisa dibaca. Relokasi belum dapat dicatat." />}
         {cycleQ.isError && <QueryError onRetry={() => cycleQ.refetch()} retrying={cycleQ.isFetching} message="Siklus aktif belum bisa dibaca." />}
 
         {!cycleQ.isLoading && !cycleQ.data && <Text style={styles.warning}>Belum ada siklus aktif. Relokasi saat ini harus menunggu siklus dibuka.</Text>}

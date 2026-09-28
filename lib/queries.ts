@@ -169,6 +169,7 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['year-insight'] });
   qc.invalidateQueries({ queryKey: ['assets'] });
   qc.invalidateQueries({ queryKey: ['asset-valuations'] });
+  qc.invalidateQueries({ queryKey: ['asset-movements'] });
   qc.invalidateQueries({ queryKey: ['audit-txns'] });
   qc.invalidateQueries({ queryKey: ['reconciliation'] });
   qc.invalidateQueries({ queryKey: ['cycle-sweep'] });
@@ -538,6 +539,31 @@ export function useAssetValuations(householdId: string | undefined, assetId?: st
   });
 }
 
+export interface AssetMovement {
+  asset_id: string;
+  flow_type: FlowType;
+  actual_amount: number;
+  status: 'PENDING' | 'PAID';
+}
+
+/** All asset-linked cash movements, kept separate from cycle insight rows. */
+export function useAssetMovements(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['asset-movements', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<AssetMovement[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('asset_id, flow_type, actual_amount, status')
+        .eq('household_id', householdId!)
+        .not('asset_id', 'is', null)
+        .in('flow_type', ['ASSET_ALLOCATION', 'ASSET_RELEASE']);
+      if (error) throw error;
+      return (data ?? []) as AssetMovement[];
+    },
+  });
+}
+
 export function useCreateAsset() {
   const qc = useQueryClient();
   return useMutation({
@@ -759,7 +785,8 @@ export function useCycleReconciliationPreview(
           .select('account_id, counter_account_id, direction, flow_type, planned_amount, actual_amount, status, obligation_id')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
         sb.from('transactions').select('id', { count: 'exact', head: true })
-          .eq('household_id', householdId!).is('cycle_id', null).eq('account_id', cycle.primary_account_id),
+          .eq('household_id', householdId!).is('cycle_id', null)
+          .or(`account_id.eq.${cycle.primary_account_id},counter_account_id.eq.${cycle.primary_account_id}`),
         sb.from('cycles').select('id')
           .eq('household_id', householdId!).lt('end_date', cycle.start_date)
           .order('end_date', { ascending: false }).limit(1),

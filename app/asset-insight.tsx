@@ -10,15 +10,22 @@ import { Colors, FontSize, Radius } from '../constants/theme';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { useCategories, useCycleYears, useObligations, useYearInsight } from '../lib/queries';
+import {
+  useAssetMovements,
+  useAssetValuations,
+  useAssets,
+  useCategories,
+  useCycleYears,
+  useObligations,
+  useYearInsight,
+} from '../lib/queries';
+import type { AssetMovement, AssetValuation } from '../lib/queries';
 import {
   accumulateAssets,
   annualTotals,
   assetSeriesByType,
   assetSummary,
   ASSET_BANDS,
-  bandKeyOfAllocationType,
-  bandLabel,
   buildTrendInsights,
   buildYearBuckets,
   latestActiveMonth,
@@ -85,6 +92,55 @@ const ASSET_BAND_COLORS: Record<string, string> = {
   LIQUIDITY: Colors.chartAsset,
 };
 
+function summarizeAssetRepository(
+  assets: { id: string; band: string }[],
+  movements: AssetMovement[],
+  valuations: AssetValuation[],
+) {
+  const contributedByAsset = new Map<string, number>();
+  for (const movement of movements) {
+    if (movement.status !== 'PAID') continue;
+    const amount = Math.max(0, movement.actual_amount);
+    const signed = movement.flow_type === 'ASSET_RELEASE' ? -amount : amount;
+    contributedByAsset.set(
+      movement.asset_id,
+      (contributedByAsset.get(movement.asset_id) ?? 0) + signed,
+    );
+  }
+
+  const latestByAsset = new Map<string, AssetValuation>();
+  for (const valuation of valuations) {
+    const current = latestByAsset.get(valuation.asset_id);
+    if (!current || valuation.valued_at > current.valued_at) {
+      latestByAsset.set(valuation.asset_id, valuation);
+    }
+  }
+
+  let contributedTotal = 0;
+  let valuationTotal = 0;
+  let valuedCount = 0;
+  const byBand: Record<string, number> = {};
+  for (const asset of assets) {
+    const contributed = contributedByAsset.get(asset.id) ?? 0;
+    contributedTotal += contributed;
+    byBand[asset.band] = (byBand[asset.band] ?? 0) + contributed;
+    const latest = latestByAsset.get(asset.id);
+    if (latest) {
+      valuationTotal += Math.max(0, latest.stated_value);
+      valuedCount += 1;
+    }
+  }
+
+  return {
+    contributedTotal,
+    valuationTotal,
+    valuedCount,
+    positionCount: assets.length,
+    valuationKnown: assets.length > 0 && valuedCount === assets.length,
+    byBand,
+  };
+}
+
 /** Expense bar colour: green under plan, amber slightly over, red well over. */
 function expenseTone(actual: number, planned: number): string {
   if (planned <= 0) return actual > 0 ? Colors.chartFinancing : Colors.chartPlan;
@@ -107,6 +163,9 @@ export default function AssetInsightScreen() {
 
   const catsQ = useCategories(householdId);
   const obligQ = useObligations(householdId);
+  const assetsQ = useAssets(householdId);
+  const assetMovementsQ = useAssetMovements(householdId);
+  const valuationsQ = useAssetValuations(householdId);
 
   const categories = useMemo(() => catsQ.data ?? [], [catsQ.data]);
   const categoryNames = useMemo(() => {
@@ -144,7 +203,25 @@ export default function AssetInsightScreen() {
   );
 
   const annual = useMemo(() => annualTotals(buckets), [buckets]);
-  const assets = useMemo(() => assetSummary(buckets), [buckets]);
+  const legacyAssets = useMemo(() => assetSummary(buckets), [buckets]);
+  const assetPositions = useMemo(() => assetsQ.data ?? [], [assetsQ.data]);
+  const assetMovements = useMemo(() => assetMovementsQ.data ?? [], [assetMovementsQ.data]);
+  const valuations = useMemo(() => valuationsQ.data ?? [], [valuationsQ.data]);
+  const assetInsight = useMemo(
+    () => summarizeAssetRepository(assetPositions, assetMovements, valuations),
+    [assetPositions, assetMovements, valuations]
+  );
+  const assets = useMemo(
+    () => ({
+      ...legacyAssets,
+      total: assetInsight.contributedTotal,
+      growth: assetInsight.contributedTotal,
+      growthPct: null,
+      topType: null,
+      topAmount: 0,
+    }),
+    [legacyAssets, assetInsight.contributedTotal]
+  );
 
   const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
   const outstanding = useMemo(
@@ -421,15 +498,30 @@ export default function AssetInsightScreen() {
           gapMonths.length > 1 ? ` (+${gapMonths.length - 1} bulan lain)` : ''
         }`;
 
-  const loading = yearQ.isLoading || yearsQ.isLoading;
-  // The empty state below reads "no cycles this year", which is a claim about
-  // the family's data — not about the network. A failed read must not be
-  // allowed to make it.
-  const failed = yearQ.isError || yearsQ.isError || obligQ.isError;
+  const loading =
+    yearQ.isLoading ||
+    yearsQ.isLoading ||
+    catsQ.isLoading ||
+    obligQ.isLoading ||
+    assetsQ.isLoading ||
+    assetMovementsQ.isLoading ||
+    valuationsQ.isLoading;
+  // Empty and incomplete asset states are claims about the family's data, not
+  // about the network. A failed repository read must not make them appear.
+  const failed =
+    yearQ.isError ||
+    yearsQ.isError ||
+    obligQ.isError ||
+    assetsQ.isError ||
+    assetMovementsQ.isError ||
+    valuationsQ.isError;
   const refetch = () => {
     void yearQ.refetch();
     void catsQ.refetch();
     void obligQ.refetch();
+    void assetsQ.refetch();
+    void assetMovementsQ.refetch();
+    void valuationsQ.refetch();
   };
 
   return (
@@ -861,37 +953,37 @@ export default function AssetInsightScreen() {
                 />
               </View>
               <Text style={styles.catList}>
-                Aset dihitung dari alokasi bulanan bertipe Aset / Tabungan / Investasi / Dana Darurat — bukan nilai pasar.
+                Grafik historis di atas menunjukkan rencana alokasi. Posisi aset dan nilai sekarang hanya dibaca dari repository aset; valuasi tidak mengubah kas.
               </Text>
               <StatGrid>
                 <StatRow>
                   <StatCard label="Total rencana aset" value={formatRupiah(assets.plannedTotal)} />
                   <StatCard
-                    label="Saldo akumulasi saat ini"
-                    value={formatRupiah(assets.total)}
+                    label="Total disisihkan"
+                    value={formatRupiah(assetInsight.contributedTotal)}
                     tone="paid"
                   />
                 </StatRow>
                 <StatRow>
                   <StatCard
-                    label="Kenaikan sejak awal tahun"
-                    value={
-                      assets.growthPct !== null
-                        ? `+${formatRupiah(assets.growth)} (+${assets.growthPct}%)`
-                        : `+${formatRupiah(assets.growth)}`
-                    }
-                    tone="paid"
+                    label="Nilai sekarang"
+                    value={assetInsight.valuationKnown ? formatRupiah(assetInsight.valuationTotal) : 'Belum lengkap'}
+                    tone={assetInsight.valuationKnown ? 'paid' : 'pending'}
                   />
                   <StatCard
-                    label="Kontributor terbesar"
-                    value={
-                      assets.topType
-                        ? `${bandLabel(bandKeyOfAllocationType(assets.topType)) ?? assets.topType} (${formatRupiahShort(assets.topAmount)})`
-                        : '—'
-                    }
+                    label="Posisi bervaluasi"
+                    value={assetInsight.positionCount === 0 ? 'Belum ada posisi' : `${assetInsight.valuedCount}/${assetInsight.positionCount}`}
                   />
                 </StatRow>
               </StatGrid>
+              {assetInsight.positionCount === 0 ? (
+                <Text style={styles.noteWarning}>Belum ada posisi aset di repository. Buat posisi aset dan catat valuasi dari menu Aset &amp; Investasi.</Text>
+              ) : !assetInsight.valuationKnown ? (
+                <Text style={styles.noteWarning}>Nilai sekarang belum lengkap. Setiap posisi perlu memiliki stated valuation sebelum total nilai ditampilkan.</Text>
+              ) : (
+                <Text style={styles.catList}>Nilai sekarang adalah snapshot stated valuation terakhir per posisi, bukan income dan bukan saldo akun.</Text>
+              )}
+              <Text style={styles.catList}>Kontribusi per band: {Object.entries(assetInsight.byBand).map(([key, value]) => `${key} ${formatRupiahShort(value)}`).join(' · ') || '—'}</Text>
             </SectionCard>
 
             {/* ---------- Section 6: Plan vs Actual ---------- */}
@@ -1165,6 +1257,7 @@ const styles = StyleSheet.create({
   footNoteDim: { fontSize: FontSize.microLabel, color: Colors.textMuted },
 
   catList: { fontSize: FontSize.caption, color: Colors.textMuted, lineHeight: 16 },
+  noteWarning: { fontSize: FontSize.caption, color: Colors.alertText, lineHeight: 16 },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {

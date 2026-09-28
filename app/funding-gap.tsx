@@ -344,15 +344,11 @@ export default function FundingGapScreen() {
                   text={`Tambah Pendapatan · +${formatRupiah(fundingGap)}`}
                   onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
                 />
-                {/* Asset release is a flow_type with no capture path yet: quick add
-                    writes OPERATING_INCOME for every income and the insert never
-                    sends ASSET_RELEASE. Shown as unavailable rather than routed to
-                    a form that would silently record the wrong flow type. */}
                 <StrategyRow
-                  icon={<Wallet size={14} color={Colors.textMuted} />}
+                  icon={<Wallet size={14} color={Colors.paidText} />}
                   text="Pencairan Aset (Asset Release) · Dana Darurat"
-                  note="Belum tersedia — catat lewat penyesuaian saldo akun"
-                  disabled
+                  note="Pilih posisi aset dan akun kas tujuan"
+                  onPress={() => router.push('/assets')}
                 />
                 <StrategyRow
                   icon={<Landmark size={14} color={Colors.loanText} />}

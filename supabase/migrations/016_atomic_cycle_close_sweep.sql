@@ -111,7 +111,7 @@ begin
   if exists (
     select 1 from public.transactions t
      where t.household_id = p_household_id and t.cycle_id is null
-       and t.account_id = p_account_id
+       and (t.account_id = p_account_id or t.counter_account_id = p_account_id)
   ) then
     raise exception 'Masih ada transaksi non-siklus pada akun primer yang belum ditinjau.';
   end if;
