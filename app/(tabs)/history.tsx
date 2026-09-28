@@ -310,6 +310,13 @@ export default function HistoryScreen() {
           <Text style={styles.muted}>Mode offline — login untuk riwayat live.</Text>
         )}
 
+        {pendingCount > 0 && (
+          <Pressable style={styles.bulkButton} onPress={() => router.push('/bulk-execute')}>
+            <Text style={styles.bulkButtonText}>Checklist eksekusi {pendingCount} transaksi</Text>
+            <Text style={styles.bulkButtonSub}>Pilih, lihat preview, lalu bagikan ke keluarga</Text>
+          </Pressable>
+        )}
+
         {/* Before this, a failed ledger read rendered the empty state below —
             "Belum ada transaksi di siklus ini" — which on a reconciliation
             screen is a claim, not a placeholder. */}
@@ -360,15 +367,10 @@ export default function HistoryScreen() {
                   key={r.id}
                   row={r}
                   first={i === 0}
-                  // A row that has not moved is the only one with something left
-                  // to do. Executed rows stay inert: payment-confirm is built to
-                  // refuse them, and a row that opens only to say "already paid"
-                  // is worse than one that does nothing.
-                  onPress={
-                    r.status === 'PENDING'
-                      ? () => router.push({ pathname: '/payment-confirm', params: { id: r.id } })
-                      : undefined
-                  }
+                  onPress={() => router.push({
+                    pathname: r.status === 'PENDING' ? '/payment-confirm' : '/transaction-edit',
+                    params: { id: r.id },
+                  })}
                 />
               ))}
             </View>
@@ -600,4 +602,7 @@ const styles = StyleSheet.create({
   empty: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
   emptyLink: { color: Colors.textPrimary, fontWeight: '600', textAlign: 'center' },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },
+  bulkButton: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.md, padding: 14, gap: 3 },
+  bulkButtonText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
+  bulkButtonSub: { color: Colors.white + 'D9', fontSize: FontSize.caption },
 });

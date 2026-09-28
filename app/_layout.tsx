@@ -103,6 +103,14 @@ function Gate() {
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
         <Stack.Screen
+          name="transaction-edit"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="bulk-execute"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
           name="quick-add"
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />

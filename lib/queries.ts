@@ -310,7 +310,13 @@ export function useTemplates(householdId: string | undefined) {
 export function useMarkAsPaid() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { txn: Txn; actualAmount: number; accountId?: string | null; isFinal: boolean }) => {
+    mutationFn: async (args: {
+      txn: Txn;
+      actualAmount: number;
+      accountId?: string | null;
+      isFinal: boolean;
+      releaseDate?: string | null;
+    }) => {
       // Exactly-once guard: `allocate_debt_payment` inserts its row already PAID
       // and reduced the obligation inside SQL. Re-confirming that row here would
       // decrement `remaining_amount` a second time.
@@ -320,11 +326,18 @@ export function useMarkAsPaid() {
       if (!(args.actualAmount > 0)) {
         throw new Error('Nominal pembayaran harus lebih dari Rp 0.');
       }
+      const releaseDate = args.releaseDate ?? todayISO();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
+      }
+      if (releaseDate > todayISO()) {
+        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
+      }
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
       const { error: uErr } = await sb.from('transactions').update({
         status: 'PAID', actual_amount: args.actualAmount,
-        release_date: todayISO(), executed_by: user?.id ?? null,
+        release_date: releaseDate, executed_by: user?.id ?? null,
         account_id: args.accountId ?? args.txn.account_id,
         is_final_payment: args.isFinal,
       }).eq('id', args.txn.id);
@@ -348,6 +361,49 @@ export function useMarkAsPaid() {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['tmpl'] });
     },
+  });
+}
+
+export function useUpdateTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      name: string;
+      amount: number;
+      releaseDate: string;
+      categoryId: string | null;
+      accountId: string | null;
+      status: 'PENDING' | 'PAID';
+    }): Promise<Txn> => {
+      if (args.name.trim().length < 3) throw new Error('Nama transaksi minimal 3 huruf.');
+      if (!(args.amount > 0)) throw new Error('Nominal harus lebih dari Rp 0.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
+        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
+      }
+      if (args.releaseDate > todayISO()) {
+        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
+      }
+      const sb = requireSupabase();
+      const patch: Record<string, string | number | null> = {
+        name: args.name.trim(),
+        planned_amount: args.amount,
+        category_id: args.categoryId,
+        account_id: args.accountId,
+      };
+      if (args.status === 'PAID') {
+        patch.actual_amount = args.amount;
+        patch.release_date = args.releaseDate;
+      } else {
+        // Editing a plan must not make it look executed or move cash.
+        patch.release_date = null;
+      }
+      const { data, error } = await sb.from('transactions').update(patch)
+        .eq('id', args.id).select('*').single();
+      if (error) throw error;
+      return data as Txn;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
   });
 }
 

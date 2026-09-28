@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
@@ -58,11 +59,20 @@ export default function PaymentConfirmScreen() {
   // The amount actually paid is often not the planned amount. Empty means
   // "same as planned"; anything typed becomes the recorded actual.
   const [amountText, setAmountText] = useState('');
+  const [releaseDate, setReleaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
   const actualAmount = amountText.trim() === '' ? planned : parseAmount(amountText);
+  const selectedDate = new Date(`${releaseDate}T00:00:00`);
+
+  function onDateValueChange(_event: { nativeEvent: { timestamp: number } }, date: Date) {
+    setReleaseDate(date.toISOString().slice(0, 10));
+    setDatePickerVisible(false);
+  }
 
   const selectedAccountId = accountId ?? liveTxn?.account_id ?? null;
   const selectedAccountName =
     accountOptions.find((a) => a.id === selectedAccountId)?.name ?? accountName;
+  const isIncome = liveTxn?.direction === 'INCOME';
   const differs = actualAmount !== planned;
 
   async function confirm() {
@@ -78,6 +88,7 @@ export default function PaymentConfirmScreen() {
         actualAmount,
         accountId: selectedAccountId,
         isFinal,
+        releaseDate,
       });
       router.back();
     } catch (e: any) {
@@ -150,14 +161,14 @@ export default function PaymentConfirmScreen() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.handle} />
-        <Text style={styles.eyebrow}>KONFIRMASI PEMBAYARAN</Text>
+        <Text style={styles.eyebrow}>{isIncome ? 'KONFIRMASI PENERIMAAN' : 'KONFIRMASI PEMBAYARAN'}</Text>
         <Text style={styles.title}>{name}</Text>
         <Text style={styles.sub}>
           {category} • {selectedAccountName}
         </Text>
 
         <View style={styles.amountBlock}>
-          <Text style={styles.amountLabel}>Nominal pembayaran</Text>
+          <Text style={styles.amountLabel}>{isIncome ? 'Nominal diterima' : 'Nominal pembayaran'}</Text>
           <Text style={styles.amountValue}>{formatRupiah(actualAmount)}</Text>
           <TextInput
             value={amountText}
@@ -180,17 +191,27 @@ export default function PaymentConfirmScreen() {
           </View>
         </View>
 
-        <View style={styles.row}>
+        <Pressable style={styles.row} onPress={() => setDatePickerVisible(true)}>
           <View>
-            <Text style={styles.rowLabel}>Tanggal bayar</Text>
+            <Text style={styles.rowLabel}>{isIncome ? 'Tanggal diterima' : 'Tanggal bayar'}</Text>
             <Text style={styles.rowValue}>
-              {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+              {new Date(`${releaseDate}T00:00:00`).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
             </Text>
           </View>
-          <Text style={styles.link}>Hari ini</Text>
-        </View>
+          <Text style={styles.link}>Pilih tanggal</Text>
+        </Pressable>
 
-        <Text style={styles.sectionLabel}>Bayar dari</Text>
+        {datePickerVisible && (
+          <DateTimePicker
+            value={selectedDate}
+            mode="date"
+            maximumDate={new Date()}
+            onValueChange={onDateValueChange}
+            onDismiss={() => setDatePickerVisible(false)}
+          />
+        )}
+
+        <Text style={styles.sectionLabel}>{isIncome ? 'Masuk ke akun' : 'Bayar dari'}</Text>
         <View style={styles.pills}>
           {accountOptions.length === 0 ? (
             <Badge label={selectedAccountName} />
@@ -239,13 +260,16 @@ export default function PaymentConfirmScreen() {
         )}
 
         <View style={styles.ctaRow}>
-          <View style={{ flex: 1 }}>
-            <SecondaryButton label="Batal" onPress={() => router.back()} />
-          </View>
           <View style={{ flex: 2 }}>
             <PrimaryButton
-              label={markPaid.isPending ? 'Menyimpan…' : 'Konfirmasi & Bayar'}
+              label={markPaid.isPending ? 'Menyimpan…' : isIncome ? 'Konfirmasi & Terima' : 'Konfirmasi & Bayar'}
               onPress={confirm}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <SecondaryButton
+              label="Ubah"
+              onPress={() => router.push({ pathname: '/transaction-edit', params: { id: liveTxn.id } })}
             />
           </View>
         </View>
