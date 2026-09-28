@@ -748,3 +748,24 @@ disamakan supaya tidak ada yang "mengembalikannya".
 (valuasi), dan **3 butuh perubahan kecil** (Funding Gap ×2, Setup Choice,
 Insight Aset). Sisanya tidak berubah — dan itu kabar baik: pivot Phase 13
 **tidak** membatalkan design, ia menambal tiga lubang dan mengoreksi satu klaim.
+
+### 10.6 Prompt pen.dev siap pakai
+
+Prompt-nya sudah ditulis, dipecah **tiga pass** yang masing-masing berdiri
+sendiri dan bisa direview sebelum lanjut:
+
+📄 **`Family Spending/PEN_DEV_ZERO_BASED_PER_AKUN_PROMPT.md`**
+
+| Pass | Frame | Butuh keputusan? |
+| --- | --- | --- |
+| **A** | M1–M2 valuasi aset + koreksi Screen 2C | Tidak — bisa jalan sekarang |
+| **B** | L1 relokasi antar akun | Tidak |
+| **C** | L2–L3 sapu + buka Screen 7B + Screen 12 | Tidak (§7.1.1 aman untuk keduanya) |
+
+Prompt itu memuat **larangan keras** yang eksplisit — "akun investasi", "saldo
+akun", "gain sebagai pemasukan" — karena ketiganya ditolak model produk dan
+skema, tapi mudah dihasilkan ulang oleh model desain yang hanya melihat
+tampilannya.
+
+**Pemetaan frame → aksi app** ada di bagian akhir prompt itu, jadi setelah
+design selesai tidak perlu menebak mana yang mengerjakan apa.
