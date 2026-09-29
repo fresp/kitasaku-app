@@ -223,7 +223,10 @@ export default function AssetInsightScreen() {
     [legacyAssets, assetInsight.contributedTotal]
   );
 
-  const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
+  const obligations = useMemo(
+    () => (obligQ.data ?? []).filter((o) => o.status !== 'CANCELLED'),
+    [obligQ.data],
+  );
   const outstanding = useMemo(
     () => obligations.reduce((s, o) => s + Math.max(0, o.remaining_amount), 0),
     [obligations]

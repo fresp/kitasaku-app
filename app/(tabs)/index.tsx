@@ -17,7 +17,9 @@ import { QueryError } from '../../components/ui/QueryError';
 import type { Txn } from '../../lib/queries';
 import type { RowItem } from '../../components/ui/TransactionRow';
 
-type HomeRow = RowItem & {
+type HomeRow = Omit<RowItem, 'status'> & {
+  status: Txn['status'];
+
   direction?: Txn['direction'];
   /** The picker's choice, so both lists agree on the icon. */
   categoryIcon?: string | null;
@@ -85,7 +87,7 @@ export default function HomeScreen() {
   };
 
   const txns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
-  const flow = useMemo(() => calcCashflow(txns), [txns]);
+  const flow = useMemo(() => calcCashflow(txns.filter((txn) => txn.status !== 'CANCELLED')), [txns]);
   const liveTotals = useMemo(() => {
     let income = 0;
     let expense = 0;
@@ -97,7 +99,7 @@ export default function HomeScreen() {
     return { income, expense };
   }, [txns]);
 
-  const homeRows = useMemo<HomeRow[]>(() => txns.map(toRow).slice(0, 4), [txns]);
+  const homeRows = useMemo<HomeRow[]>(() => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 4), [txns]);
 
   const cycleName = cycleQ.data?.name ?? 'Belum ada siklus aktif';
   // The alert counts unpaid *expenses*. `pendingCount` also counts an

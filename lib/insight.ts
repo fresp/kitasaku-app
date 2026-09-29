@@ -69,7 +69,7 @@ export interface InsightTxn {
   category_id?: string | null;
   planned_amount: number;
   actual_amount: number;
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
 }
 
 export interface InsightAllocation {
@@ -77,6 +77,7 @@ export interface InsightAllocation {
   allocation_type: AllocationType;
   amount: number;
   category_id?: string | null;
+  cancelled_at?: string | null;
 }
 
 export interface YearBucket {
@@ -241,6 +242,7 @@ export function buildYearBuckets(args: {
   }
 
   for (const t of args.txns) {
+    if (t.status === 'CANCELLED') continue;
     if (!t.cycle_id) continue;
     const month = monthByCycle.get(t.cycle_id);
     if (month === undefined) continue;
@@ -290,6 +292,7 @@ export function buildYearBuckets(args: {
   }
 
   for (const a of args.allocations) {
+    if (a.cancelled_at) continue;
     if (!a.cycle_id) continue;
     const month = monthByCycle.get(a.cycle_id);
     if (month === undefined) continue;

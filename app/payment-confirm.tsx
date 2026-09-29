@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactions } from '../lib/queries';
+import { CANCELLATION_REASONS, useAccounts, useActiveCycle, useCancelPendingTransaction, useMarkAsPaid, useTransactions } from '../lib/queries';
 import { accountSubline } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
@@ -29,6 +29,7 @@ export default function PaymentConfirmScreen() {
   const txnsQ = useTransactions(householdId, cycleQ.data?.id);
   const accsQ = useAccounts(householdId);
   const markPaid = useMarkAsPaid();
+  const cancelTxn = useCancelPendingTransaction();
 
   const liveTxn = useMemo(
     () => (txnsQ.data ?? []).find((t) => t.id === id),
@@ -61,6 +62,9 @@ export default function PaymentConfirmScreen() {
   const [amountText, setAmountText] = useState('');
   const [releaseDate, setReleaseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelNote, setCancelNote] = useState('');
   const actualAmount = amountText.trim() === '' ? planned : parseAmount(amountText);
   const selectedDate = new Date(`${releaseDate}T00:00:00`);
 
@@ -95,6 +99,71 @@ export default function PaymentConfirmScreen() {
       setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
     }
   }
+
+  async function cancel() {
+    setErr(null);
+    if (!liveTxn || !householdId) return;
+    if (!cancelReason) { setErr('Pilih alasan pembatalan.'); return; }
+    try {
+      await cancelTxn.mutateAsync({
+        householdId,
+        transactionId: liveTxn.id,
+        reason: cancelReason as Parameters<typeof cancelTxn.mutateAsync>[0]['reason'],
+        note: cancelNote,
+      });
+      setCancelOpen(false);
+      router.back();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal membatalkan rencana.');
+    }
+  }
+
+  const cancelModal = (
+    <Modal
+      visible={cancelOpen}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setCancelOpen(false)}
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Batalkan rencana?</Text>
+          <Text style={styles.modalBody}>
+            Rencana ini tidak akan dieksekusi, tetapi catatan dan alasan pembatalannya tetap tersimpan di riwayat audit.
+          </Text>
+          <Text style={styles.sectionLabel}>Alasan</Text>
+          <View style={styles.reasonList}>
+            {CANCELLATION_REASONS.map((item) => (
+              <Pressable
+                key={item.value}
+                onPress={() => setCancelReason(item.value)}
+                style={[styles.reason, cancelReason === item.value && styles.reasonActive]}
+              >
+                <Text style={[styles.reasonText, cancelReason === item.value && styles.reasonTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            value={cancelNote}
+            onChangeText={setCancelNote}
+            placeholder="Catatan tambahan (opsional)"
+            placeholderTextColor={Colors.textMuted}
+            multiline
+            maxLength={500}
+            style={styles.noteInput}
+          />
+          <Text style={styles.charCount}>{cancelNote.length}/500</Text>
+          {err && <Text style={styles.errText}>{err}</Text>}
+          <View style={styles.modalActions}>
+            <View style={{ flex: 1 }}><SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} /></View>
+            <View style={{ flex: 1 }}><PrimaryButton label={cancelTxn.isPending ? 'Menyimpan…' : 'Batalkan rencana'} onPress={cancel} /></View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (loadFailed || loading) {
     return (
@@ -273,10 +342,15 @@ export default function PaymentConfirmScreen() {
             />
           </View>
         </View>
+        <Pressable onPress={() => { setErr(null); setCancelOpen(true); }} style={styles.cancelLink}>
+          <Text style={styles.cancelLinkText}>Batalkan rencana</Text>
+        </Pressable>
         {!householdId && (
+
           <Text style={styles.note}>Mode offline — login untuk menyimpan ke Supabase.</Text>
         )}
       </ScrollView>
+      {cancelModal}
     </SafeAreaView>
   );
 }
@@ -353,4 +427,18 @@ const styles = StyleSheet.create({
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
   note: { color: Colors.textMuted, fontSize: FontSize.body, textAlign: 'center' },
   ctaRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  cancelLink: { alignItems: 'center', paddingVertical: 8 },
+  cancelLinkText: { color: Colors.pendingText, fontWeight: '600' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' },
+  modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: 20, gap: 10 },
+  modalTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },
+  modalBody: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 19 },
+  reasonList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reason: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 8 },
+  reasonActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  reasonText: { color: Colors.textSecondary, fontWeight: '600' },
+  reasonTextActive: { color: Colors.white },
+  noteInput: { minHeight: 76, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, color: Colors.textPrimary, textAlignVertical: 'top' },
+  charCount: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'right' },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
 });

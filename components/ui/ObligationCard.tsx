@@ -97,7 +97,8 @@ export function ObligationCard({
   const pct = progressPct(obligation.total_amount, obligation.remaining_amount);
   const badge = obligationBadge(state, pct);
   const Icon = STATE_ICON[state];
-  const settled = state === 'SETTLED' || state === 'CANCELLED';
+  const cancelled = state === 'CANCELLED';
+  const settled = state === 'SETTLED';
   const schedule = installmentProgressLabel(installments);
   const isLoan = normalizeObligationType(obligation.type) === 'LOAN';
   const plan = planInfo(obligation);
@@ -107,17 +108,21 @@ export function ObligationCard({
   const dueLabel = longDateLabel(obligation.due_date);
 
   // A settled card shows how it finished; a live card shows what is still owed.
-  const line2 = settled
-    ? schedule
-      ? `Lunas${dueLabel ? ` pada ${dueLabel}` : ''} • ${schedule}`
-      : `Lunas${dueLabel ? ` pada ${dueLabel}` : ''}`
-    : state === 'OVERDUE'
-      ? overdueNote(obligation.due_date, todayISO)
-      : counterparty;
+  const line2 = cancelled
+    ? 'Dibatalkan — tidak ada pembayaran yang dicatat'
+    : settled
+      ? schedule
+        ? `Lunas${dueLabel ? ` pada ${dueLabel}` : ''} • ${schedule}`
+        : `Lunas${dueLabel ? ` pada ${dueLabel}` : ''}`
+      : state === 'OVERDUE'
+        ? overdueNote(obligation.due_date, todayISO)
+        : counterparty;
 
-  const line3 = settled
-    ? `Total ${formatRupiah(obligation.total_amount)} • Sisa kewajiban ${formatRupiah(Math.max(0, obligation.remaining_amount))}`
-    : state === 'OVERDUE'
+  const line3 = cancelled
+    ? `Total ${formatRupiah(obligation.total_amount)} • Rencana ditutup`
+    : settled
+      ? `Total ${formatRupiah(obligation.total_amount)} • Sisa kewajiban ${formatRupiah(Math.max(0, obligation.remaining_amount))}`
+      : state === 'OVERDUE'
       ? overdueBreakdown(obligation, installments)
       : normalizeObligationType(obligation.type) === 'LOAN'
         ? loanBreakdownText(obligation)
@@ -150,7 +155,7 @@ export function ObligationCard({
         {!!line2 && <Text style={styles.sub} numberOfLines={2}>{line2}</Text>}
       </View>
 
-      {!settled && (
+      {!settled && !cancelled && (
         <View style={styles.amountRow}>
           <View>
             <Text style={styles.amountLabel}>{state === 'OVERDUE' ? 'Tagihan' : 'Sisa'}</Text>
@@ -167,10 +172,12 @@ export function ObligationCard({
           style={[
             styles.fill,
             {
-              width: `${Math.max(pct, settled ? 100 : 2)}%` as any,
-              backgroundColor: settled
-                ? Colors.paidText
-                : state === 'OVERDUE'
+              width: `${Math.max(pct, settled || cancelled ? 100 : 2)}%` as any,
+              backgroundColor: cancelled
+                ? Colors.textMuted
+                : settled
+                  ? Colors.paidText
+                  : state === 'OVERDUE'
                   ? Colors.pendingBorder
                   : Colors.loanBorder,
             },

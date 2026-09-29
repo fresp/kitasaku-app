@@ -75,7 +75,7 @@ export interface AccountZeroBasedTransaction {
   direction?: 'INCOME' | 'EXPENSE';
   planned_amount: AmountInput;
   actual_amount: AmountInput;
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
   obligation_id?: string | null;
 }
 
@@ -124,6 +124,7 @@ export function accountZeroBased(args: AccountZeroBasedArgs): AccountZeroBasedSu
     expense: 0, debtPayment: 0, assetAllocation: 0, transferOut: 0, total: 0,
   };
   for (const txn of args.transactions) {
+    if (txn.status === 'CANCELLED') continue;
     const flow = txn.flow_type ?? defaultFlowType(txn.direction ?? 'EXPENSE', txn.obligation_id ?? null);
     const amount = resolveModeAmount(txn, args.mode ?? 'planned');
     if (amount === 0) continue;
@@ -390,7 +391,7 @@ export function defaultFlowType(
 
 /** Rows a payment may be executed against. */
 export interface PayableTxn {
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
   obligation_id?: string | null;
   flow_type?: FlowType | null;
 }
@@ -463,10 +464,11 @@ export function resolveModeAmount(
   txn: {
     planned_amount: AmountInput;
     actual_amount: AmountInput;
-    status: 'PENDING' | 'PAID';
+    status: 'PENDING' | 'PAID' | 'CANCELLED';
   },
   mode: SummaryMode
 ): number {
+  if (txn.status === 'CANCELLED') return 0;
   if (mode === 'actual') {
     return txn.status === 'PAID' ? normalizeAmount(txn.actual_amount) : 0;
   }
@@ -490,8 +492,9 @@ export function resolveModeAmount(
 export function ledgerDisplayAmount(txn: {
   planned_amount: AmountInput;
   actual_amount: AmountInput;
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
 }): number {
+  if (txn.status === 'CANCELLED') return 0;
   if (txn.status === 'PENDING') return normalizeAmount(txn.planned_amount);
   const actual = normalizeAmount(txn.actual_amount);
   return actual > 0 ? actual : normalizeAmount(txn.planned_amount);
@@ -623,7 +626,9 @@ export interface LedgerFilterRow {
   account_id?: string | null;
   accountName?: string | null;
   categoryName?: string | null;
-  status?: 'PENDING' | 'PAID';
+  status?: 'PENDING' | 'PAID' | 'CANCELLED';
+  release_date?: string | null;
+  displayAmount?: number;
 }
 
 export interface LedgerFilter {
@@ -633,7 +638,7 @@ export interface LedgerFilter {
   /** `null`/absent = every account. */
   accountId?: string | null;
   /** `null`/absent = every status. `PENDING` is Home's "belum dibayar" deep link. */
-  status?: 'PENDING' | 'PAID' | null;
+  status?: 'PENDING' | 'PAID' | 'CANCELLED' | null;
 }
 
 /**
@@ -700,7 +705,7 @@ export interface ReconciliationTransaction {
   flow_type?: FlowType | null;
   planned_amount: AmountInput;
   actual_amount: AmountInput;
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
   obligation_id?: string | null;
 }
 
@@ -735,6 +740,7 @@ export function reconciliationPreview(args: {
 
   for (const txn of args.transactions) {
     if (!txn.account_id && !txn.counter_account_id) nullAccountCount += 1;
+    if (txn.status === 'CANCELLED') continue;
     if (txn.status === 'PENDING') {
       pendingCount += 1;
       continue;

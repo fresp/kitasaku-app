@@ -65,7 +65,7 @@ export default function TransactionEditScreen() {
         releaseDate: currentDate,
         categoryId: currentCategoryId,
         accountId: currentAccountId,
-        status: txn.status,
+        status: txn.status as 'PENDING' | 'PAID',
       });
       router.back();
     } catch (e: any) {
@@ -86,6 +86,20 @@ export default function TransactionEditScreen() {
 
   if (!txn) {
     return <SafeAreaView style={styles.safe}><View style={styles.center}><Text style={styles.title}>Transaksi tidak ditemukan</Text><PrimaryButton label="Kembali" onPress={() => router.back()} /></View></SafeAreaView>;
+  }
+
+  if (txn.status === 'CANCELLED') {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.center}>
+          <Text style={styles.title}>Transaksi dibatalkan</Text>
+          <Text style={styles.muted}>Catatan ini dipertahankan untuk audit dan tidak dapat diubah.</Text>
+          {!!txn.cancellation_reason && <Text style={styles.muted}>Alasan: {txn.cancellation_reason}</Text>}
+          {!!txn.cancellation_note && <Text style={styles.muted}>Catatan: {txn.cancellation_note}</Text>}
+          <PrimaryButton label="Kembali" onPress={() => router.back()} />
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (

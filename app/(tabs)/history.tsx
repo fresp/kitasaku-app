@@ -55,7 +55,7 @@ const PAGE_SIZE = 30;
 
 type DirectionFilter = 'ALL' | 'EXPENSE' | 'INCOME';
 
-type StatusFilter = 'ALL' | 'PENDING' | 'PAID';
+type StatusFilter = 'ALL' | 'PENDING' | 'PAID' | 'CANCELLED';
 
 /**
  * The status filter lives in the URL, not in component state.
@@ -69,7 +69,7 @@ type StatusFilter = 'ALL' | 'PENDING' | 'PAID';
  */
 function statusFromParam(value: string | string[] | undefined): StatusFilter {
   const v = Array.isArray(value) ? value[0] : value;
-  return v === 'PENDING' || v === 'PAID' ? v : 'ALL';
+  return v === 'PENDING' || v === 'PAID' || v === 'CANCELLED' ? v : 'ALL';
 }
 
 export default function HistoryScreen() {
@@ -136,6 +136,10 @@ export default function HistoryScreen() {
   // assumption the status filter deliberately refuses to make.
   const paidCount = useMemo(
     () => narrowed.filter((r) => r.status === 'PAID').length,
+    [narrowed]
+  );
+  const cancelledCount = useMemo(
+    () => narrowed.filter((r) => r.status === 'CANCELLED').length,
     [narrowed]
   );
 
@@ -278,6 +282,11 @@ export default function HistoryScreen() {
             label={`Sudah dieksekusi · ${paidCount}`}
             active={status === 'PAID'}
             onPress={() => setStatus(status === 'PAID' ? 'ALL' : 'PAID')}
+          />
+          <Chip
+            label={`Dibatalkan · ${cancelledCount}`}
+            active={status === 'CANCELLED'}
+            onPress={() => setStatus(status === 'CANCELLED' ? 'ALL' : 'CANCELLED')}
           />
           <Chip
             label="Pengeluaran"

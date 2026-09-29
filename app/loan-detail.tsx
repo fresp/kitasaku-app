@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -18,8 +18,10 @@ import {
 } from '../lib/beneficiary';
 import {
   useActiveCycle,
+  CANCELLATION_REASONS,
   useAccounts,
   useAllocateDebtPayment,
+  useCancelObligation,
   useBeneficiaries,
   useObligationInstallments,
   useObligationPayments,
@@ -76,8 +78,12 @@ export default function LoanDetailScreen() {
   const beneficiariesQ = useBeneficiaries(householdId);
   const setMode = useSetRepaymentMode();
   const pay = useAllocateDebtPayment();
+  const cancelObligation = useCancelObligation();
 
   const [err, setErr] = useState<string | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelNote, setCancelNote] = useState('');
   const [payOpen, setPayOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   // "Ubah Rencana Pembayaran" scrolls to the mode card rather than picking a
@@ -137,7 +143,8 @@ export default function LoanDetailScreen() {
   const pct = progressPct(obligation.total_amount, obligation.remaining_amount);
   const badge = obligationBadge(state, pct);
   const paid = paidAmount(obligation.total_amount, obligation.remaining_amount);
-  const settled = state === 'SETTLED' || state === 'CANCELLED';
+  const cancelled = state === 'CANCELLED';
+  const settled = state === 'SETTLED';
 
   const schedule = repaymentModeOf(obligation);
   const nextInst = nextOpenInstallment(installments);
@@ -184,6 +191,59 @@ export default function LoanDetailScreen() {
     } catch (e: any) { setErr(e?.message ?? 'Gagal mencatat pembayaran.'); }
   }
 
+  async function cancel() {
+    setErr(null);
+    if (!householdId) return;
+    if (!cancelReason) { setErr('Pilih alasan pembatalan.'); return; }
+    try {
+      await cancelObligation.mutateAsync({
+        householdId,
+        obligationId: ob.id,
+        reason: cancelReason as Parameters<typeof cancelObligation.mutateAsync>[0]['reason'],
+        note: cancelNote,
+      });
+      setCancelOpen(false);
+      router.back();
+    } catch (e: any) { setErr(e?.message ?? 'Gagal membatalkan tanggungan.'); }
+  }
+
+  const cancelModal = (
+    <Modal visible={cancelOpen} transparent animationType="slide" onRequestClose={() => setCancelOpen(false)}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Batalkan tanggungan?</Text>
+          <Text style={styles.modalBody}>
+            Tanggungan dan rencana cicilan yang belum dibayar akan ditutup. Tidak ada uang yang dibalikkan; catatan ini tetap tersimpan untuk audit.
+          </Text>
+          <Text style={styles.sectionLabel}>Alasan</Text>
+          <View style={styles.reasonList}>
+            {CANCELLATION_REASONS.map((item) => (
+              <Pressable key={item.value} onPress={() => setCancelReason(item.value)} style={[styles.reason, cancelReason === item.value && styles.reasonActive]}>
+                <Text style={[styles.reasonText, cancelReason === item.value && styles.reasonTextActive]}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            value={cancelNote}
+            onChangeText={setCancelNote}
+            placeholder="Catatan tambahan (opsional)"
+            placeholderTextColor={Colors.textMuted}
+            multiline
+            maxLength={500}
+            style={styles.noteInput}
+          />
+          <Text style={styles.charCount}>{cancelNote.length}/500</Text>
+          {err && <Text style={styles.errText}>{err}</Text>}
+          <View style={styles.modalActions}>
+            <View style={{ flex: 1 }}><SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} /></View>
+            <View style={{ flex: 1 }}><PrimaryButton label={cancelObligation.isPending ? 'Menyimpan…' : 'Batalkan tanggungan'} onPress={cancel} /></View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+  const canCancel = !settled && payments.length === 0;
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -215,22 +275,24 @@ export default function LoanDetailScreen() {
         <View style={styles.hero}>
           <View style={styles.heroTop}>
             <Text style={styles.heroLabel}>
-              {type === 'LOAN' ? 'SISA PINJAMAN' : 'SISA KEWAJIBAN'}
+              {cancelled ? 'RENCANA DIBATALKAN' : type === 'LOAN' ? 'SISA PINJAMAN' : 'SISA KEWAJIBAN'}
             </Text>
-            <Text style={styles.heroPct}>{pct}% dibayar</Text>
+            {!cancelled && <Text style={styles.heroPct}>{pct}% dibayar</Text>}
           </View>
-          <Text style={styles.heroAmount}>{formatRupiah(obligation.remaining_amount)}</Text>
+          <Text style={styles.heroAmount}>{cancelled ? 'Tidak ada pembayaran yang dicatat' : formatRupiah(obligation.remaining_amount)}</Text>
           <View style={styles.track}>
             <View
               style={[
                 styles.fill,
                 {
-                  width: `${Math.max(pct, settled ? 100 : 2)}%` as any,
-                  backgroundColor: settled
-                    ? Colors.paidText
-                    : state === 'OVERDUE'
-                      ? Colors.pendingBorder
-                      : Colors.heroFooter,
+                  width: `${Math.max(pct, settled || cancelled ? 100 : 2)}%` as any,
+                  backgroundColor: cancelled
+                    ? Colors.textMuted
+                    : settled
+                      ? Colors.paidText
+                      : state === 'OVERDUE'
+                        ? Colors.pendingBorder
+                        : Colors.heroFooter,
                 },
               ]}
             />
@@ -241,6 +303,7 @@ export default function LoanDetailScreen() {
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>RINGKASAN KEWAJIBAN</Text>
+          {cancelled && <Text style={styles.modeNote}>Rencana ini dibatalkan dan dipertahankan sebagai catatan audit.</Text>}
           <SummaryRow
             label="Total pokok"
             value={formatRupiah(Math.max(0, obligation.total_amount - (obligation.interest_fee_amount ?? 0)))}
@@ -310,7 +373,7 @@ export default function LoanDetailScreen() {
           </View>
         )}
 
-        <View style={styles.card} onLayout={(e) => setModeY(e.nativeEvent.layout.y)}>
+        {!cancelled && <View style={styles.card} onLayout={(e) => setModeY(e.nativeEvent.layout.y)}>
           <Text style={styles.sectionLabel}>Mode Pembayaran</Text>
           <View style={styles.modeRow}>
             {REPAYMENT_MODES.map((m) => {
@@ -338,7 +401,7 @@ export default function LoanDetailScreen() {
             </Text>
           )}
           {setMode.isPending && <Text style={styles.modeNote}>Menyimpan…</Text>}
-        </View>
+        </View>}
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>Riwayat Pembayaran</Text>
@@ -415,7 +478,13 @@ export default function LoanDetailScreen() {
         <Text style={styles.footNote}>
           Mengubah mode hanya mengubah rencana, bukan jumlah yang sudah dibayar.
         </Text>
+        {canCancel && (
+          <Pressable onPress={() => { setErr(null); setCancelOpen(true); }} style={styles.cancelLink}>
+            <Text style={styles.cancelLinkText}>Batalkan tanggungan</Text>
+          </Pressable>
+        )}
       </ScrollView>
+      {cancelModal}
     </SafeAreaView>
   );
 }
@@ -568,8 +637,22 @@ const styles = StyleSheet.create({
   },
   cancel: { color: Colors.textSecondary, fontWeight: '600', textAlign: 'center', paddingVertical: 6 },
   footNote: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center' },
-  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
+  cancelLink: { alignItems: 'center', paddingVertical: 8 },
+  cancelLinkText: { color: Colors.pendingText, fontWeight: '600' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' },
+  modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: 20, gap: 10 },
+  modalTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },
+  modalBody: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 19 },
+  reasonList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reason: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 8 },
+  reasonActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
+  reasonText: { color: Colors.textSecondary, fontWeight: '600' },
+  reasonTextActive: { color: Colors.white },
+  noteInput: { minHeight: 76, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, color: Colors.textPrimary, textAlignVertical: 'top' },
+  charCount: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'right' },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
 
   missing: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
   missingTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },

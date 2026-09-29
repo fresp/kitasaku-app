@@ -94,13 +94,25 @@ export interface Account {
   sort_order?: number;
   icon?: string | null;
 }
+export type TransactionStatus = 'PENDING' | 'PAID' | 'CANCELLED';
+export type CancellationReason = 'WRONG_INPUT' | 'DUPLICATE' | 'NOT_HAPPENED' | 'OTHER';
+
+export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
+  { value: 'WRONG_INPUT', label: 'Salah input' },
+  { value: 'DUPLICATE', label: 'Duplikat' },
+  { value: 'NOT_HAPPENED', label: 'Tidak jadi' },
+  { value: 'OTHER', label: 'Lainnya' },
+];
+
 export interface Txn {
   id: string; household_id: string; cycle_id: string | null;
   recurring_template_id: string | null; obligation_id: string | null;
   name: string; category_id: string | null; account_id: string | null;
   direction: 'INCOME' | 'EXPENSE'; flow_type?: FlowType | null; planned_amount: number; actual_amount: number;
   counter_account_id?: string | null; asset_id?: string | null;
-  release_date: string | null; status: 'PENDING' | 'PAID';
+  release_date: string | null; status: TransactionStatus;
+  cancelled_at?: string | null; cancelled_by?: string | null;
+  cancellation_reason?: CancellationReason | null; cancellation_note?: string | null;
   created_by: string | null; executed_by: string | null;
   recipient: string | null; is_final_payment: boolean; created_at: string;
   // joined
@@ -286,7 +298,7 @@ export function useObligations(householdId: string | undefined) {
       const sb = requireSupabase();
       const { data, error } = await sb.from('obligations')
         .select('*, beneficiary:beneficiaries(*)')
-        .eq('household_id', householdId!).neq('status', 'SETTLED').order('created_at', { ascending: false });
+        .eq('household_id', householdId!).not('status', 'in', '(SETTLED,CANCELLED)').order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as Obligation[];
     },
@@ -335,25 +347,42 @@ export function useMarkAsPaid() {
       }
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
+      if (args.txn.status === 'CANCELLED') {
+        throw new Error('Transaksi yang sudah dibatalkan tidak dapat dibayar.');
+      }
+      if (isObligationPaydown(args.txn) && args.txn.obligation_id) {
+        const { data: ob, error: obErr } = await sb.from('obligations')
+          .select('status').eq('id', args.txn.obligation_id).maybeSingle();
+        if (obErr) throw obErr;
+        if (ob?.status === 'CANCELLED') {
+          throw new Error('Tanggungan yang sudah dibatalkan tidak dapat dibayar.');
+        }
+      }
       const { error: uErr } = await sb.from('transactions').update({
         status: 'PAID', actual_amount: args.actualAmount,
         release_date: releaseDate, executed_by: user?.id ?? null,
         account_id: args.accountId ?? args.txn.account_id,
         is_final_payment: args.isFinal,
-      }).eq('id', args.txn.id);
+      }).eq('id', args.txn.id).eq('status', 'PENDING');
+      if (uErr) throw uErr;
       if (uErr) throw uErr;
       if (args.isFinal && args.txn.recurring_template_id) {
         const { error } = await sb.from('recurring_templates').update({ status: 'COMPLETED' }).eq('id', args.txn.recurring_template_id);
         if (error) throw error;
       }
       if (isObligationPaydown(args.txn)) {
-        const { data: ob } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id!).maybeSingle();
+        const { data: ob, error: obErr } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id!).maybeSingle();
+        if (obErr) throw obErr;
         if (ob) {
+          if ((ob as Obligation).status === 'CANCELLED') {
+            throw new Error('Tanggungan yang sudah dibatalkan tidak dapat dibayar.');
+          }
           const remaining = Math.max(0, (ob as Obligation).remaining_amount - args.actualAmount);
-          await sb.from('obligations').update({
+          const { error: updateErr } = await sb.from('obligations').update({
             remaining_amount: remaining,
             status: remaining <= 0 ? 'SETTLED' : 'PARTIAL',
-          }).eq('id', args.txn.obligation_id!);
+          }).eq('id', args.txn.obligation_id!).neq('status', 'CANCELLED');
+          if (updateErr) throw updateErr;
         }
       }
     },
@@ -404,6 +433,69 @@ export function useUpdateTransaction() {
       return data as Txn;
     },
     onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+export function useCancelPendingTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      transactionId: string;
+      reason: CancellationReason;
+      note?: string | null;
+    }) => {
+      const reason = args.reason;
+      const note = args.note?.trim() || null;
+      if (!CANCELLATION_REASONS.some((item) => item.value === reason)) {
+        throw new Error('Alasan pembatalan tidak dikenal.');
+      }
+      if (note && note.length > 500) {
+        throw new Error('Catatan pembatalan maksimal 500 karakter.');
+      }
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('cancel_pending_transaction', {
+        p_household_id: args.householdId,
+        p_transaction_id: args.transactionId,
+        p_reason: reason,
+        p_note: note,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+export function useCancelObligation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      obligationId: string;
+      reason: CancellationReason;
+      note?: string | null;
+    }) => {
+      const reason = args.reason;
+      const note = args.note?.trim() || null;
+      if (!CANCELLATION_REASONS.some((item) => item.value === reason)) {
+        throw new Error('Alasan pembatalan tidak dikenal.');
+      }
+      if (note && note.length > 500) {
+        throw new Error('Catatan pembatalan maksimal 500 karakter.');
+      }
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('cancel_obligation', {
+        p_household_id: args.householdId,
+        p_obligation_id: args.obligationId,
+        p_reason: reason,
+        p_note: note,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['installments'] });
+    },
   });
 }
 
@@ -605,7 +697,7 @@ export interface AssetMovement {
   asset_id: string;
   flow_type: FlowType;
   actual_amount: number;
-  status: 'PENDING' | 'PAID';
+  status: TransactionStatus;
 }
 
 /** All asset-linked cash movements, kept separate from cycle insight rows. */
@@ -709,10 +801,14 @@ export function useAllocateObligation() {
       const { data: { user } } = await sb.auth.getUser();
       const { data: ob } = await sb.from('obligations').select('*').eq('id', args.obligationId).maybeSingle();
       const obligation = ob as Obligation | null;
-      if (obligation && args.amount > obligation.remaining_amount) {
+      if (!obligation) throw new Error('Tanggungan tidak ditemukan.');
+      if (obligation.status === 'CANCELLED') {
+        throw new Error('Tanggungan yang sudah dibatalkan tidak dapat dialokasikan.');
+      }
+      if (args.amount > obligation.remaining_amount) {
         throw new Error('Nominal alokasi melebihi sisa tanggungan.');
       }
-      const title = obligation?.title ?? 'Alokasi tanggungan';
+      const title = obligation.title;
       const { error } = await sb.from('transactions').insert({
         household_id: args.householdId, cycle_id: args.cycleId,
         obligation_id: args.obligationId, name: title,
@@ -1158,7 +1254,7 @@ export function calcCashflow(txns: Txn[]): Cashflow {
       paidCount += 1;
       if (t.direction === 'INCOME') cashIn += t.actual_amount;
       else cashOut += t.actual_amount;
-    } else {
+    } else if (t.status === 'PENDING') {
       pendingCount += 1;
       if (t.direction === 'EXPENSE') {
         pendingOut += t.planned_amount;
@@ -1191,6 +1287,7 @@ export interface CycleAllocation {
   allocation_type: AllocationType; amount: number;
   category_id: string | null; obligation_id: string | null; account_id: string | null;
   note: string | null; created_by: string | null; created_at: string;
+  cancelled_at?: string | null; cancelled_by?: string | null; cancellation_reason?: string | null;
   categories?: { name: string; icon?: string | null } | null;
   obligations?: { title: string } | null;
   accounts?: { name: string } | null;
@@ -1226,12 +1323,15 @@ function aggregateSourceFunds(
   return { operatingIncome, financingInflow, assetRelease, total: operatingIncome + financingInflow + assetRelease };
 }
 
-function aggregateAllocations(rows: Pick<CycleAllocation, 'allocation_type' | 'amount'>[]) {
+function aggregateAllocations(rows: Pick<CycleAllocation, 'allocation_type' | 'amount' | 'cancelled_at'>[]) {
   const byType: Record<AllocationType, number> = {
     EXPENSE: 0, DEBT_PAYMENT: 0, ASSET: 0, SAVINGS: 0,
     INVESTMENT: 0, EMERGENCY_FUND: 0, OTHER: 0,
   };
-  for (const r of rows) byType[r.allocation_type] += Math.max(0, r.amount);
+  for (const r of rows) {
+    if (r.cancelled_at) continue;
+    byType[r.allocation_type] += Math.max(0, r.amount);
+  }
   return {
     expense: byType.EXPENSE, debtPayment: byType.DEBT_PAYMENT, asset: byType.ASSET,
     savings: byType.SAVINGS, investment: byType.INVESTMENT,
@@ -1284,17 +1384,21 @@ export function useZeroBasedSummary(
           .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
         sb.from('cycle_allocations')
-          .select('allocation_type, amount')
+          .select('allocation_type, amount, cancelled_at')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
       ]);
       if (txnsRes.error) throw txnsRes.error;
       if (allocsRes.error) throw allocsRes.error;
-      const txnRows = (txnsRes.data ?? []) as Txn[];
-      const allocRows = (allocsRes.data ?? []) as Pick<CycleAllocation, 'allocation_type' | 'amount'>[];
+      const txnRows = (txnsRes.data ?? []).filter((row) => (row as Txn).status !== 'CANCELLED') as Txn[];
+      const allocRows = (allocsRes.data ?? []) as Pick<CycleAllocation, 'allocation_type' | 'amount' | 'cancelled_at'>[];
       const source = aggregateSourceFunds(txnRows, mode);
       // Required allocation is always the planned total, regardless of
-      // mode; mode only affects the source-funds side.
-      const requiredAllocation = allocRows.reduce((s, r) => s + Math.max(0, r.amount), 0);
+      // mode; mode only affects the source-funds side. Cancelled commitments
+      // remain queryable for audit but are no longer required funding.
+      const requiredAllocation = allocRows.reduce(
+        (s, r) => s + (r.cancelled_at ? 0 : Math.max(0, r.amount)),
+        0,
+      );
       return calculateZeroBasedSummary({
         source: {
           operatingIncome: source.operatingIncome,
@@ -1436,7 +1540,7 @@ export function useCycleYears(householdId: string | undefined) {
 
 export function useObligationSummaries(householdId: string | undefined) {
   const q = useObligations(householdId);
-  const data: ObligationSummary[] | undefined = q.data?.map((o) => {
+  const data: ObligationSummary[] | undefined = q.data?.filter((o) => o.status !== 'CANCELLED').map((o) => {
     const paidAmount = Math.max(0, o.total_amount - o.remaining_amount);
     return {
       id: o.id, householdId: o.household_id, title: o.title, type: o.type, status: o.status,

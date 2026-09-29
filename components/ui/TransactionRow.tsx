@@ -14,7 +14,7 @@ export interface RowItem {
   account: string;
   amount: number;
   dueLabel: string;
-  status: 'PENDING' | 'PAID';
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
   deltaKind: 'up' | 'down' | 'same' | 'neutral';
   deltaText: string;
   obligationId?: string | null;
