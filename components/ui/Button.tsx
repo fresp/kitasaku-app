@@ -10,7 +10,11 @@ export function PrimaryButton({
   onPress?: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.primary}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+    >
       <Text style={styles.primaryText}>{label}</Text>
     </Pressable>
   );
@@ -24,7 +28,11 @@ export function SecondaryButton({
   onPress?: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={styles.secondary}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+    >
       <Text style={styles.secondaryText}>{label}</Text>
     </Pressable>
   );
@@ -32,7 +40,11 @@ export function SecondaryButton({
 
 export function PayButton({ onPress }: { onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.pay} accessibilityRole="button">
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.pay, pressed && styles.pressed]}
+    >
       <Check size={14} color={Colors.white} strokeWidth={2.5} />
       <Text style={styles.payText}>Bayar</Text>
     </Pressable>
@@ -58,6 +70,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderSubtle,
   },
   secondaryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
   pay: {
     backgroundColor: Colors.brandPrimary,
     borderRadius: Radius.pill,

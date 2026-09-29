@@ -258,12 +258,12 @@ export function useBankAccounts(householdId: string | undefined) {
 
 export function useAccounts(
   householdId: string | undefined,
-  options?: { includeArchived?: boolean }
+  options?: { includeArchived?: boolean; enabled?: boolean }
 ) {
   const includeArchived = options?.includeArchived ?? false;
   return useQuery({
     queryKey: ['accs', householdId, includeArchived],
-    enabled: !!householdId,
+    enabled: (options?.enabled ?? true) && !!householdId,
     queryFn: async (): Promise<Account[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb
@@ -1624,11 +1624,13 @@ export function useCreateFinancingLoan() {
 
 /** Installments of one obligation, ordered by due date (nulls last = backlog). */
 export function useObligationInstallments(
-  householdId: string | undefined, obligationId: string | undefined
+  householdId: string | undefined,
+  obligationId: string | undefined,
+  options?: { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: ['installments', householdId, obligationId],
-    enabled: !!householdId && !!obligationId,
+    enabled: (options?.enabled ?? true) && !!householdId && !!obligationId,
     queryFn: async (): Promise<ObligationInstallment[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('obligation_installments')
@@ -1672,11 +1674,13 @@ export function useTransactionById(householdId: string | undefined, txnId: strin
  * Pembayaran section empty for exactly the loans that have the most history.
  */
 export function useObligationPayments(
-  householdId: string | undefined, obligationId: string | undefined
+  householdId: string | undefined,
+  obligationId: string | undefined,
+  options?: { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: ['obl-payments', householdId, obligationId],
-    enabled: !!householdId && !!obligationId,
+    enabled: (options?.enabled ?? true) && !!householdId && !!obligationId,
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')

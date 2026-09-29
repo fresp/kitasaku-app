@@ -20,7 +20,21 @@ function hideNativeSplash() {
   SplashScreen.hideAsync().catch(() => { });
 }
 
-const queryClient = new QueryClient();
+// Mobile-friendly cache defaults: realtime keeps active screens fresh, while a
+// short stale window prevents every route focus and mutation from immediately
+// replaying the same Supabase reads. Failed requests get one quick retry rather
+// than making a slow screen feel stuck through several exponential retries.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 15_000,
+      gcTime: 5 * 60_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+    },
+  },
+});
 
 function Gate() {
   const { session, membership, loading } = useAuth();
