@@ -4,6 +4,7 @@ import { requireSupabase } from './supabase';
 import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
 import { isRepaymentMode } from './obligation';
 import type { RepaymentMode } from './obligation';
+import type { InstallmentMode } from './installments';
 import type { Beneficiary } from './beneficiary';
 import { cleanAccountNumber } from './beneficiary';
 import {
@@ -126,6 +127,8 @@ export interface Obligation {
   planned_installment_amount?: number | null; installment_count?: number | null;
   current_installment?: number | null; start_date?: string | null; due_date?: string | null;
   interest_fee_amount?: number | null;
+  interest_mode?: InstallmentMode | null;
+  interest_rate_bps?: number | null;
   /**
    * Plan shape (migration 008): LUMP_NEXT_MONTH | INSTALLMENT | MANUAL.
    * `null`/undefined means nobody has chosen — see `repaymentModeOf` in
@@ -150,6 +153,9 @@ export interface Template {
 export interface ObligationInstallment {
   id: string; household_id: string; obligation_id: string; cycle_id: string | null;
   planned_amount: number; due_date: string | null;
+  principal_amount?: number | null;
+  interest_amount?: number | null;
+  remaining_principal?: number | null;
   status: 'OPEN' | 'PARTIAL' | 'OVERDUE' | 'SETTLED' | 'CANCELLED';
   paid_amount: number; paid_transaction_id: string | null; created_at: string;
   obligations?: { title: string } | null;
@@ -1657,6 +1663,8 @@ export function useCreateFinancingLoan() {
       accountId?: string | null; dueDate?: string | null;
       repaymentMethod?: LoanRepaymentMethod | null; installmentCount?: number | null;
       startDate?: string | null; interestFeeAmount?: number;
+      interestMode?: InstallmentMode | null;
+      monthlyInterestRateBps?: number;
       /**
        * Plan shape. Written after the financing RPC because
        * `create_financing_with_obligation` does not take it, and only when the
@@ -1675,6 +1683,13 @@ export function useCreateFinancingLoan() {
       }
       if (!(args.amount > 0)) throw new Error('Nominal pembiayaan harus lebih dari 0.');
       if ((args.interestFeeAmount ?? 0) < 0) throw new Error('Bunga/biaya tidak boleh negatif.');
+      if ((args.monthlyInterestRateBps ?? 0) < 0) throw new Error('Bunga bulanan tidak boleh negatif.');
+      if (args.interestMode && args.interestMode !== 'FIXED_INSTALLMENT' && args.interestMode !== 'FLOATING_INTEREST') {
+        throw new Error('Mode bunga tidak dikenal.');
+      }
+      if (args.interestMode === 'FLOATING_INTEREST' && args.installmentCount == null) {
+        throw new Error('Tenor wajib diisi untuk bunga mengambang.');
+      }
       if (args.installmentCount != null && (args.installmentCount < 1 || args.installmentCount > 600)) {
         throw new Error('Jumlah angsuran harus antara 1 dan 600.');
       }
@@ -1692,6 +1707,8 @@ export function useCreateFinancingLoan() {
         p_start_date: args.startDate ?? null,
         p_interest_fee_amount: args.interestFeeAmount ?? 0,
         p_release_date: args.releaseDate ?? null,
+        p_interest_mode: args.interestMode ?? null,
+        p_interest_rate_bps: args.monthlyInterestRateBps ?? 0,
       });
       if (error) throw error;
       const rows = data as {

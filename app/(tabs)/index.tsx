@@ -5,6 +5,10 @@ import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
 import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import ArrowDown from 'lucide-react-native/icons/arrow-down';
+import ArrowLeftRight from 'lucide-react-native/icons/arrow-left-right';
+import Eye from 'lucide-react-native/icons/eye';
+import X from 'lucide-react-native/icons/x';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import { calcCashflow, useActiveCycle, useCycleReconciliation, useTransactions, useZeroBasedSummary } from '../../lib/queries';
@@ -62,6 +66,18 @@ export default function HomeScreen() {
   const { household, membership } = useAuth();
   const householdId = household?.id;
   const [refreshing, setRefreshing] = useState(false);
+  const [fabOpen, setFabOpen] = useState(false);
+
+  const closeFab = () => setFabOpen(false);
+  const openQuickAdd = (kind: 'out' | 'in') => {
+    closeFab();
+    router.push({ pathname: '/quick-add', params: { kind } });
+  };
+  const openTransfer = () => {
+    closeFab();
+    router.push('/transfer');
+  };
+
 
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
@@ -99,15 +115,15 @@ export default function HomeScreen() {
     return { income, expense };
   }, [txns]);
 
-  const homeRows = useMemo<HomeRow[]>(() => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 4), [txns]);
+  // The home feed is a glance, not a second ledger. Three rows keep the next
+  // action visible without making the first screen feel like a report.
+  const homeRows = useMemo<HomeRow[]>(() => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 3), [txns]);
 
   const cycleName = cycleQ.data?.name ?? 'Belum ada siklus aktif';
   // The alert counts unpaid *expenses*. `pendingCount` also counts an
   // un-cleared salary, and "Gaji Bulanan belum dibayar" is not a sentence this
   // screen should say.
   const unpaidCount = flow.unpaidExpenseCount;
-  const pendingCount = flow.pendingCount;
-  const paidCount = flow.paidCount;
   const income = liveTotals.income;
   const expense = liveTotals.expense;
   const actualCash = failed ? 0 : flow.actualCash;
@@ -145,7 +161,6 @@ export default function HomeScreen() {
       >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <BrandIcon name="context-home" size={34} label="" />
             <View>
               <Text style={styles.roomLabel}>Ruang keluarga</Text>
               <Text style={styles.title}>Halo, {displayName}</Text>
@@ -169,18 +184,10 @@ export default function HomeScreen() {
           }
           style={styles.cyclePill}
         >
-          <View style={styles.cycleLeft}>
-            <View style={styles.calendarIcon}>
-              <Calendar size={14} color={Colors.textSecondary} />
-            </View>
-            <View style={styles.cycleCopy}>
-              <Text style={styles.cycleTitle}>{cycleName}</Text>
-              <Text style={styles.cycleRange}>
-                {rangeLabel ?? 'Siklus belum dibuka'} • Payday-to-Payday
-              </Text>
-            </View>
-          </View>
-          <ChevronRight size={17} color={Colors.textMuted} />
+          <Calendar size={15} color={Colors.textSecondary} />
+          <Text style={styles.cycleTitle}>{cycleName}</Text>
+          <Text style={styles.cycleRange}>{rangeLabel ?? 'Siklus belum dibuka'}</Text>
+          <ChevronRight size={16} color={Colors.textMuted} />
         </Pressable>
 
         {cycleQ.data?.primary_account_id && !reconciliationQ.data && (
@@ -209,52 +216,39 @@ export default function HomeScreen() {
           <QueryError onRetry={retryAll} retrying={txnsQ.isFetching || cycleQ.isFetching} />
         )}
 
-        <View style={styles.hero}>
-          <Text style={styles.heroLabel}>SALDO KAS RIIL</Text>
+        <Pressable onPress={() => router.push('/allocation')} style={styles.hero}>
+          <View style={styles.heroLabelRow}>
+            <Text style={styles.heroLabel}>SALDO KAS RIIL</Text>
+            <Eye size={15} color="#AEBCCD" />
+          </View>
           <Text style={styles.heroAmount}>{signedRupiah(actualCash)}</Text>
-          <Text style={styles.heroHelper}>Pemasukan cair dikurangi pengeluaran riil</Text>
+          <Text style={styles.heroHelper}>Estimasi sisa akhir {signedRupiah(projectedRemaining)}</Text>
           <View style={styles.heroRule} />
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <Text style={styles.incomeValue}>{formatRupiah(income)}</Text>
-              <Text style={styles.statLabel}>Pemasukan</Text>
+              <Text style={styles.statLabel}>Masuk</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.expenseValue}>− {formatRupiah(expense)}</Text>
-              <Text style={styles.statLabel}>Pengeluaran</Text>
+              <Text style={styles.statLabel}>Keluar</Text>
             </View>
           </View>
-          <Pressable onPress={() => router.push('/allocation')} style={styles.heroFooter}>
-            <Text style={styles.heroFooterLabel}>Estimasi sisa akhir</Text>
-            <Text style={styles.heroFooterValue}>{signedRupiah(projectedRemaining)} ›</Text>
-          </Pressable>
-        </View>
+        </Pressable>
 
-        <View style={styles.quickActions}>
-          <Pressable
-            onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}
-            style={styles.primaryAction}
-          >
-            <Plus size={15} color={Colors.white} />
-            <Text style={styles.primaryActionText}>Tambah transaksi</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
-            style={styles.secondaryAction}
-          >
-            <Text style={styles.secondaryActionText}>Catat pemasukan</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/transfer')}
-            style={styles.secondaryAction}
-          >
-            <Text style={styles.secondaryActionText}>Relokasi</Text>
-          </Pressable>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Tambah transaksi"
+          onPress={() => openQuickAdd('out')}
+          style={styles.primaryAction}
+        >
+          <Plus size={15} color={Colors.white} />
+          <Text style={styles.primaryActionText}>Tambah transaksi</Text>
+        </Pressable>
 
         {unpaidCount > 0 && (
           <View>
-            <SectionHeader title="Perlu perhatian" onPress={openUnpaid} />
+            <SectionHeader title="Perlu perhatian" />
             <Pressable onPress={openUnpaid} style={styles.attention}>
               <View style={styles.attentionIcon}><Text style={styles.attentionIconText}>!</Text></View>
               <View style={styles.attentionCopy}>
@@ -271,7 +265,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <SectionHeader title="Aktivitas terbaru" onPress={() => router.push('/(tabs)/history')} />
+        <SectionHeader title="Aktivitas terbaru" onPress={() => router.push('/(tabs)/history')} compact />
 
         {txnsQ.isLoading && householdId ? (
           <Text style={styles.empty}>Memuat aktivitas keluarga…</Text>
@@ -313,31 +307,72 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <Pressable onPress={() => router.push('/(tabs)/history')} style={styles.allLink}>
-          <Text style={styles.allLinkText}>Lihat semua transaksi ({pendingCount + paidCount})</Text>
-          <ChevronRight size={14} color={Colors.textSecondary} />
-        </Pressable>
+        {fabOpen && (
+          <View style={styles.menuWrap}>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuHeaderText}>Tambah aktivitas</Text>
+              <Pressable onPress={() => setFabOpen(false)} hitSlop={10} accessibilityLabel="Tutup menu tambah aktivitas">
+                <X size={20} color={Colors.textPrimary} />
+              </Pressable>
+            </View>
+            <View style={styles.inlineMenu}>
+            <Pressable onPress={() => openQuickAdd('out')} style={styles.menuRow}>
+              <View style={[styles.menuIcon, styles.menuIconBlue]}><Plus size={17} color={Colors.white} /></View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Tambah transaksi</Text>
+                <Text style={styles.menuSubtitle}>Catat pengeluaran, transfer, dll</Text>
+              </View>
+              <ChevronRight size={16} color={Colors.textMuted} />
+            </Pressable>
+            <Pressable onPress={() => openQuickAdd('in')} style={styles.menuRow}>
+              <View style={[styles.menuIcon, styles.menuIconGreen]}><ArrowDown size={17} color={Colors.white} /></View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Catat pemasukan</Text>
+                <Text style={styles.menuSubtitle}>Gaji, refund, hasil jual, dll</Text>
+              </View>
+              <ChevronRight size={16} color={Colors.textMuted} />
+            </Pressable>
+            <Pressable onPress={openTransfer} style={styles.menuRow}>
+              <View style={[styles.menuIcon, styles.menuIconPurple]}><ArrowLeftRight size={17} color={Colors.white} /></View>
+              <View style={styles.menuCopy}>
+                <Text style={styles.menuTitle}>Relokasi</Text>
+                <Text style={styles.menuSubtitle}>Pindahkan antar akun/kategori</Text>
+              </View>
+              <ChevronRight size={16} color={Colors.textMuted} />
+            </Pressable>
+            </View>
+          </View>
+        )}
       </ScrollView>
-
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Tambah transaksi"
-        onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}
-        style={styles.fab}
+        accessibilityLabel={fabOpen ? 'Tutup menu tambah aktivitas' : 'Buka menu tambah aktivitas'}
+        onPress={() => setFabOpen((open) => !open)}
+        style={[styles.fab, fabOpen && styles.fabOpen]}
       >
-        <Plus size={23} color={Colors.white} />
+        {fabOpen ? <X size={23} color={Colors.white} /> : <Plus size={23} color={Colors.white} />}
       </Pressable>
     </SafeAreaView>
   );
 }
 
-function SectionHeader({ title, onPress }: { title: string; onPress: () => void }) {
+function SectionHeader({
+  title,
+  onPress,
+  compact = false,
+}: {
+  title: string;
+  onPress?: () => void;
+  compact?: boolean;
+}) {
   return (
-    <View style={styles.sectionHeader}>
+    <View style={[styles.sectionHeader, compact && styles.sectionHeaderCompact]}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      <Pressable onPress={onPress} hitSlop={8}>
-        <Text style={styles.sectionLink}>Lihat semua</Text>
-      </Pressable>
+      {onPress && (
+        <Pressable onPress={onPress} hitSlop={8}>
+          <Text style={styles.sectionLink}>Lihat semua</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -388,14 +423,11 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 13 },
   cyclePill: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderSubtle,
-    paddingVertical: 9, paddingHorizontal: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    minHeight: 40, paddingVertical: 8, paddingHorizontal: 2, flexDirection: 'row',
+    alignItems: 'center', gap: 7,
   },
-  cycleLeft: { flexDirection: 'row', alignItems: 'center', gap: 9, flex: 1 },
-  calendarIcon: { width: 26, height: 26, borderRadius: 8, backgroundColor: Colors.subtle, alignItems: 'center', justifyContent: 'center' },
-  cycleCopy: { flex: 1 },
-  cycleTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.body },
-  cycleRange: { color: Colors.textSecondary, fontSize: 10, marginTop: 1 },
+  cycleTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.caption },
+  cycleRange: { color: Colors.textSecondary, fontSize: FontSize.caption, flex: 1 },
   offline: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
   offlineText: { color: Colors.alertText, fontSize: FontSize.caption, fontWeight: '600', flex: 1 },
   reconcileBanner: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
@@ -403,7 +435,8 @@ const styles = StyleSheet.create({
   reconcileTitle: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
   reconcileSub: { color: '#93651F', fontSize: 10, marginTop: 2 },
   hero: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16 },
-  heroLabel: { color: '#AEBCCD', fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.7, marginBottom: 7 },
+  heroLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
+  heroLabel: { color: '#AEBCCD', fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.7 },
   heroAmount: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
   heroHelper: { color: '#AEBCCD', fontSize: FontSize.caption, marginTop: 3 },
   heroRule: { height: 1, backgroundColor: '#2E3E51', marginVertical: 14 },
@@ -412,15 +445,22 @@ const styles = StyleSheet.create({
   incomeValue: { color: '#9DD9C2', fontSize: FontSize.currencyLarge, fontWeight: '700', fontVariant: ['tabular-nums'] },
   expenseValue: { color: Colors.white, fontSize: FontSize.currencyLarge, fontWeight: '700', fontVariant: ['tabular-nums'] },
   statLabel: { color: '#AEBCCD', fontSize: FontSize.caption, marginTop: 2 },
-  heroFooter: { marginTop: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  heroFooterLabel: { color: '#C8D5E0', fontSize: FontSize.caption },
-  heroFooterValue: { color: '#9DD9C2', fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  quickActions: { flexDirection: 'row', gap: 8 },
-  primaryAction: { flex: 1, minHeight: 38, borderRadius: 10, backgroundColor: Colors.brandPrimary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 10 },
+  primaryAction: { minHeight: 44, borderRadius: 10, backgroundColor: Colors.brandPrimary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 10 },
   primaryActionText: { color: Colors.white, fontSize: FontSize.caption, fontWeight: '700' },
-  secondaryAction: { minHeight: 38, borderRadius: 10, borderWidth: 1, borderColor: Colors.borderSubtle, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
-  secondaryActionText: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700' },
+  menuWrap: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.lg, padding: 10, gap: 8 },
+  menuHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingVertical: 2 },
+  menuHeaderText: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700' },
+  inlineMenu: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, overflow: 'hidden' },
+  menuRow: { minHeight: 68, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: '#EEF2F5' },
+  menuIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  menuIconBlue: { backgroundColor: '#2F80ED' },
+  menuIconGreen: { backgroundColor: '#19B887' },
+  menuIconPurple: { backgroundColor: '#8067D9' },
+  menuCopy: { flex: 1 },
+  menuTitle: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700' },
+  menuSubtitle: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 2 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 },
+  sectionHeaderCompact: { marginTop: -2 },
   sectionTitle: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700', letterSpacing: -0.2 },
   sectionLink: { color: Colors.textSecondary, fontSize: FontSize.caption, fontWeight: '700' },
   attention: { backgroundColor: Colors.alertBg, borderWidth: 1, borderColor: '#F7DFA9', borderRadius: Radius.md, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
@@ -447,4 +487,5 @@ const styles = StyleSheet.create({
   allLink: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 3, paddingVertical: 2 },
   allLinkText: { color: Colors.textSecondary, fontSize: FontSize.caption, fontWeight: '700' },
   fab: { position: 'absolute', right: 16, bottom: 20, width: 52, height: 52, borderRadius: 26, backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 6 },
+  fabOpen: { backgroundColor: Colors.textSecondary },
 });
