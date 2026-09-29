@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
@@ -307,42 +307,50 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {fabOpen && (
-          <View style={styles.menuWrap}>
-            <View style={styles.menuHeader}>
-              <Text style={styles.menuHeaderText}>Tambah aktivitas</Text>
-              <Pressable onPress={() => setFabOpen(false)} hitSlop={10} accessibilityLabel="Tutup menu tambah aktivitas">
-                <X size={20} color={Colors.textPrimary} />
-              </Pressable>
-            </View>
-            <View style={styles.inlineMenu}>
-            <Pressable onPress={() => openQuickAdd('out')} style={styles.menuRow}>
-              <View style={[styles.menuIcon, styles.menuIconBlue]}><Plus size={17} color={Colors.white} /></View>
-              <View style={styles.menuCopy}>
-                <Text style={styles.menuTitle}>Tambah transaksi</Text>
-                <Text style={styles.menuSubtitle}>Catat pengeluaran, transfer, dll</Text>
+        <Modal
+          visible={fabOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={closeFab}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={closeFab}>
+            <Pressable style={styles.menuSheet} onPress={(event) => event.stopPropagation()}>
+              <View style={styles.sheetHandle} />
+              <View style={styles.menuHeader}>
+                <Text style={styles.menuHeaderText}>Tambah aktivitas</Text>
+                <Pressable onPress={closeFab} hitSlop={10} accessibilityLabel="Tutup menu tambah aktivitas">
+                  <X size={20} color={Colors.textPrimary} />
+                </Pressable>
               </View>
-              <ChevronRight size={16} color={Colors.textMuted} />
-            </Pressable>
-            <Pressable onPress={() => openQuickAdd('in')} style={styles.menuRow}>
-              <View style={[styles.menuIcon, styles.menuIconGreen]}><ArrowDown size={17} color={Colors.white} /></View>
-              <View style={styles.menuCopy}>
-                <Text style={styles.menuTitle}>Catat pemasukan</Text>
-                <Text style={styles.menuSubtitle}>Gaji, refund, hasil jual, dll</Text>
+              <View style={styles.inlineMenu}>
+                <Pressable onPress={() => openQuickAdd('out')} style={styles.menuRow}>
+                  <View style={[styles.menuIcon, styles.menuIconBlue]}><Plus size={17} color={Colors.white} /></View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Tambah transaksi</Text>
+                    <Text style={styles.menuSubtitle}>Catat pengeluaran, transfer, dll</Text>
+                  </View>
+                  <ChevronRight size={16} color={Colors.textMuted} />
+                </Pressable>
+                <Pressable onPress={() => openQuickAdd('in')} style={styles.menuRow}>
+                  <View style={[styles.menuIcon, styles.menuIconGreen]}><ArrowDown size={17} color={Colors.white} /></View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Catat pemasukan</Text>
+                    <Text style={styles.menuSubtitle}>Gaji, refund, hasil jual, dll</Text>
+                  </View>
+                  <ChevronRight size={16} color={Colors.textMuted} />
+                </Pressable>
+                <Pressable onPress={openTransfer} style={styles.menuRow}>
+                  <View style={[styles.menuIcon, styles.menuIconPurple]}><ArrowLeftRight size={17} color={Colors.white} /></View>
+                  <View style={styles.menuCopy}>
+                    <Text style={styles.menuTitle}>Relokasi</Text>
+                    <Text style={styles.menuSubtitle}>Pindahkan antar akun/kategori</Text>
+                  </View>
+                  <ChevronRight size={16} color={Colors.textMuted} />
+                </Pressable>
               </View>
-              <ChevronRight size={16} color={Colors.textMuted} />
             </Pressable>
-            <Pressable onPress={openTransfer} style={styles.menuRow}>
-              <View style={[styles.menuIcon, styles.menuIconPurple]}><ArrowLeftRight size={17} color={Colors.white} /></View>
-              <View style={styles.menuCopy}>
-                <Text style={styles.menuTitle}>Relokasi</Text>
-                <Text style={styles.menuSubtitle}>Pindahkan antar akun/kategori</Text>
-              </View>
-              <ChevronRight size={16} color={Colors.textMuted} />
-            </Pressable>
-            </View>
-          </View>
-        )}
+          </Pressable>
+        </Modal>
       </ScrollView>
       <Pressable
         accessibilityRole="button"
