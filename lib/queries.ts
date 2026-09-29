@@ -129,6 +129,7 @@ export interface Obligation {
   interest_fee_amount?: number | null;
   interest_mode?: InstallmentMode | null;
   interest_rate_bps?: number | null;
+  principal_amount?: number | null;
   /**
    * Plan shape (migration 008): LUMP_NEXT_MONTH | INSTALLMENT | MANUAL.
    * `null`/undefined means nobody has chosen — see `repaymentModeOf` in
@@ -1873,6 +1874,53 @@ export function useScheduleInstallments() {
         p_total: args.total,
         p_count: args.count,
         p_start_date: args.startDate ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['installments'] });
+      qc.invalidateQueries({ queryKey: ['oblig'] });
+    },
+  });
+}
+
+/**
+ * Creates the first schedule for an existing obligation. The RPC is deliberately
+ * append-only: once a schedule or payment exists, it refuses to rewrite history.
+ */
+export function useConfigureObligationInstallments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      obligationId: string;
+      cycleId: string | null;
+      principal: number;
+      flatInterest?: number;
+      count: number;
+      startDate?: string | null;
+      interestMode: InstallmentMode;
+      monthlyInterestRateBps?: number;
+    }) => {
+      if (!(args.principal > 0)) throw new Error('Pokok harus lebih dari Rp 0.');
+      if (!(args.count >= 1 && args.count <= 600)) throw new Error('Tenor harus antara 1 dan 600 siklus.');
+      if ((args.flatInterest ?? 0) < 0 || (args.monthlyInterestRateBps ?? 0) < 0) {
+        throw new Error('Bunga tidak boleh negatif.');
+      }
+      if (args.interestMode !== 'FIXED_INSTALLMENT' && args.interestMode !== 'FLOATING_INTEREST') {
+        throw new Error('Mode cicilan tidak dikenal.');
+      }
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('configure_obligation_installments', {
+        p_household_id: args.householdId,
+        p_obligation_id: args.obligationId,
+        p_cycle_id: args.cycleId,
+        p_principal: args.principal,
+        p_flat_interest: args.flatInterest ?? 0,
+        p_count: args.count,
+        p_start_date: args.startDate ?? null,
+        p_interest_mode: args.interestMode,
+        p_interest_rate_bps: args.monthlyInterestRateBps ?? 0,
       });
       if (error) throw error;
     },

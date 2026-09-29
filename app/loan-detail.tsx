@@ -1,5 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -19,6 +30,7 @@ import {
 import {
   useActiveCycle,
   CANCELLATION_REASONS,
+  useConfigureObligationInstallments,
   useAccounts,
   useAllocateDebtPayment,
   useCancelObligation,
@@ -43,6 +55,12 @@ import {
   REPAYMENT_MODES,
   type RepaymentMode,
 } from '../lib/obligation';
+import {
+  calculateInstallmentSchedule,
+  scheduleInterest,
+  scheduleTotal,
+  type InstallmentMode,
+} from '../lib/installments';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
@@ -77,6 +95,7 @@ export default function LoanDetailScreen() {
   const accsQ = useAccounts(householdId);
   const beneficiariesQ = useBeneficiaries(householdId);
   const setMode = useSetRepaymentMode();
+  const configureInstallments = useConfigureObligationInstallments();
   const pay = useAllocateDebtPayment();
   const cancelObligation = useCancelObligation();
 
@@ -85,7 +104,15 @@ export default function LoanDetailScreen() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelNote, setCancelNote] = useState('');
   const [payOpen, setPayOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState<InstallmentMode>('FIXED_INSTALLMENT');
+  const [schedulePrincipalText, setSchedulePrincipalText] = useState('');
+  const [scheduleTenorText, setScheduleTenorText] = useState('');
+  const [scheduleRateText, setScheduleRateText] = useState('');
+  const [scheduleFeeText, setScheduleFeeText] = useState('');
+  const [scheduleStartDate, setScheduleStartDate] = useState('');
   const [copied, setCopied] = useState(false);
+  const todayISO = new Date().toISOString().slice(0, 10);
   // "Ubah Rencana Pembayaran" scrolls to the mode card rather than picking a
   // mode for the person. The y offset is measured on layout, not hardcoded,
   // because the summary card above it grows with interest/installment rows.
@@ -98,6 +125,111 @@ export default function LoanDetailScreen() {
   );
   const installments = useMemo(() => instQ.data ?? [], [instQ.data]);
   const payments = useMemo(() => payQ.data ?? [], [payQ.data]);
+  const schedulePrincipal = Number(schedulePrincipalText.replace(/[^0-9]/g, '') || 0);
+  const scheduleTenor = Number(scheduleTenorText.replace(/[^0-9]/g, '') || 0);
+  const scheduleRateBps = Math.round((Number(scheduleRateText.replace(',', '.')) || 0) * 100);
+  const scheduleFee = Number(scheduleFeeText.replace(/[^0-9]/g, '') || 0);
+  const schedulePreview = useMemo(
+    () => schedulePrincipal > 0 && scheduleTenor > 0
+      ? calculateInstallmentSchedule({
+          principalAmount: schedulePrincipal,
+          tenor: scheduleTenor,
+          mode: scheduleMode,
+          monthlyInterestRateBps: scheduleRateBps,
+        })
+      : [],
+    [schedulePrincipal, scheduleTenor, scheduleMode, scheduleRateBps],
+  );
+  const schedulePreviewBaseTotal = scheduleTotal(schedulePreview);
+  const schedulePreviewInterest = scheduleInterest(schedulePreview);
+  const schedulePreviewTotal = schedulePreviewBaseTotal + (scheduleMode === 'FIXED_INSTALLMENT' ? scheduleFee : 0);
+  const schedulePreviewFeePerCycle = scheduleTenor > 0 && scheduleMode === 'FIXED_INSTALLMENT'
+    ? Math.floor(scheduleFee / scheduleTenor)
+    : 0;
+
+  function openSchedule() {
+    setErr(null);
+    setSchedulePrincipalText(String(obligation?.principal_amount ?? obligation?.remaining_amount ?? 0));
+    setScheduleTenorText(String(obligation?.installment_count ?? ''));
+    setScheduleRateText(
+      obligation?.interest_rate_bps ? String(obligation.interest_rate_bps / 100).replace('.', ',') : '',
+    );
+    setScheduleFeeText(String(obligation?.interest_fee_amount ?? 0));
+    setScheduleStartDate(obligation?.start_date ?? todayISO);
+    setScheduleMode(obligation?.interest_mode ?? 'FIXED_INSTALLMENT');
+    setScheduleOpen(true);
+  }
+
+  async function saveSchedule() {
+    setErr(null);
+    if (!householdId) { setErr('Login dulu untuk mengatur cicilan.'); return; }
+    if (!obligation) { setErr('Tanggungan tidak ditemukan.'); return; }
+    if (schedulePreview.length === 0) { setErr('Isi pokok dan tenor yang valid terlebih dahulu.'); return; }
+    try {
+      await configureInstallments.mutateAsync({
+        householdId,
+        obligationId: obligation.id,
+        cycleId: cycleId ?? null,
+        principal: schedulePrincipal,
+        count: scheduleTenor,
+        startDate: scheduleStartDate || todayISO,
+        interestMode: scheduleMode,
+        flatInterest: scheduleMode === 'FIXED_INSTALLMENT' ? scheduleFee : 0,
+        monthlyInterestRateBps: scheduleMode === 'FLOATING_INTEREST' ? scheduleRateBps : 0,
+      });
+      setScheduleOpen(false);
+    } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan jadwal cicilan.'); }
+  }
+
+  const scheduleModal = (
+    <Modal visible={scheduleOpen} transparent animationType="slide" onRequestClose={() => setScheduleOpen(false)}>
+      <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.scheduleKeyboard}>
+          <View style={styles.scheduleCard}>
+            <View style={styles.scheduleHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Atur jadwal cicilan</Text>
+                <Text style={styles.modalBody}>Jadwal dibuat sekali dan tidak menimpa pembayaran yang sudah tercatat.</Text>
+              </View>
+              <Pressable onPress={() => setScheduleOpen(false)}><Text style={styles.cancel}>Tutup</Text></Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.scheduleContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.sectionLabel}>MODEL CICILAN</Text>
+              <View style={styles.modeRow}>
+                {(['FIXED_INSTALLMENT', 'FLOATING_INTEREST'] as InstallmentMode[]).map((mode) => (
+                  <Pressable key={mode} onPress={() => setScheduleMode(mode)} style={[styles.modeOpt, scheduleMode === mode && styles.modeOptActive]}>
+                    <Text style={[styles.modeText, scheduleMode === mode && styles.modeTextActive]}>{mode === 'FIXED_INSTALLMENT' ? 'Cicilan tetap' : 'Bunga mengambang'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.sectionLabel}>POKOK YANG DICICIL</Text>
+              <TextInput value={schedulePrincipalText} onChangeText={setSchedulePrincipalText} keyboardType="number-pad" placeholder="mis. 5000000" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
+              <Text style={styles.sectionLabel}>TENOR (SIKLUS)</Text>
+              <TextInput value={scheduleTenorText} onChangeText={setScheduleTenorText} keyboardType="number-pad" placeholder="mis. 12" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
+              {scheduleMode === 'FIXED_INSTALLMENT' && <>
+                <Text style={styles.sectionLabel}>BIAYA / BUNGA TETAP (OPSIONAL)</Text>
+                <TextInput value={scheduleFeeText} onChangeText={setScheduleFeeText} keyboardType="number-pad" placeholder="mis. 250000" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
+              </>}
+              {scheduleMode === 'FLOATING_INTEREST' && <>
+                <Text style={styles.sectionLabel}>BUNGA PER BULAN (%)</Text>
+                <TextInput value={scheduleRateText} onChangeText={setScheduleRateText} keyboardType="decimal-pad" placeholder="mis. 1,5" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
+              </>}
+              <Text style={styles.sectionLabel}>CICILAN DIMULAI</Text>
+              <TextInput value={scheduleStartDate} onChangeText={setScheduleStartDate} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
+              {schedulePreview.length > 0 && <View style={styles.schedulePreview}>
+                <Text style={styles.previewTitle}>{schedulePreview.length}× cicilan • total {formatRupiah(schedulePreviewTotal)}</Text>
+                <Text style={styles.previewLine}>Perkiraan pertama {formatRupiah(schedulePreview[0].totalAmount + schedulePreviewFeePerCycle)}{schedulePreview.length > 1 ? ` • terakhir ${formatRupiah(schedulePreview[schedulePreview.length - 1].totalAmount + Math.max(0, scheduleFee - (schedulePreviewFeePerCycle * Math.max(0, schedulePreview.length - 1))))}` : ''}</Text>
+                {schedulePreviewInterest > 0 && <Text style={styles.previewLine}>Total bunga {formatRupiah(schedulePreviewInterest)}</Text>}
+              </View>}
+              {err && <Text style={styles.errText}>{err}</Text>}
+              <PrimaryButton label={configureInstallments.isPending ? 'Menyimpan…' : 'Simpan jadwal cicilan'} onPress={saveSchedule} />
+              <SecondaryButton label="Batal" onPress={() => setScheduleOpen(false)} />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
 
   const beneficiary = useMemo(() => {
     if (obligation?.beneficiary) return obligation.beneficiary;
@@ -117,8 +249,6 @@ export default function LoanDetailScreen() {
   // money landed in. Fetched by id because the receipt may sit in a cycle that
   // is no longer the active one.
   const sourceQ = useTransactionById(householdId, obligation?.source_transaction_id ?? undefined);
-
-  const todayISO = new Date().toISOString().slice(0, 10);
 
   if (!obligation) {
     return (
@@ -373,6 +503,16 @@ export default function LoanDetailScreen() {
           </View>
         )}
 
+        {!cancelled && installments.length === 0 && payments.length === 0 && (
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>JADWAL CICILAN</Text>
+            <Text style={styles.modeHint}>
+              Tanggungan ini belum memiliki jadwal per cicilan. Atur tenor dan model bunga untuk melihat nominal setiap siklus.
+            </Text>
+            <PrimaryButton label="Atur cicilan & tenor" onPress={openSchedule} />
+          </View>
+        )}
+
         {!cancelled && <View style={styles.card} onLayout={(e) => setModeY(e.nativeEvent.layout.y)}>
           <Text style={styles.sectionLabel}>Mode Pembayaran</Text>
           <View style={styles.modeRow}>
@@ -485,6 +625,7 @@ export default function LoanDetailScreen() {
         )}
       </ScrollView>
       {cancelModal}
+      {scheduleModal}
     </SafeAreaView>
   );
 }
@@ -640,6 +781,14 @@ const styles = StyleSheet.create({
   cancelLink: { alignItems: 'center', paddingVertical: 8 },
   cancelLinkText: { color: Colors.pendingText, fontWeight: '600' },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' },
+  scheduleKeyboard: { width: '100%' },
+  scheduleCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, maxHeight: '92%' },
+  scheduleHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 20, borderBottomWidth: 1, borderBottomColor: Colors.borderSubtle },
+  scheduleContent: { padding: 20, paddingBottom: 36, gap: 10 },
+  scheduleInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, color: Colors.textPrimary, backgroundColor: Colors.canvas },
+  schedulePreview: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 12, gap: 4 },
+  previewTitle: { color: Colors.textPrimary, fontWeight: '600', fontSize: FontSize.body },
+  previewLine: { color: Colors.textSecondary, fontSize: FontSize.caption },
   modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: 20, gap: 10 },
   modalTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },
   modalBody: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 19 },
