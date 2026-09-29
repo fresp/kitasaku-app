@@ -113,11 +113,7 @@ export default function LoanDetailScreen() {
   const [scheduleStartDate, setScheduleStartDate] = useState('');
   const [copied, setCopied] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
-  // "Ubah Rencana Pembayaran" scrolls to the mode card rather than picking a
-  // mode for the person. The y offset is measured on layout, not hardcoded,
-  // because the summary card above it grows with interest/installment rows.
   const scrollRef = useRef<ScrollView>(null);
-  const [modeY, setModeY] = useState(0);
 
   const obligation = useMemo(
     () => (obligQ.data ?? []).find((o) => o.id === id) ?? null,
@@ -513,7 +509,7 @@ export default function LoanDetailScreen() {
           </View>
         )}
 
-        {!cancelled && <View style={styles.card} onLayout={(e) => setModeY(e.nativeEvent.layout.y)}>
+        {!cancelled && <View style={styles.card}>
           <Text style={styles.sectionLabel}>Mode Pembayaran</Text>
           <View style={styles.modeRow}>
             {REPAYMENT_MODES.map((m) => {
@@ -604,20 +600,6 @@ export default function LoanDetailScreen() {
             )}
           </>
         )}
-        <SecondaryButton
-          label="Ubah Rencana Pembayaran"
-          onPress={() => {
-            setErr(null);
-            // Take the person to the chooser rather than cycling the mode for
-            // them: silently rewriting the plan on a button press would change
-            // a decision nobody made. Scrolling is the honest version of
-            // "go here and pick one".
-            scrollRef.current?.scrollTo({ y: Math.max(0, modeY - 16), animated: true });
-          }}
-        />
-        <Text style={styles.footNote}>
-          Mengubah mode hanya mengubah rencana, bukan jumlah yang sudah dibayar.
-        </Text>
         {canCancel && (
           <Pressable onPress={() => { setErr(null); setCancelOpen(true); }} style={styles.cancelLink}>
             <Text style={styles.cancelLinkText}>Batalkan tanggungan</Text>

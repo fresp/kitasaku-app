@@ -68,14 +68,10 @@ export function ObligationRow({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // Closed rows are common in the list but do not expose any panel. Keep their
-  // detail queries dormant until an action needs them; this avoids an N+1 burst
-  // of requests on first render without changing the card's behavior.
-  // Installments are only needed when the action panel is open. Payment history
-  // stays live because the card surfaces its latest payment as part of the list.
-  const instQ = useObligationInstallments(householdId, obligation.id, {
-    enabled: panel !== 'none',
-  });
+  // The card displays installment progress and the next due amount, so the
+  // schedule must be available during the normal list render. Payment history
+  // remains live for the card's latest-payment cue.
+  const instQ = useObligationInstallments(householdId, obligation.id);
   const histQ = useObligationPayments(householdId, obligation.id);
   // Account choices are only rendered inside the action panel.
   const accsQ = useAccounts(householdId, { enabled: panel !== 'none' });

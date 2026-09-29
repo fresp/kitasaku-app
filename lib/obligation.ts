@@ -383,11 +383,16 @@ export function planInfo(o: {
 
 /** "2 dari 5 cicilan" — null when the obligation has no schedule. */
 export function installmentProgressLabel(
-  installments: { status: ObligationStatus | string }[]
+  installments: { status: ObligationStatus | string; paid_amount?: number | null; planned_amount?: number | null }[]
 ): string | null {
   if (installments.length === 0) return null;
   const done = installments.filter(
-    (i) => i.status === 'SETTLED' || i.status === 'CANCELLED'
+    (i) => i.status === 'SETTLED'
+      || i.status === 'CANCELLED'
+      || (i.paid_amount != null
+        && i.planned_amount != null
+        && Number(i.planned_amount) > 0
+        && Number(i.paid_amount) >= Number(i.planned_amount))
   ).length;
   return `${done} dari ${installments.length} cicilan`;
 }

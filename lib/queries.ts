@@ -378,6 +378,17 @@ export function useMarkAsPaid() {
         if (error) throw error;
       }
       if (isObligationPaydown(args.txn)) {
+        if (args.txn.obligation_id) {
+          const { error: installmentErr } = await sb.rpc('sync_obligation_installment_payment', {
+            p_household_id: args.txn.household_id,
+            p_obligation_id: args.txn.obligation_id,
+            p_amount: args.actualAmount,
+            p_transaction_id: args.txn.id,
+          });
+          if (installmentErr && !installmentErr.message.includes('function') && !installmentErr.message.includes('does not exist')) {
+            throw installmentErr;
+          }
+        }
         const { data: ob, error: obErr } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id!).maybeSingle();
         if (obErr) throw obErr;
         if (ob) {
@@ -396,6 +407,7 @@ export function useMarkAsPaid() {
     onSuccess: () => {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['tmpl'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
     },
   });
 }
@@ -513,7 +525,16 @@ export function useQuickAdd() {
       householdId: string; cycleId?: string | null; name: string; amount: number;
       direction: 'INCOME' | 'EXPENSE'; categoryId: string | null; accountId: string | null;
       makeRecurring: boolean; releaseDate?: string | null;
+      status?: 'PENDING' | 'PAID';
     }) => {
+      const status = args.status ?? 'PAID';
+      if (status === 'PENDING' && args.makeRecurring) {
+        throw new Error('Rencana transaksi tidak dapat dibuat rutin sebelum dieksekusi.');
+      }
+
+      if (status !== 'PENDING' && status !== 'PAID') {
+        throw new Error('Status transaksi tidak dikenal.');
+      }
       if (args.releaseDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
         throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
       }
@@ -526,10 +547,13 @@ export function useQuickAdd() {
       const { data: txn, error } = await sb.from('transactions').insert({
         household_id: args.householdId, cycle_id: args.cycleId ?? null, name: args.name,
         direction: args.direction, flow_type: args.direction === 'INCOME' ? 'OPERATING_INCOME' : 'EXPENSE',
-        planned_amount: args.amount, actual_amount: args.amount,
-        status: 'PAID', release_date: args.releaseDate ?? todayISO(),
+        planned_amount: args.amount,
+        actual_amount: status === 'PAID' ? args.amount : 0,
+        status,
+        release_date: status === 'PAID' ? (args.releaseDate ?? todayISO()) : null,
         category_id: args.categoryId, account_id: args.accountId,
-        created_by: user?.id ?? null, executed_by: user?.id ?? null,
+        created_by: user?.id ?? null,
+        executed_by: status === 'PAID' ? (user?.id ?? null) : null,
       }).select('*').single();
       if (error) throw error;
       if (args.makeRecurring) {
@@ -550,6 +574,7 @@ export function useQuickAdd() {
     onSuccess: () => {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['tmpl'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
     },
   });
 }
@@ -1948,7 +1973,10 @@ export function useAllocateDebtPayment() {
       if (error) throw error;
       return data as { transaction_id: string; allocation_id: string }[];
     },
-    onSuccess: () => invalidateMoneyKeys(qc),
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['installments'] });
+    },
   });
 }
 

@@ -236,16 +236,6 @@ export default function HomeScreen() {
           </View>
         </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Tambah transaksi"
-          onPress={() => openQuickAdd('out')}
-          style={styles.primaryAction}
-        >
-          <Plus size={15} color={Colors.white} />
-          <Text style={styles.primaryActionText}>Tambah transaksi</Text>
-        </Pressable>
-
         {unpaidCount > 0 && (
           <View>
             <SectionHeader title="Perlu perhatian" />

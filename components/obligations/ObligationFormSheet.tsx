@@ -78,7 +78,10 @@ export function ObligationFormSheet({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const categories = useMemo(() => catsQ.data ?? [], [catsQ.data]);
+  const categories = useMemo(
+    () => (catsQ.data ?? []).filter((category) => category.type === 'EXPENSE'),
+    [catsQ.data],
+  );
   const totalAmount = parseAmount(totalText);
 
   function resetForm() {

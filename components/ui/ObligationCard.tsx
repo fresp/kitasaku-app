@@ -137,6 +137,7 @@ export function ObligationCard({
 
   return (
     <View style={styles.card}>
+      <Pressable onPress={onPressDetail} style={styles.cardTap} accessibilityRole="button" accessibilityLabel={`Buka detail ${obligation.title}`}>
       <View style={styles.topRow}>
         <View style={styles.leftTags}>
           <View style={[styles.iconBox, { backgroundColor: iconBg(state) }]}>
@@ -206,12 +207,10 @@ export function ObligationCard({
           </Text>
         </View>
       )}
+      </Pressable>
 
       {!settled && (
         <View style={styles.actions}>
-          <Pressable onPress={onPressDetail} style={styles.btn}>
-            <Text style={styles.btnText}>Lihat Detail</Text>
-          </Pressable>
           <Pressable
             onPress={() => onPressPay(payAmount)}
             style={[styles.btn, state === 'OVERDUE' && styles.btnDanger]}
@@ -225,11 +224,7 @@ export function ObligationCard({
         </View>
       )}
 
-      {settled ? (
-        <Pressable onPress={onPressDetail} style={styles.btn}>
-          <Text style={styles.btnText}>Lihat Detail</Text>
-        </Pressable>
-      ) : (
+      {!settled && (
         <Pressable onPress={onPressAllocate} style={styles.allocRow}>
           <Plus size={13} color={Colors.textPrimary} />
           <Text style={styles.allocText}>Alokasikan ke bulan ini</Text>
@@ -266,6 +261,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1,
     borderColor: Colors.borderSubtle, padding: 16, gap: 10,
   },
+  cardTap: { gap: 10 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   leftTags: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   iconBox: { width: 26, height: 26, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
