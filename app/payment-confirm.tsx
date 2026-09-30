@@ -7,7 +7,7 @@ import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { CANCELLATION_REASONS, useAccounts, useActiveCycle, useCancelPendingTransaction, useMarkAsPaid, useTransactions } from '../lib/queries';
-import { accountSubline } from '../lib/account';
+import { accountSubline, isZeroBasedCashAccount } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { BrandIcon } from '../components/ui/BrandIcon';
@@ -53,7 +53,9 @@ export default function PaymentConfirmScreen() {
   const loadFailed = txnsQ.isError || cycleQ.isError || accsQ.isError;
   const loading = !loadFailed && txnsQ.isLoading;
 
-  const accountOptions = accsQ.data ?? [];
+  const accountOptions = (accsQ.data ?? []).filter((account) =>
+    account.is_active !== false && isZeroBasedCashAccount(account)
+  );
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isFinal, setIsFinal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -73,7 +75,9 @@ export default function PaymentConfirmScreen() {
     setDatePickerVisible(false);
   }
 
-  const selectedAccountId = accountId ?? liveTxn?.account_id ?? null;
+  const selectedAccountId = accountId ?? (accountOptions.some((account) => account.id === liveTxn?.account_id)
+    ? liveTxn?.account_id ?? null
+    : null);
   const selectedAccountName =
     accountOptions.find((a) => a.id === selectedAccountId)?.name ?? accountName;
   const isIncome = liveTxn?.direction === 'INCOME';

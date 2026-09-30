@@ -44,6 +44,9 @@ import type { AccountType } from '../lib/account';
 import {
   useAccountUsage,
   useAccounts,
+  useActiveCycle,
+  useBankAccounts,
+  useUpdateCyclePrimaryAccount,
   useArchiveAccount,
   useCreateAccount,
   useDeleteAccount,
@@ -116,6 +119,9 @@ export default function ManagedAccountScreen() {
   const householdId = household?.id;
 
   const accsQ = useAccounts(householdId, { includeArchived: true });
+  const activeCycleQ = useActiveCycle(householdId);
+  const bankAccountsQ = useBankAccounts(householdId);
+  const updatePrimaryAccount = useUpdateCyclePrimaryAccount();
   const createAccount = useCreateAccount();
   const updateAccount = useUpdateAccount();
   const archiveAccount = useArchiveAccount();
@@ -149,6 +155,20 @@ export default function ManagedAccountScreen() {
   );
 
   const saving = createAccount.isPending || updateAccount.isPending;
+  const primaryAccountId = activeCycleQ.data?.primary_account_id ?? null;
+
+  async function selectPrimaryAccount(accountId: string) {
+    if (!householdId || !activeCycleQ.data) return;
+    try {
+      await updatePrimaryAccount.mutateAsync({
+        householdId,
+        cycleId: activeCycleQ.data.id,
+        accountId,
+      });
+    } catch (error: any) {
+      Alert.alert('Gagal memilih rekening utama', error?.message ?? 'Coba lagi.');
+    }
+  }
 
   function openCreateForm() {
     setDraft({
@@ -507,8 +527,7 @@ export default function ManagedAccountScreen() {
                       <Text style={styles.archiveBtnText}>Arsipkan Akun</Text>
                     </Pressable>
                     <Text style={styles.destructiveHelper}>
-                      Akun ini dipakai di transaksi atau template, jadi tidak bisa dihapus.
-                      Arsipkan supaya tidak muncul lagi di pilihan pembayaran — riwayatnya tetap utuh.
+                      Akun ini memiliki referensi riwayat atau dipakai sebagai rekening utama. Tidak bisa dihapus; arsipkan setelah memilih rekening utama pengganti bila diperlukan.
                     </Text>
                   </View>
                 ) : (
@@ -566,6 +585,47 @@ export default function ManagedAccountScreen() {
             <Plus size={14} color={Colors.white} />
             <Text style={styles.addBtnText}>Tambah Akun</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.primaryCard}>
+          <Text style={styles.sectionTitle}>REKENING UTAMA SIKLUS</Text>
+          <Text style={styles.primaryDescription}>
+            Rekening BANK aktif ini menjadi acuan rekonsiliasi untuk siklus yang sedang berjalan.
+          </Text>
+          {activeCycleQ.isLoading || bankAccountsQ.isLoading ? (
+            <Text style={styles.accountSubline}>Memuat siklus dan rekening BANK…</Text>
+          ) : activeCycleQ.isError || bankAccountsQ.isError ? (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.destructiveHelper}>Pengaturan rekening utama belum bisa dimuat.</Text>
+              <Pressable onPress={() => { activeCycleQ.refetch(); bankAccountsQ.refetch(); }}>
+                <Text style={styles.primaryLink}>Coba lagi</Text>
+              </Pressable>
+            </View>
+          ) : !activeCycleQ.data ? (
+            <Text style={styles.accountSubline}>Belum ada siklus. Rekening utama dapat dipilih saat membuka siklus baru.</Text>
+          ) : (bankAccountsQ.data ?? []).length === 0 ? (
+            <Text style={styles.accountSubline}>Tambahkan rekening BANK aktif untuk mengatur acuan rekonsiliasi.</Text>
+          ) : (
+            <View style={styles.primaryChoices}>
+              {(bankAccountsQ.data ?? []).map((account) => {
+                const selected = account.id === primaryAccountId;
+                return (
+                  <Pressable
+                    key={account.id}
+                    disabled={selected || updatePrimaryAccount.isPending}
+                    onPress={() => selectPrimaryAccount(account.id)}
+                    style={[styles.primaryChoice, selected && styles.primaryChoiceActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Text style={[styles.primaryChoiceText, selected && styles.primaryChoiceTextActive]}>
+                      {selected ? '✓ ' : ''}{account.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         {/* Empty State */}
@@ -916,6 +976,31 @@ const styles = StyleSheet.create({
   },
 
   // List section styles
+  primaryCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    padding: 14,
+    gap: 8,
+  },
+  primaryDescription: {
+    fontSize: FontSize.caption,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+  },
+  primaryChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  primaryChoice: {
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    borderRadius: Radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  primaryChoiceActive: { backgroundColor: Colors.subtle, borderColor: Colors.brandPrimary },
+  primaryChoiceText: { color: Colors.textSecondary, fontSize: FontSize.caption, fontWeight: '600' },
+  primaryChoiceTextActive: { color: Colors.brandPrimary },
+  primaryLink: { color: Colors.brandPrimary, fontSize: FontSize.caption, fontWeight: '700' },
   sectionHeaderRow: {
     marginTop: 8,
   },

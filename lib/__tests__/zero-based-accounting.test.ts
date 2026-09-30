@@ -29,6 +29,22 @@ describe('liquid-account Zero-Based totals', () => {
     expect(aggregateCashSourceFunds(rows, 'actual').total).toBe(0);
   });
 
+  it('keeps transfers out of household source totals', () => {
+    const result = aggregateCashSourceFunds([
+      { direction: 'INCOME', flow_type: 'OPERATING_INCOME', planned_amount: 1_000, actual_amount: 1_000, status: 'PAID', account_type: 'BANK' },
+      { direction: 'EXPENSE', flow_type: 'TRANSFER', planned_amount: 500, actual_amount: 500, status: 'PAID', account_type: 'BANK' },
+    ], 'actual');
+    expect(result.total).toBe(1_000);
+    expect(result.operatingIncome).toBe(1_000);
+  });
+
+  it('counts the persisted allocation row once; transaction outflows are not allocation inputs', () => {
+    const allocations = aggregateCashAllocations([allocation('BANK', 500)]);
+    expect(allocations.expense).toBe(500);
+    expect(allocations.debtPayment).toBe(0);
+    expect(allocations.asset).toBe(0);
+  });
+
   it('counts only active liquid-account allocations and excludes unassigned/CC/CASH history', () => {
     const result = aggregateCashAllocations([
       allocation('BANK', 1_000),

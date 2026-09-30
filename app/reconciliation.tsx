@@ -86,7 +86,7 @@ export default function ReconciliationScreen() {
         openingStated: preview.openingStated,
         closingStated: preview.closingStated!,
         recordedNet: preview.recordedNet,
-        delta: preview.delta ?? 0,
+        delta: preview.delta,
         categoryId: untrackedCategoryId,
         sweepRequested,
       });
@@ -158,7 +158,7 @@ export default function ReconciliationScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.successTitle}>Rekonsiliasi sudah tersimpan</Text>
               <Text style={styles.body}>
-                Saldo akhir {formatRupiah(saved.closing_stated)} · {saved.delta === 0 ? 'cocok' : `selisih ${formatRupiah(Math.abs(saved.delta))}`}
+                Saldo akhir {formatRupiah(saved.closing_stated)} · {saved.delta === null ? 'selisih belum diketahui' : saved.delta === 0 ? 'cocok' : `selisih ${formatRupiah(Math.abs(saved.delta))}`}
               </Text>
             </View>
           </View>
@@ -194,8 +194,8 @@ export default function ReconciliationScreen() {
                     <Text style={styles.cardTitle}>Sapu akun saat tutup</Text>
                     <Text style={styles.note}>
                       {sweepPolicy === 'REQUIRED'
-                        ? 'Wajib: selesaikan pemindahan delta positif akun kas sekunder ke akun primer.'
-                        : 'Ditawarkan: delta positif akun kas sekunder dapat dipindahkan ke akun primer, atau dilewati.'}
+                        ? 'Wajib: selesaikan pemindahan delta positif rekening bank/e-wallet ke akun primer. Uang tunai fisik tidak disapu.'
+                        : 'Ditawarkan: delta positif rekening bank/e-wallet dapat dipindahkan ke akun primer, atau dilewati. Uang tunai fisik tidak disapu.'}
                     </Text>
                     <Pressable
                       onPress={() => setSweepRequested((value) => !value)}

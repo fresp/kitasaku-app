@@ -4,9 +4,9 @@ Dokumen ini menjawab satu pertanyaan yang muncul di akhir Phase 12: **apakah
 siklus sebaiknya zero-based per akun, bukan hanya per rumah tangga?** Dokumen ini
 juga memuat **grilling** — pencarian bug/grey area — atas model tersebut.
 
-Status aktual (2026-09-30): sebagian fondasi Phase 13 sudah ada di kode dan migration lokal: `TRANSFER`/`counter_account_id`, aset dan valuasi, kebijakan sweep, serta agregasi kas Zero-Based yang hanya memasukkan akun BANK/E_WALLET. Zero-Based per akun secara penuh dan seluruh jalur tulis/sapuan belum dianggap selesai hanya dari keberadaan skema. Status remote Supabase tidak diverifikasi di sini.
+Status aktual (2026-10-01): fondasi Phase 13 sudah tersedia pada kode dan migration lokal: `TRANSFER`/`counter_account_id`, tabel aset/valuasi, jalur tulis asset allocation/release, kebijakan sweep, agregasi Zero-Based kas, dan ringkasan per akun beserta snapshot saldo yang dinyatakan. Tes unit mencakup sejumlah kontrak domain, tetapi belum memverifikasi seluruh behavior lewat Supabase lokal/remote. Migration 026 untuk guard bentuk cash movement dan pengecualian CASH pada sweep masih berupa pekerjaan; status remote Supabase tidak diverifikasi.
 
-Bagian berikut mempertahankan keputusan dan temuan historis. Checklist yang ditandai selesai adalah catatan pada tanggalnya; item desain yang belum ada tetap perlu dicocokkan dengan implementasi saat ini sebelum dianggap todo.
+Bagian berikut mempertahankan keputusan dan temuan historis. Checklist yang ditandai selesai adalah catatan pada tanggalnya; klaim di bagian grilling bahwa fitur tertentu belum ada adalah keadaan saat dokumen ditulis, bukan daftar status terkini.
 
 ---
 
@@ -334,7 +334,9 @@ penambahan posisi; `asset_valuations` yang menyatakan nilainya sekarang.
 
 ---
 
-## 6. Ringkasan temuan grilling
+## 6. Ringkasan temuan grilling (snapshot historis saat dokumen ditulis; bukan status aktual)
+
+Temuan #1–#9 di bawah merekam kondisi dan risiko yang ditemukan pada saat grilling. Beberapa sudah ditangani oleh implementasi yang tercatat di status aktual §0; jangan menafsirkan label “bug (ada sekarang)” atau saran tindakan di tabel ini sebagai hasil audit kode terkini.
 
 | # | Temuan | Kelas | Dampak |
 | --- | --- | --- | --- |
@@ -646,7 +648,7 @@ mengubah migration remote yang sudah ada.
 | B7 | Insight 2-dimensi (rasio trash + cakupan) | butuh 3–6 siklus data |
 | B8 | Izinkan catat transaksi non-siklus (Phase 12 §12.1) | — |
 
-**Tahap 2 — Phase 13 (zero-based per akun)**
+**Tahap 2 — Phase 13 (zero-based per akun; status historis 2026-09-28, bukan todo aktif)**
 
 | # | Aksi | Tergantung |
 | --- | --- | --- |

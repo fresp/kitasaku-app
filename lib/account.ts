@@ -121,10 +121,24 @@ export function sortAccounts<T extends { sort_order?: number; name: string }>(
  * back to a wallet or card would silently choose an invalid primary account.
  * Expects the list already ordered by `sortAccounts`.
  */
-export function defaultAccountId<T extends { id: string; type: string }>(
+export function defaultAccountId<T extends { id: string; type: string; is_active?: boolean | null }>(
   accounts: T[]
 ): string | null {
-  return accounts.find((a) => a.type === 'BANK')?.id ?? null;
+  return accounts.find((a) => a.type === 'BANK' && a.is_active !== false)?.id ?? null;
+}
+
+/**
+ * Resolves the primary BANK for a new cycle. Keep the prior choice when it is
+ * still eligible; otherwise use the first active BANK in the ordered list.
+ */
+export function cyclePrimaryAccountId<T extends { id: string; type: string; is_active?: boolean | null }>(
+  accounts: T[],
+  priorPrimaryAccountId?: string | null,
+): string | null {
+  const prior = accounts.find((account) =>
+    account.id === priorPrimaryAccountId && account.type === 'BANK' && account.is_active !== false
+  );
+  return prior?.id ?? defaultAccountId(accounts);
 }
 
 /** Bank accounts and e-wallets are the cash accounts eligible for allocation. */

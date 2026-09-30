@@ -111,6 +111,7 @@ function Gate() {
         <Stack.Screen name="assets" options={{ presentation: 'card' }} />
         <Stack.Screen name="audit-history" options={{ presentation: 'card' }} />
         <Stack.Screen name="account-summary" options={{ presentation: 'card' }} />
+        <Stack.Screen name="account-snapshots" options={{ presentation: 'card' }} />
         <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
         <Stack.Screen
           name="payment-confirm"

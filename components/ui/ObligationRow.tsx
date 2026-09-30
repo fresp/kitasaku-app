@@ -19,6 +19,7 @@ import {
   useObligationPayments,
 } from '../../lib/queries';
 import type { Obligation } from '../../lib/queries';
+import { isZeroBasedCashAccount } from '../../lib/account';
 import { Badge } from './Badge';
 import { PrimaryButton } from './Button';
 import { ObligationCard } from './ObligationCard';
@@ -93,8 +94,12 @@ export function ObligationRow({
     [histQ.data]
   );
 
-  const accountOptions = accsQ.data ?? [];
-  const selectedAccount = accountId ?? accountOptions[0]?.id ?? null;
+  const accountOptions = (accsQ.data ?? []).filter((account) =>
+    account.is_active !== false && isZeroBasedCashAccount(account)
+  );
+  const selectedAccount = accountOptions.some((account) => account.id === accountId)
+    ? accountId
+    : accountOptions[0]?.id ?? null;
 
   function openPanel(which: 'pay' | 'allocate', suggested: number) {
     setPanel(which);
@@ -203,7 +208,7 @@ export function ObligationRow({
             keyboardType="number-pad"
             style={styles.input}
           />
-          {accountOptions.length > 0 && (
+          {accountOptions.length > 0 ? (
             <View style={styles.pills}>
               {accountOptions.map((a) => {
                 const active = a.id === selectedAccount;
@@ -220,6 +225,8 @@ export function ObligationRow({
                 );
               })}
             </View>
+          ) : (
+            <Text style={styles.hint}>Tambahkan rekening BANK atau e-wallet aktif sebelum mencatat pembayaran atau alokasi.</Text>
           )}
           <Text style={styles.hint}>
             {panel === 'pay'

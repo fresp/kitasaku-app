@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { openingBalanceFromPriorReconciliation, reconciliationPreview } from '../zero-based';
+import { accountZeroBased, openingBalanceFromPriorReconciliation, reconciliationPreview } from '../zero-based';
 import type { ReconciliationTransaction } from '../zero-based';
 
 const txn = (overrides: Partial<ReconciliationTransaction>): ReconciliationTransaction => ({
@@ -29,12 +29,35 @@ describe('cycle reconciliation preview', () => {
     expect(openingBalanceFromPriorReconciliation('bank-a', '2026-08-01', anchors)).toBe(10_000);
   });
 
+  it('uses the newest same-account anchor when multiple earlier anchors exist', () => {
+    const anchors = [
+      { cycleId: 'old', endDate: '2026-07-31', accountId: 'bank-a', closingStated: 10_000 },
+      { cycleId: 'new', endDate: '2026-08-31', accountId: 'bank-a', closingStated: 12_000 },
+    ];
+    expect(openingBalanceFromPriorReconciliation('bank-a', '2026-09-01', anchors)).toBe(12_000);
+  });
+
   it('does not use an anchor dated on or after the current cycle start', () => {
     expect(openingBalanceFromPriorReconciliation('bank-a', '2026-08-01', [
       { cycleId: 'future', endDate: '2026-08-31', accountId: 'bank-a', closingStated: 10_000 },
     ])).toBeNull();
   });
 
+
+  it('counts transfers out and in directionally in each account summary', () => {
+    const transactions = [
+      { account_id: 'bank-a', counter_account_id: 'bank-b', flow_type: 'TRANSFER' as const, planned_amount: 500, actual_amount: 500, status: 'PAID' as const },
+    ];
+    const source = accountZeroBased({ accountId: 'bank-a', transactions });
+    const target = accountZeroBased({ accountId: 'bank-b', transactions });
+
+    expect(source.outgoing.transferOut).toBe(500);
+    expect(source.incoming.transferIn).toBe(0);
+    expect(source.netCashflow).toBe(-500);
+    expect(target.incoming.transferIn).toBe(500);
+    expect(target.outgoing.transferOut).toBe(0);
+    expect(target.netCashflow).toBe(500);
+  });
 
   it('computes recorded movement and delta from paid primary-account rows', () => {
     const result = reconciliationPreview({

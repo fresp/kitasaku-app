@@ -26,11 +26,10 @@ import {
 import {
   accountZeroBased,
   calculateZeroBasedSummary,
+  openingBalanceFromPriorReconciliation,
   canMarkAsPaid,
   defaultFlowType,
-  isObligationPaydown,
   ledgerDisplayAmount,
-  openingBalanceFromPriorReconciliation,
   reconciliationPreview,
   resolveModeAmount,
 } from './zero-based';
@@ -77,7 +76,7 @@ export interface CycleReconciliation {
   opening_stated: number | null;
   closing_stated: number;
   recorded_net: number;
-  delta: number;
+  delta: number | null;
   adjustment_txn_id: string | null;
   noted_at: string;
   noted_by: string | null;
@@ -96,6 +95,16 @@ export interface Category {
    */
   icon?: string | null;
 }
+export interface CycleAccountSnapshot {
+  id: string;
+  household_id: string;
+  cycle_id: string;
+  account_id: string;
+  closing_stated: number;
+  noted_at: string;
+  noted_by: string | null;
+}
+
 export interface Account {
   id: string;
   household_id: string;
@@ -217,6 +226,53 @@ export function useActiveCycle(householdId: string | undefined) {
       if (error) throw error;
       const rows = (data ?? []) as Cycle[];
       return rows.find((c) => c.is_active) ?? rows[0] ?? null;
+    },
+  });
+}
+
+export function useCycleAccountSnapshots(householdId: string | undefined, cycleId: string | undefined) {
+  return useQuery({
+    queryKey: ['account-snapshots', householdId, cycleId],
+    enabled: !!householdId && !!cycleId,
+    queryFn: async (): Promise<CycleAccountSnapshot[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('cycle_account_snapshots')
+        .select('*').eq('household_id', householdId!).eq('cycle_id', cycleId!)
+        .order('noted_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as CycleAccountSnapshot[];
+    },
+  });
+}
+
+export function useRecordCycleAccountSnapshot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      cycleId: string;
+      accountId: string;
+      closingStated: number;
+    }): Promise<CycleAccountSnapshot> => {
+      if (!Number.isSafeInteger(args.closingStated) || args.closingStated < 0) {
+        throw new Error('Saldo akhir harus bilangan bulat yang tidak negatif.');
+      }
+      const sb = requireSupabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from('cycle_account_snapshots').upsert({
+        household_id: args.householdId,
+        cycle_id: args.cycleId,
+        account_id: args.accountId,
+        closing_stated: args.closingStated,
+        noted_at: new Date().toISOString(),
+        noted_by: user?.id ?? null,
+      }, { onConflict: 'cycle_id,account_id' }).select('*').single();
+      if (error) throw error;
+      return data as CycleAccountSnapshot;
+    },
+    onSuccess: (_snapshot, args) => {
+      qc.invalidateQueries({ queryKey: ['account-snapshots', args.householdId, args.cycleId] });
+      invalidateMoneyKeys(qc);
     },
   });
 }
@@ -364,57 +420,28 @@ export function useMarkAsPaid() {
       if (releaseDate > todayISO()) {
         throw new Error('Tanggal transaksi tidak boleh di masa depan.');
       }
-      const sb = requireSupabase();
-      const { data: { user } } = await sb.auth.getUser();
       if (args.txn.status === 'CANCELLED') {
         throw new Error('Transaksi yang sudah dibatalkan tidak dapat dibayar.');
       }
-      if (isObligationPaydown(args.txn) && args.txn.obligation_id) {
-        const { data: ob, error: obErr } = await sb.from('obligations')
-          .select('status').eq('id', args.txn.obligation_id).maybeSingle();
-        if (obErr) throw obErr;
-        if (ob?.status === 'CANCELLED') {
-          throw new Error('Tanggungan yang sudah dibatalkan tidak dapat dibayar.');
-        }
+      const effectiveAccountId = args.accountId ?? args.txn.account_id;
+      if (!effectiveAccountId) {
+        throw new Error('Pilih rekening bank atau e-wallet aktif untuk transaksi ini.');
       }
-      const { error: uErr } = await sb.from('transactions').update({
-        status: 'PAID', actual_amount: args.actualAmount,
-        release_date: releaseDate, executed_by: user?.id ?? null,
-        account_id: args.accountId ?? args.txn.account_id,
-        is_final_payment: args.isFinal,
-      }).eq('id', args.txn.id).eq('status', 'PENDING');
-      if (uErr) throw uErr;
-      if (uErr) throw uErr;
-      if (args.isFinal && args.txn.recurring_template_id) {
-        const { error } = await sb.from('recurring_templates').update({ status: 'COMPLETED' }).eq('id', args.txn.recurring_template_id);
-        if (error) throw error;
-      }
-      if (isObligationPaydown(args.txn)) {
-        if (args.txn.obligation_id) {
-          const { error: installmentErr } = await sb.rpc('sync_obligation_installment_payment', {
-            p_household_id: args.txn.household_id,
-            p_obligation_id: args.txn.obligation_id,
-            p_amount: args.actualAmount,
-            p_transaction_id: args.txn.id,
-          });
-          if (installmentErr && !installmentErr.message.includes('function') && !installmentErr.message.includes('does not exist')) {
-            throw installmentErr;
-          }
-        }
-        const { data: ob, error: obErr } = await sb.from('obligations').select('*').eq('id', args.txn.obligation_id!).maybeSingle();
-        if (obErr) throw obErr;
-        if (ob) {
-          if ((ob as Obligation).status === 'CANCELLED') {
-            throw new Error('Tanggungan yang sudah dibatalkan tidak dapat dibayar.');
-          }
-          const remaining = Math.max(0, (ob as Obligation).remaining_amount - args.actualAmount);
-          const { error: updateErr } = await sb.from('obligations').update({
-            remaining_amount: remaining,
-            status: remaining <= 0 ? 'SETTLED' : 'PARTIAL',
-          }).eq('id', args.txn.obligation_id!).neq('status', 'CANCELLED');
-          if (updateErr) throw updateErr;
-        }
-      }
+      const sb = requireSupabase();
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('household_id, type, is_active').eq('id', effectiveAccountId)
+        .eq('household_id', args.txn.household_id).maybeSingle();
+      if (accountError) throw accountError;
+      assertEligibleCashAccountForHousehold(account, args.txn.household_id);
+      const { error } = await sb.rpc('execute_planned_transaction', {
+        p_household_id: args.txn.household_id,
+        p_transaction_id: args.txn.id,
+        p_actual_amount: args.actualAmount,
+        p_account_id: effectiveAccountId,
+        p_release_date: releaseDate,
+        p_is_final: args.isFinal,
+      });
+      if (error) throw error;
     },
     onSuccess: () => {
       invalidateMoneyKeys(qc);
@@ -601,6 +628,13 @@ export function useCreateTransfer() {
       if (!(args.amount > 0)) throw new Error('Nominal relokasi harus lebih dari Rp 0.');
       if (args.fromAccountId === args.toAccountId) throw new Error('Akun asal dan tujuan harus berbeda.');
       const sb = requireSupabase();
+      const { data: accountRows, error: accountError } = await sb.from('accounts')
+        .select('id, household_id, type, is_active').eq('household_id', args.householdId)
+        .in('id', [args.fromAccountId, args.toAccountId]);
+      if (accountError) throw accountError;
+      const byId = new Map((accountRows ?? []).map((account) => [account.id, account]));
+      assertEligibleCashAccountForHousehold(byId.get(args.fromAccountId), args.householdId);
+      assertEligibleCashAccountForHousehold(byId.get(args.toAccountId), args.householdId);
       const { data: { user } } = await sb.auth.getUser();
       const { data, error } = await sb.from('transactions').insert({
         household_id: args.householdId,
@@ -633,6 +667,15 @@ export function useCreateAssetAllocation() {
     }): Promise<Txn> => {
       if (!(args.amount > 0)) throw new Error('Nominal alokasi aset harus lebih dari Rp 0.');
       const sb = requireSupabase();
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('household_id, type, is_active').eq('id', args.accountId)
+        .eq('household_id', args.householdId).maybeSingle();
+      if (accountError) throw accountError;
+      assertEligibleCashAccountForHousehold(account, args.householdId);
+      const { data: asset, error: assetError } = await sb.from('assets').select('household_id, is_active')
+        .eq('id', args.assetId).eq('household_id', args.householdId).maybeSingle();
+      if (assetError) throw assetError;
+      if (!asset || asset.is_active !== true) throw new Error('Posisi aset harus aktif dan milik household ini.');
       const { data: { user } } = await sb.auth.getUser();
       const { data, error } = await sb.from('transactions').insert({
         household_id: args.householdId,
@@ -666,6 +709,15 @@ export function useCreateAssetRelease() {
     }): Promise<Txn> => {
       if (!(args.amount > 0)) throw new Error('Nominal pencairan aset harus lebih dari Rp 0.');
       const sb = requireSupabase();
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('household_id, type, is_active').eq('id', args.accountId)
+        .eq('household_id', args.householdId).maybeSingle();
+      if (accountError) throw accountError;
+      assertEligibleCashAccountForHousehold(account, args.householdId);
+      const { data: asset, error: assetError } = await sb.from('assets').select('household_id, is_active')
+        .eq('id', args.assetId).eq('household_id', args.householdId).maybeSingle();
+      if (assetError) throw assetError;
+      if (!asset || asset.is_active !== true) throw new Error('Posisi aset harus aktif dan milik household ini.');
       const { data: { user } } = await sb.auth.getUser();
       const { data, error } = await sb.from('transactions').insert({
         household_id: args.householdId,
@@ -812,11 +864,67 @@ export function useAccountZeroBasedSummary(
       if (!accountData || !isZeroBasedCashAccount(accountData)) {
         throw new Error('Zero-Based hanya tersedia untuk rekening bank dan e-wallet.');
       }
-      const { data, error } = await sb.from('transactions')
-        .select('account_id, counter_account_id, flow_type, direction, planned_amount, actual_amount, status, obligation_id')
-        .eq('household_id', householdId!).eq('cycle_id', cycleId!);
-      if (error) throw error;
-      return accountZeroBased({ accountId: accountId!, transactions: (data ?? []) as AccountZeroBasedTransaction[], mode });
+      const [txnsResult, allocationsResult, cycleResult, snapshotResult] = await Promise.all([
+        sb.from('transactions')
+          .select('account_id, counter_account_id, flow_type, direction, planned_amount, actual_amount, status, obligation_id')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!),
+        sb.from('cycle_allocations')
+          .select('amount, allocation_type, cancelled_at')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!).eq('account_id', accountId!),
+        sb.from('cycles').select('id, start_date, end_date, primary_account_id')
+          .eq('household_id', householdId!).eq('id', cycleId!).single(),
+        sb.from('cycle_account_snapshots').select('closing_stated')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!).eq('account_id', accountId!).maybeSingle(),
+      ]);
+      if (txnsResult.error) throw txnsResult.error;
+      if (allocationsResult.error) throw allocationsResult.error;
+      if (cycleResult.error) throw cycleResult.error;
+      if (snapshotResult.error) throw snapshotResult.error;
+      const cycle = cycleResult.data;
+      const { data: priorCycles, error: priorCyclesError } = await sb.from('cycles')
+        .select('id, end_date').eq('household_id', householdId!)
+        .lt('end_date', cycle.start_date).order('end_date', { ascending: false }).limit(1);
+      if (priorCyclesError) throw priorCyclesError;
+      let openingStated: number | null = null;
+      const priorCycle = priorCycles?.[0];
+      if (priorCycle) {
+        const [{ data: primaryAnchor, error: primaryAnchorError }, { data: secondaryAnchor, error: secondaryAnchorError }] = await Promise.all([
+          sb.from('cycle_reconciliations').select('account_id, closing_stated')
+            .eq('household_id', householdId!).eq('cycle_id', priorCycle.id).maybeSingle(),
+          sb.from('cycle_account_snapshots').select('closing_stated')
+            .eq('household_id', householdId!).eq('cycle_id', priorCycle.id).eq('account_id', accountId!).maybeSingle(),
+        ]);
+        if (primaryAnchorError) throw primaryAnchorError;
+        if (secondaryAnchorError) throw secondaryAnchorError;
+        const anchorAmount = primaryAnchor?.account_id === accountId
+          ? primaryAnchor?.closing_stated
+          : secondaryAnchor?.closing_stated;
+        const anchor = anchorAmount == null ? null : { closing_stated: anchorAmount };
+        if (anchor?.closing_stated != null) {
+          openingStated = openingBalanceFromPriorReconciliation(accountId!, cycle.start_date, [{
+            cycleId: priorCycle.id,
+            endDate: priorCycle.end_date,
+            accountId: accountId!,
+            closingStated: anchor.closing_stated,
+          }]);
+        }
+      }
+      const movement = accountZeroBased({
+        accountId: accountId!,
+        transactions: (txnsResult.data ?? []) as AccountZeroBasedTransaction[],
+        mode,
+      });
+      const allocations = (allocationsResult.data ?? []).filter((row) => !row.cancelled_at)
+        .reduce((sum, row) => sum + Math.max(0, row.amount), 0);
+      return {
+        ...movement,
+        allocations,
+        openingStated,
+        closingStated: snapshotResult.data?.closing_stated ?? null,
+        // A movement projection is not an account balance and does not infer
+        // the period's balance when either stated endpoint is unknown.
+        projectedClosingStated: openingStated === null ? null : openingStated + movement.netCashflow,
+      };
     },
   });
 }
@@ -1065,15 +1173,9 @@ export function useCycleReconciliationPreview(
           }]);
         }
       }
-      // A closing balance belongs to that specific bank account. If the family
-      // changes the cycle's primary bank, this account needs a fresh opening
-      // balance instead of inheriting another account's closing snapshot.
-      // The latest prior cycle is the only eligible anchor; an unreconciled
-      // latest cycle must not fall back to an older snapshot.
-
-      // A closing balance belongs to that specific bank account. If the family
-      // changes the cycle's primary bank, this account needs a fresh opening
-      // balance instead of inheriting another account's closing snapshot.
+      // Only the immediately preceding cycle is eligible. If it has no stated
+      // closing for this bank account, leave the opening unknown; do not fall
+      // back to an older cycle or another account's balance.
       const preview = reconciliationPreview({
         accountId: cycle.primary_account_id,
         openingStated,
@@ -1110,7 +1212,7 @@ export function useFinalizeCycleReconciliation() {
       openingStated: number | null;
       closingStated: number;
       recordedNet: number;
-      delta: number;
+      delta: number | null;
       categoryId: string | null;
       sweepRequested: boolean;
     }): Promise<CycleCloseResult> => {
@@ -2357,6 +2459,18 @@ export function useUpdateAccount() {
         patch.is_active = args.isActive;
       }
       if (Object.keys(patch).length === 0) return null;
+      const { data: current, error: currentError } = await sb.from('accounts')
+        .select('id, household_id, type, is_active').eq('id', args.id).maybeSingle();
+      if (currentError) throw currentError;
+      if (!current) throw new Error('Akun tidak ditemukan.');
+      if ((args.isActive === false || (args.type !== undefined && args.type !== 'BANK'))
+        && current.type === 'BANK' && current.is_active !== false) {
+        const { count, error: primaryError } = await sb.from('cycles')
+          .select('id', { count: 'exact', head: true })
+          .eq('household_id', current.household_id).eq('primary_account_id', args.id).eq('is_active', true);
+        if (primaryError) throw primaryError;
+        if ((count ?? 0) > 0) throw new Error('Pilih rekening utama pengganti sebelum menonaktifkan akun BANK ini.');
+      }
       const { data, error } = await sb.from('accounts')
         .update(patch).eq('id', args.id).select('*').single();
       if (error) {
@@ -2379,6 +2493,17 @@ export function useArchiveAccount() {
   return useMutation({
     mutationFn: async (args: { id: string }) => {
       const sb = requireSupabase();
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('id, household_id, type, is_active').eq('id', args.id).maybeSingle();
+      if (accountError) throw accountError;
+      if (!account) throw new Error('Akun tidak ditemukan.');
+      if (account.type === 'BANK') {
+        const { count, error: primaryError } = await sb.from('cycles')
+          .select('id', { count: 'exact', head: true })
+          .eq('household_id', account.household_id).eq('primary_account_id', args.id).eq('is_active', true);
+        if (primaryError) throw primaryError;
+        if ((count ?? 0) > 0) throw new Error('Pilih rekening utama pengganti sebelum mengarsipkan akun BANK ini.');
+      }
       const { data, error } = await sb.from('accounts')
         .update({ is_active: false }).eq('id', args.id).select('*').single();
       if (error) throw error;
@@ -2432,20 +2557,27 @@ export function useAccountUsage(accountId: string | undefined) {
   return useQuery({
     queryKey: ['acc-usage', accountId],
     enabled: !!accountId,
-    queryFn: async (): Promise<{ isUsed: boolean; txnCount: number; templateCount: number }> => {
-      if (!accountId) return { isUsed: false, txnCount: 0, templateCount: 0 };
+    queryFn: async (): Promise<{ isUsed: boolean; txnCount: number; templateCount: number; referenceCount: number }> => {
+      if (!accountId) return { isUsed: false, txnCount: 0, templateCount: 0, referenceCount: 0 };
       const sb = requireSupabase();
-      const [{ count: txnCount, error: txnErr }, { count: tmplCount, error: tmplErr }] = await Promise.all([
+      const [primary, ...refs] = await Promise.all([
+        sb.from('cycles').select('id', { count: 'exact', head: true }).eq('primary_account_id', accountId),
         sb.from('transactions').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+        sb.from('transactions').select('id', { count: 'exact', head: true }).eq('counter_account_id', accountId),
         sb.from('recurring_templates').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+        sb.from('cycle_allocations').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+        sb.from('cycle_reconciliations').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
       ]);
-      if (txnErr) throw txnErr;
-      if (tmplErr) throw tmplErr;
-      const total = (txnCount ?? 0) + (tmplCount ?? 0);
+      if (primary.error) throw primary.error;
+      for (const result of refs) if (result.error) throw result.error;
+      const txnCount = refs[0].count ?? 0;
+      const templateCount = refs[2].count ?? 0;
+      const referenceCount = (primary.count ?? 0) + (refs[1].count ?? 0) + (refs[3].count ?? 0) + (refs[4].count ?? 0);
       return {
-        isUsed: total > 0,
-        txnCount: txnCount ?? 0,
-        templateCount: tmplCount ?? 0,
+        isUsed: txnCount + referenceCount + templateCount > 0,
+        txnCount,
+        templateCount,
+        referenceCount,
       };
     },
   });

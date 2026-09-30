@@ -8,6 +8,7 @@ import {
   sortAccounts,
   validateAccountNumber,
   defaultAccountId,
+  cyclePrimaryAccountId,
 } from '../account';
 
 describe('account helpers and presentation rules (Flow J)', () => {
@@ -215,6 +216,41 @@ describe('account helpers and presentation rules (Flow J)', () => {
 
     it('returns null when there are no accounts at all', () => {
       expect(defaultAccountId([])).toBeNull();
+    });
+
+    it('skips archived banks when choosing a default', () => {
+      const accounts = [
+        { id: 'archived', name: 'Old bank', type: 'BANK', is_active: false },
+        { id: 'active', name: 'Current bank', type: 'BANK', is_active: true },
+      ];
+      expect(defaultAccountId(accounts)).toBe('active');
+    });
+
+    it('carries forward a prior active bank as the new cycle primary', () => {
+      const accounts = [
+        { id: 'first', name: 'First bank', type: 'BANK', is_active: true },
+        { id: 'prior', name: 'Prior bank', type: 'BANK', is_active: true },
+      ];
+      expect(cyclePrimaryAccountId(accounts, 'prior')).toBe('prior');
+    });
+
+    it.each([
+      ['missing', 'not-present'],
+      ['archived', 'archived'],
+      ['non-bank', 'wallet'],
+    ])('falls back to active bank when prior primary is %s', (_label, priorId) => {
+      const accounts = [
+        { id: 'archived', name: 'Old bank', type: 'BANK', is_active: false },
+        { id: 'wallet', name: 'Wallet', type: 'E_WALLET', is_active: true },
+        { id: 'fallback', name: 'Current bank', type: 'BANK', is_active: true },
+      ];
+      expect(cyclePrimaryAccountId(accounts, priorId)).toBe('fallback');
+    });
+
+    it('returns null when neither prior nor default active bank is eligible', () => {
+      expect(cyclePrimaryAccountId([
+        { id: 'archived', name: 'Old bank', type: 'BANK', is_active: false },
+      ], 'archived')).toBeNull();
     });
   });
 });

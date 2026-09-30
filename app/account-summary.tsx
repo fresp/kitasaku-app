@@ -28,11 +28,14 @@ export default function AccountSummaryScreen() {
         <View style={styles.header}><Pressable onPress={() => router.back()} style={styles.back} accessibilityLabel="Kembali"><ArrowLeft size={18} color={Colors.textPrimary} /></Pressable><View><Text style={styles.eyebrow}>ZERO-BASED · PER AKUN</Text><Text style={styles.title}>Ringkasan Akun</Text></View></View>
         <View style={styles.notice}><Wallet size={18} color={Colors.textSecondary} /><Text style={styles.noticeText}>Setiap akun dihitung mandiri. Relokasi masuk sebagai keluar di akun asal dan masuk di akun tujuan, tanpa menambah sumber dana rumah tangga.</Text></View>
         {!cycleQ.data && <Text style={styles.warning}>Belum ada siklus aktif. Ringkasan akun akan muncul setelah siklus dibuka.</Text>}
+        {accountsQ.isError && <QueryError onRetry={() => accountsQ.refetch()} retrying={accountsQ.isFetching} message="Daftar rekening belum bisa dibaca." />}
         <Text style={styles.label}>PILIH AKUN</Text>
         <View style={styles.chips}>{accounts.map((account) => <Pressable key={account.id} onPress={() => setAccountId(account.id)} style={[styles.chip, selected?.id === account.id && styles.chipActive]}><Text style={[styles.chipText, selected?.id === account.id && styles.chipTextActive]}>{account.name}</Text><Text style={[styles.typeText, selected?.id === account.id && styles.chipTextActive]}>{account.type}</Text></Pressable>)}</View>
         {summaryQ.isError && <QueryError onRetry={() => summaryQ.refetch()} retrying={summaryQ.isFetching} message="Ringkasan akun belum bisa dibaca." />}
         {summary && selected && <>
-          <View style={[styles.hero, summary.status === 'FUNDING_GAP' && styles.heroGap]}><Text style={styles.heroLabel}>{selected.name} · {cycleQ.data?.name}</Text><Text style={styles.heroValue}>{formatRupiah(summary.netCashflow)}</Text><Text style={styles.heroSub}>{summary.status === 'FUNDING_GAP' ? 'Akun mengalami funding gap' : summary.status === 'UNALLOCATED' ? 'Dana belum memiliki tujuan' : 'Pergerakan akun seimbang'}</Text></View>
+          <View style={[styles.hero, summary.netCashflow < 0 && styles.heroGap]}><Text style={styles.heroLabel}>{selected.name} · {cycleQ.data?.name}</Text><Text style={styles.heroValue}>{formatRupiah(summary.netCashflow)}</Text><Text style={styles.heroSub}>Pergerakan kas bersih siklus ini · bukan saldo rekening</Text></View>
+          <View style={styles.card}><Text style={styles.cardTitle}>Saldo yang dinyatakan</Text><Row label="Saldo awal" value={summary.openingStated} /><Row label="Perkiraan dari pergerakan tercatat" value={summary.projectedClosingStated} /><Row label="Saldo akhir yang dicatat" value={summary.closingStated} /><Text style={styles.noticeText}>Saldo hanya ditampilkan jika angka awal/akhir pernah dinyatakan. Perkiraan tidak memasukkan histori di luar siklus.</Text></View>
+          <View style={styles.card}><Text style={styles.cardTitle}>Alokasi tercatat pada akun</Text><Row label="Komitmen dari cycle_allocations" value={summary.allocations} /><Text style={styles.noticeText}>Alokasi ditampilkan terpisah dari pergerakan kas dan tidak dijumlahkan dua kali.</Text></View>
           <View style={styles.card}><Text style={styles.cardTitle}>Dana masuk</Text><Row label="Income operasional" value={summary.incoming.operatingIncome} positive /><Row label="Pemasukan pendanaan" value={summary.incoming.financingInflow} positive /><Row label="Pelepasan aset" value={summary.incoming.assetRelease} positive /><Row label="Relokasi masuk" value={summary.incoming.transferIn} positive total /></View>
           <View style={styles.card}><Text style={styles.cardTitle}>Dana keluar</Text><Row label="Pengeluaran" value={summary.outgoing.expense} /><Row label="Pembayaran kewajiban" value={summary.outgoing.debtPayment} /><Row label="Alokasi aset" value={summary.outgoing.assetAllocation} /><Row label="Relokasi keluar" value={summary.outgoing.transferOut} total /></View>
         </>}
@@ -42,8 +45,8 @@ export default function AccountSummaryScreen() {
   );
 }
 
-function Row({ label, value, positive, total }: { label: string; value: number; positive?: boolean; total?: boolean }) {
-  return <View style={[styles.row, total && styles.totalRow]}><Text style={styles.rowLabel}>{label}</Text><Text style={[styles.rowValue, positive && styles.positive]}>{positive ? '+' : '−'}{formatRupiah(value)}</Text></View>;
+function Row({ label, value, positive, total }: { label: string; value: number | null; positive?: boolean; total?: boolean }) {
+  return <View style={[styles.row, total && styles.totalRow]}><Text style={styles.rowLabel}>{label}</Text><Text style={[styles.rowValue, positive && styles.positive]}>{value === null ? 'Belum diketahui' : `${positive ? '+' : '−'}${formatRupiah(value)}`}</Text></View>;
 }
 
 const styles = StyleSheet.create({

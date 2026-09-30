@@ -1,7 +1,9 @@
 # Kitasaku — Audit Kesiapan Release
 
+> **Snapshot historis per 2026-09-27** untuk commit `9dcb1ec`, bukan hasil audit kondisi repo saat ini. Temuan, checklist, dan verdict perlu diverifikasi ulang sebelum dipakai sebagai gate rilis; status Supabase remote saat ini tidak diketahui.
+
 Repo: `kitasaku-app` · commit `9dcb1ec` · 2026-09-27
-Verdict: **BELUM siap rilis.** 6 blocker, 2 di antaranya bikin app tidak jalan sama sekali untuk user baru.
+Verdict saat audit tersebut: **BELUM siap rilis.** 6 blocker, 2 di antaranya bikin app tidak jalan sama sekali untuk user baru.
 
 ---
 

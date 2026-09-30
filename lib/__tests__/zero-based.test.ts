@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  accountZeroBased,
   budgetFillPct,
   budgetHealthStatus,
   calculateFundingGap,
@@ -38,6 +39,26 @@ function summarize(overrides: {
 }
 
 describe('zero-based domain contract', () => {
+  it('projects transfer outflow and inflow separately for the two accounts', () => {
+    const transactions = [{
+      flow_type: 'TRANSFER' as const,
+      account_id: 'bank-a',
+      counter_account_id: 'wallet',
+      planned_amount: 200,
+      actual_amount: 150,
+      status: 'PAID' as const,
+    }];
+    const source = accountZeroBased({ accountId: 'bank-a', transactions, mode: 'actual' });
+    const target = accountZeroBased({ accountId: 'wallet', transactions, mode: 'actual' });
+
+    expect(source.outgoing.transferOut).toBe(150);
+    expect(source.outgoing.total).toBe(150);
+    expect(source.incoming.total).toBe(0);
+    expect(target.incoming.transferIn).toBe(150);
+    expect(target.incoming.total).toBe(150);
+    expect(target.outgoing.total).toBe(0);
+  });
+
   it('1: source only counts operating income when others are zero', () => {
     const summary = summarize({
       source: { operatingIncome: 10_000_000, financingInflow: 0, assetRelease: 0 },

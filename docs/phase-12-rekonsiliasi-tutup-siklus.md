@@ -6,12 +6,13 @@ Status implementasi yang dapat diverifikasi dari repo: jalur rekonsiliasi dan sw
 
 Bagian di bawah mempertahankan alasan dan keputusan historis. Rekomendasi serta checklist yang sudah terlaksana dibaca sebagai catatan desain/histori, bukan todo aktif; perbedaan implementasi saat ini dicatat di bagian status aktual.
 
-### Status aktual (2026-09-30)
+### Status aktual (2026-10-01)
 
-- `cycles.primary_account_id` hanya menerima rekening BANK aktif melalui picker dan validasi mutasi.
-- Penutupan menyimpan snapshot, adjustment, dan sweep secara atomik melalui RPC. Delta negatif membuat transaksi penyesuaian dan alokasi `OTHER`; saldo awal diwariskan hanya dari rekonsiliasi siklus terdahulu paling baru untuk akun yang sama.
-- Jika anchor pembuka tidak tersedia atau akun primer berubah, Home tidak mengarang saldo awal nol. Ia menampilkan pergerakan bersih siklus dan menandainya sebagai belum direkonsiliasi.
-- Pending dan baris tanpa akun menjadi isu yang ditampilkan/diblokir dalam pratinjau rekonsiliasi. Push H-7/H-3 belum diimplementasikan.
+- `cycles.primary_account_id` dibatasi ke rekening BANK aktif melalui picker dan validasi mutasi.
+- Penutupan menyimpan snapshot, adjustment, dan sweep secara atomik melalui RPC. Delta negatif membuat transaksi penyesuaian dan alokasi `OTHER`; delta nullable tetap tidak diketahui bila opening anchor tidak tersedia.
+- Opening akun primer menggunakan rekonsiliasi pada siklus terdahulu paling baru hanya untuk akun yang sama; tidak ada fallback ke siklus lebih lama atau akun lain.
+- Pending, transaksi tanpa akun, dan transaksi primer non-siklus menjadi isu yang ditampilkan/diblokir dalam pratinjau. Push H-7/H-3 belum diimplementasikan.
+- Migration lokal 025 mengaktifkan snapshot saldo sekunder BANK/E_WALLET. Perubahan migration 026 untuk mengecualikan CASH dari sweep dan memperketat bentuk cash-movement masih dalam pengembangan/static review; belum diterapkan.
 - Status di atas merujuk pada kode dan migration lokal saja, bukan deployment remote.
 
 ---

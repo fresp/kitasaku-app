@@ -139,6 +139,14 @@ export default function ProfileScreen() {
       onPress: () => router.push('/account-summary'),
     },
     {
+      key: 'account-snapshots',
+      icon: Wallet,
+      title: 'Snapshot Rekening Kas',
+      sub: 'Catat saldo akhir yang dinyatakan untuk siklus aktif',
+      tone: 'default',
+      onPress: () => router.push('/account-snapshots'),
+    },
+    {
       key: 'categories',
       icon: Sparkles,
       title: 'Kelola Kategori',

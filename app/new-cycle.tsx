@@ -7,8 +7,8 @@ import { BrandIcon } from '../components/ui/BrandIcon';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { cycleWindowFrom } from '../lib/profile';
-import { useAccounts, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
-import { defaultAccountId } from '../lib/account';
+import { useAccounts, useActiveCycle, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
+import { cyclePrimaryAccountId, defaultAccountId } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
@@ -27,12 +27,18 @@ export default function NewCycleScreen() {
   const catsQ = useCategories(householdId);
   const accsQ = useAccounts(householdId);
   const obligQ = useObligations(householdId);
+  const activeCycleQ = useActiveCycle(householdId);
   const createCycle = useCreateCycle();
 
   const activeTemplates = useMemo(
     () => (tmplQ.data ?? []).filter((t) => t.status === 'ACTIVE'),
     [tmplQ.data]
   );
+  const activePrimaryId = useMemo(
+    () => cyclePrimaryAccountId(accsQ.data ?? [], activeCycleQ.data?.primary_account_id),
+    [activeCycleQ.data?.primary_account_id, accsQ.data]
+  );
+  const incomeAccountId = activePrimaryId;
   const [checked, setChecked] = useState<Record<string, boolean> | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   // Seeded from the family's own payday (migration 007) once the household
@@ -159,9 +165,9 @@ export default function NewCycleScreen() {
         householdId,
         name: cycleName.trim() || 'Siklus Baru',
         start, end,
-        primaryAccountId: defaultAccountId(accsQ.data ?? []),
+        primaryAccountId: activePrimaryId,
         incomeAmount: income,
-        incomeAccountId: defaultAccountId(accsQ.data ?? []),
+        incomeAccountId,
         incomeCategoryId: (catsQ.data ?? []).find((c) => c.type === 'INCOME')?.id ?? null,
         items: selected.map((t) => ({
           templateId: t.id, name: t.name,
