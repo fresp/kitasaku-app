@@ -116,17 +116,18 @@ export function sortAccounts<T extends { sort_order?: number; name: string }>(
 }
 
 /**
- * The account a money form should pre-select when the family has not picked
- * one: the first bank, falling back to the first account, falling back to null.
- *
- * A bank is the only account whose balance a cycle reconciles against, so it is
- * the honest default. Picking the first row instead used to hand a *card* to
- * income rows — 'CC Mandiri' sorts before 'Mandiri' alphabetically, and the
- * seeded rows shared a sort_order, so the tie-break decided it. Expects the
- * list already ordered by `sortAccounts`.
+ * The bank account a cycle should use by default, or null when none exists.
+ * A bank is the only account whose balance a cycle reconciles against; falling
+ * back to a wallet or card would silently choose an invalid primary account.
+ * Expects the list already ordered by `sortAccounts`.
  */
 export function defaultAccountId<T extends { id: string; type: string }>(
   accounts: T[]
 ): string | null {
-  return accounts.find((a) => a.type === 'BANK')?.id ?? accounts[0]?.id ?? null;
+  return accounts.find((a) => a.type === 'BANK')?.id ?? null;
+}
+
+/** Bank accounts and e-wallets are the cash accounts eligible for allocation. */
+export function isZeroBasedCashAccount(account: { type: string }): boolean {
+  return account.type === 'BANK' || account.type === 'E_WALLET';
 }

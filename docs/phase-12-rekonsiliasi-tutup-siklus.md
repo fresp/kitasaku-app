@@ -1,13 +1,24 @@
 # Phase 12 — Rekonsiliasi Tutup Siklus (akun primer, kategori Tidak Terlacak, push H-7/H-3)
 
-Dokumen ini merancang satu alur yang belum ada sama sekali di app: **momen
-menutup siklus**. Sampai sekarang siklus tidak pernah "ditutup" — ia hanya
-berhenti aktif ketika siklus berikutnya dibuka (`useCreateCycle` men-set
-`is_active = false` pada siklus lama, `lib/queries.ts:403`). Tidak ada ritual,
-tidak ada rekonsiliasi, dan tidak ada cara untuk tahu bahwa catatan app berbeda
-dengan kenyataan di bank.
+Dokumen ini mencatat keputusan dan kontrak **rekonsiliasi tutup siklus**. Implementasi lokal kini memiliki akun primer BANK per siklus, snapshot rekonsiliasi, pratinjau selisih, penyesuaian atomik, dan opsi sweep saat penutupan (migration 012, 015, dan 016 serta `lib/queries.ts`). Ini adalah fakta bertanggal, bukan saldo turunan: Home hanya menyebut saldo absolut bila ada opening anchor yang sah; tanpa anchor, Home menampilkan pergerakan bersih siklus.
 
-Sumber keputusan (brainstorm 2026-09-27/28):
+Status implementasi yang dapat diverifikasi dari repo: jalur rekonsiliasi dan sweep ada di kode/migrasi lokal. Status penerapan pada Supabase remote tidak dinyatakan di sini karena tidak diverifikasi dalam perubahan ini. Notifikasi push H-7/H-3 tetap rancangan tertunda.
+
+Bagian di bawah mempertahankan alasan dan keputusan historis. Rekomendasi serta checklist yang sudah terlaksana dibaca sebagai catatan desain/histori, bukan todo aktif; perbedaan implementasi saat ini dicatat di bagian status aktual.
+
+### Status aktual (2026-09-30)
+
+- `cycles.primary_account_id` hanya menerima rekening BANK aktif melalui picker dan validasi mutasi.
+- Penutupan menyimpan snapshot, adjustment, dan sweep secara atomik melalui RPC. Delta negatif membuat transaksi penyesuaian dan alokasi `OTHER`; saldo awal diwariskan hanya dari rekonsiliasi siklus terdahulu paling baru untuk akun yang sama.
+- Jika anchor pembuka tidak tersedia atau akun primer berubah, Home tidak mengarang saldo awal nol. Ia menampilkan pergerakan bersih siklus dan menandainya sebagai belum direkonsiliasi.
+- Pending dan baris tanpa akun menjadi isu yang ditampilkan/diblokir dalam pratinjau rekonsiliasi. Push H-7/H-3 belum diimplementasikan.
+- Status di atas merujuk pada kode dan migration lokal saja, bukan deployment remote.
+
+---
+
+## Sumber keputusan (brainstorm 2026-09-27/28)
+
+Bagian ini mempertahankan keputusan dan konteks historis.
 
 1. Trash = **parkiran**, bukan TPA. Ada profiling dulu ("saldo ATM-mu benar
    sisa X?"), lalu user memilih: ingat → kategori asli, tidak ingat → trash.
@@ -37,99 +48,48 @@ Sumber keputusan (brainstorm 2026-09-27/28):
 Ini keputusan yang paling banyak mengubah segalanya, dan alasannya bukan
 kenyamanan UI.
 
-Sebelum keputusan ini, rekonsiliasi **tidak mungkin dilakukan dengan benar**.
-Migration 010 menolak `accounts.balance` secara eksplisit dan argumentasinya
-masih berlaku hari ini: tidak ada saldo awal yang tersimpan di mana pun, jadi
-app tidak pernah bisa menjawab "seharusnya saldo Mandiri berapa". Membandingkan
-"app bilang 3jt, bank bilang 2jt" hanya valid untuk rekening amplop yang dikuras
-habis tiap gajian — untuk rekening yang menyimpan tabungan bertahun-tahun, bank
-memang menyimpan uang tahun lalu, dan selisihnya bukan kelupaan.
+Migration 010 menolak `accounts.balance` sebagai saldo berjalan yang mudah basi.
+Rekonsiliasi tidak menyimpan saldo berjalan semacam itu; ia menyimpan snapshot
+fakta bertanggal sebagai anchor, lalu menghitung pergerakan dari transaksi.
+Saldo absolut hanya dapat dihitung bila opening anchor yang sah tersedia.
 
-**Mengikat satu akun primer per siklus menutup lubang itu, karena rekonsiliasi
-jadi berlabuh di dua ujung, bukan di satu angka absolut:**
+**Mengikat satu akun primer per siklus membuat perbandingan punya dua ujung:**
 
 ```
-O  = saldo awal yang dinyatakan (saat siklus dibuka)
+O  = saldo awal yang dinyatakan / closing anchor siklus sebelumnya
 C  = saldo akhir yang dinyatakan (saat siklus ditutup)
-R+ = transaksi INCOME  PAID dengan account_id = akun primer
-R− = transaksi EXPENSE PAID dengan account_id = akun primer
-
-Δ_catat  = R+ − R−
-Δ_nyata  = C − O
-D        = Δ_nyata − Δ_catat        ← inilah selisih yang dicari
+R  = pergerakan PAID akun primer menurut flow_type dan arah transfer
+D  = (C − O) − R
 ```
 
-**Gerbang `R` cuma satu: `account_id` = akun yang di-bind ke siklus.** Bukan
-"semua transaksi", dan bukan "semua akun yang didefinisikan". Inilah yang
-menegakkan aturan yang disepakati: **transaksi non-siklus tetap tercatat sebagai
-bahan audit, tetapi tidak pernah membebani saldo siklus.** Belanja kartu kredit
-adalah contoh paling jelas — ia dicatat lengkap (makan di McD, RAM laptop,
-belanja TV) dengan `account_id` = CC, dan karena CC bukan akun yang di-bind, ia
-**tidak masuk `R`** dan tidak pernah memunculkan `D`.
+Anchor `O` hanya diwariskan dari siklus terdahulu paling baru dan hanya jika
+rekonsiliasi siklus itu untuk akun primer yang sama. Jika tidak ada anchor,
+`O` dan `D` tidak dikarang sebagai nol; Home menampilkan pergerakan bersih,
+bukan saldo absolut. Transaksi transfer masuk/keluar dihitung sesuai akun yang
+menjadi tujuan/sumber dan bukan sebagai income atau expense.
 
-Satu gerbang ini sekaligus menghapus risiko dobel hitung tanpa pengecualian
-khusus: belanja CC tidak menyentuh Mandiri sampai tagihannya dibayar, dan
-**pembayaran tagihan itulah** yang ber-`account_id` = Mandiri dan masuk `R`
-(bagian "Kartu kredit" di bawah).
+Transaksi di luar siklus tidak dihitung dalam movement siklus. Preview penutupan
+menampilkan transaksi tanpa siklus yang menyentuh akun primer sebagai isu
+terpisah dan memblokir close sampai ditinjau. Aturan rinci historical di bawah
+ini menjelaskan alasan model, tetapi jangan dibaca sebagai bukti bahwa jalur
+transaksi non-siklus sudah tersedia di semua layar.
 
-Ada satu nuansa yang belum diputuskan dan tidak boleh dikarang di sini: baris
-yang ber-`account_id` = akun primer tetapi **tidak terikat siklus mana pun**
-(`cycle_id` NULL, mis. pengeluaran bank yang dicatat di luar siklus berjalan).
-Secara kas ia jelas menggerakkan rekening, tetapi ia tidak bisa masuk `R` siklus
-mana pun. Dibahas sebagai keputusan terbuka #6 di bagian 10.
+### Rekening kas dan arah pergerakan
 
-Yang dibandingkan **selisih**, bukan saldo. Rekening yang menyimpan tabungan
-sepuluh tahun punya `O` dan `C` yang keduanya besar, dan keduanya saling
-meniadakan — `D` tetap nol kalau tidak ada yang kelupaan. Inilah sebabnya model
-ini bekerja untuk rekening nyata, sedangkan "app 3jt vs bank 2jt" tidak.
+E-wallet dan tunai tetap dapat menjadi akun, tetapi bukan akun primer untuk
+rekonsiliasi. Zero-Based kas menghitung BANK dan E_WALLET; CASH, kartu kredit,
+serta baris tanpa akun dikecualikan dari agregat kas. Dalam cashflow Home,
+perpindahan ke/dari akun primer dihitung berdasarkan sisi transfer, sedangkan
+transfer tetap netral terhadap income dan expense. Untuk saldo akun Zero-Based,
+transfer masuk menjadi inflow akun penerima dan transfer keluar menjadi outflow
+akun sumber.
 
-### Kenapa e-wallet dan tunai tidak perlu dilacak
-
-Ini yang membuat rumusnya tetap sederhana meski keluarga memakai GoPay dan uang
-tunai setiap hari.
-
-```
-Top-up GoPay 500rb dari Mandiri
-  → transaksi EXPENSE 500rb, account_id = Mandiri, cycle_id = siklus ini
-  → uang itu LUNAS. Tidak dilacak lagi.
-  → belanja di dalam GoPay tidak pernah dicatat, dan tidak perlu.
-
-Tarik tunai 300rb dari Mandiri
-  → transaksi EXPENSE 300rb, account_id = Mandiri, cycle_id = siklus ini
-  → belanja tunai (bensin, warung) tidak pernah dicatat.
-```
-
-Uang yang keluar dari akun primer diperlakukan sebagai **spent**, bukan
-*transferred*. Karena itu tidak ada transaksi anak yang menggantung di sisi sana
-dan tidak ada yang perlu dicocokkan — titik rekonsiliasinya adalah **saat uang
-keluar dari Mandiri** (top-up / tarik tunai), bukan saat dibelanjakan.
-
-**Ini kebiasaan user, bukan aturan yang dipaksakan app.** Keluarga yang memang
-mau mencatat detail jajan GoPay-nya **boleh**: baris itu dicatat dengan
-`account_id` = GoPay. Karena GoPay bukan akun yang di-bind ke siklus, baris itu
-tampil di Riwayat sebagai bahan audit tanpa memengaruhi `R` maupun saldo siklus.
-Yang app harus jaga bukan "GoPay tidak boleh dicatat", melainkan **"transaksi
-non-siklus tidak pernah membebani saldo siklus"** — dan satu gerbang `account_id`
-sudah cukup untuk itu.
-
-Konsekuensinya untuk picker akun: e-wallet dan tunai **tetap boleh ada sebagai
-akun** (migration 010 sudah menyediakan `is_active`, dan `seed.ts:36-41` sudah
-membuatnya), tetapi ia bukan kandidat akun primer. Akun primer adalah **rekening
-bank** — satu-satunya tempat yang bisa dinyatakan saldonya ke ATM.
-
-Tanda `D` menentukan artinya, dan **keduanya menulis jumlah baris yang
-berbeda** — konsekuensi langsung dari kontrak Phase 1 (`income` adalah *source*,
-bukan alokasi; total alokasi hanya dari `cycle_allocations`):
-
-| Kondisi | Arti | Yang ditulis |
-| --- | --- | --- |
-| `D = 0` | cocok | **tidak ada apa pun** |
-| `D < 0` | ada pengeluaran tak tercatat | transaksi EXPENSE PAID **+** alokasi `OTHER` (2 baris) |
-| `D > 0` | ada pemasukan tak tercatat | transaksi INCOME saja (1 baris) |
-
-Asimetri ini menguntungkan: kasus `D > 0` otomatis menaikkan
-`unallocatedFunds`, yang **langsung memicu insight alokasi ke investasi**
-(bagian 7) tanpa mesin tambahan.
+Nilai `D` pada penutupan dipakai untuk menulis adjustment secara atomik oleh RPC.
+Untuk delta negatif, RPC membuat transaksi penyesuaian serta alokasi `OTHER`;
+untuk delta positif, ia membuat transaksi income. `D` tidak dihitung bila opening
+anchor belum tersedia. Detail historis berikut tentang pilihan pencatatan tetap
+dipertahankan sebagai keputusan desain, bukan pernyataan bahwa seluruh jalur
+legacy sudah beroperasi demikian.
 
 ### Carry-over: saldo akhir jadi saldo awal berikutnya
 
@@ -203,6 +163,10 @@ keluarga memang melewatkannya, bukan karena bingung memilih.
 ---
 
 ## 2. Model data (migration 012)
+
+Implementasi lokal tersedia di `supabase/migrations/012_phase12_reconciliation.sql`.
+Catatan dan SQL contoh berikut menjelaskan bentuk desain awal; migration aktual
+adalah sumber kebenaran untuk kolom, constraint, dan trigger.
 
 ### 2.1 `cycles.primary_account_id`
 

@@ -709,6 +709,25 @@ export interface ReconciliationTransaction {
   obligation_id?: string | null;
 }
 
+export interface ReconciliationAnchor {
+  cycleId: string;
+  endDate: string;
+  accountId: string;
+  closingStated: number;
+}
+
+/** Uses the most recent earlier reconciliation only when it belongs to this account. */
+export function openingBalanceFromPriorReconciliation(
+  currentAccountId: string,
+  currentStartDate: string,
+  anchors: ReconciliationAnchor[],
+): number | null {
+  const prior = anchors
+    .filter((anchor) => anchor.endDate < currentStartDate)
+    .sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
+  return prior?.accountId === currentAccountId ? normalizeAmount(prior.closingStated) : null;
+}
+
 export interface ReconciliationPreview {
   accountId: string;
   openingStated: number | null;

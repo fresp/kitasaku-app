@@ -4,8 +4,9 @@ Dokumen ini menjawab satu pertanyaan yang muncul di akhir Phase 12: **apakah
 siklus sebaiknya zero-based per akun, bukan hanya per rumah tangga?** Dokumen ini
 juga memuat **grilling** — pencarian bug/grey area — atas model tersebut.
 
-Status: **desain, belum ada implementasi.** Semua rujukan baris diverifikasi
-langsung ke kode pada 2026-09-28 01:xx.
+Status aktual (2026-09-30): sebagian fondasi Phase 13 sudah ada di kode dan migration lokal: `TRANSFER`/`counter_account_id`, aset dan valuasi, kebijakan sweep, serta agregasi kas Zero-Based yang hanya memasukkan akun BANK/E_WALLET. Zero-Based per akun secara penuh dan seluruh jalur tulis/sapuan belum dianggap selesai hanya dari keberadaan skema. Status remote Supabase tidak diverifikasi di sini.
+
+Bagian berikut mempertahankan keputusan dan temuan historis. Checklist yang ditandai selesai adalah catatan pada tanggalnya; item desain yang belum ada tetap perlu dicocokkan dengan implementasi saat ini sebelum dianggap todo.
 
 ---
 
@@ -79,7 +80,10 @@ bukan akun.
 
 ## 3. Tiga jenis pergerakan uang
 
-Ini kosakata yang hilang dan menyebabkan blocker di spreadsheet user.
+Ini kosakata yang hilang dan menyebabkan blocker di spreadsheet user. Catatan
+serta tabel temuan di bawah merekam kondisi saat dokumen dirancang; fondasi
+`TRANSFER`/`counter_account_id` kini tersedia di migration 014, tetapi detail
+implementasi lokal menjadi acuan status saat ini.
 
 | Jenis | Arti | `sourceFunds` | `totalAllocation` |
 | --- | --- | --- | --- |
@@ -108,6 +112,11 @@ bertambah) dan bukan expense (uang tidak habis).
 **Yang benar-benar hilang hanya satu: `TRANSFER`** — perpindahan antar **dua
 akun**, di mana tidak ada aset yang lahir. Mandiri → GoPay adalah transfer;
 GoPay → reksadana adalah `ASSET_ALLOCATION`.
+
+> **Catatan status kini (2026-09-30):** `TRANSFER` dan `counter_account_id` sudah
+> ditambahkan pada migration 014 dan kosakata klien. Paragraf serta temuan di
+> bawah yang menyatakan jalur tersebut belum ada adalah kondisi historis saat
+> dokumen ditulis, bukan status kode saat ini.
 
 ```
 Mandiri → GoPay       TRANSFER          (akun → akun, dua sisi kas)

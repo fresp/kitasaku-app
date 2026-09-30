@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reconciliationPreview } from '../zero-based';
+import { openingBalanceFromPriorReconciliation, reconciliationPreview } from '../zero-based';
 import type { ReconciliationTransaction } from '../zero-based';
 
 const txn = (overrides: Partial<ReconciliationTransaction>): ReconciliationTransaction => ({
@@ -12,6 +12,30 @@ const txn = (overrides: Partial<ReconciliationTransaction>): ReconciliationTrans
 });
 
 describe('cycle reconciliation preview', () => {
+  it('uses the previous closing anchor only for the same account', () => {
+    const anchors = [
+      { cycleId: 'old', endDate: '2026-08-31', accountId: 'bank-a', closingStated: 12_000 },
+    ];
+    expect(openingBalanceFromPriorReconciliation('bank-a', '2026-09-01', anchors)).toBe(12_000);
+    expect(openingBalanceFromPriorReconciliation('bank-b', '2026-09-01', anchors)).toBeNull();
+  });
+
+  it('uses the latest earlier cycle anchor and does not skip an unreconciled latest cycle', () => {
+    const anchors = [
+      { cycleId: 'older', endDate: '2026-07-31', accountId: 'bank-a', closingStated: 10_000 },
+      { cycleId: 'latest', endDate: '2026-08-31', accountId: 'bank-b', closingStated: 20_000 },
+    ];
+    expect(openingBalanceFromPriorReconciliation('bank-a', '2026-09-01', anchors)).toBeNull();
+    expect(openingBalanceFromPriorReconciliation('bank-a', '2026-08-01', anchors)).toBe(10_000);
+  });
+
+  it('does not use an anchor dated on or after the current cycle start', () => {
+    expect(openingBalanceFromPriorReconciliation('bank-a', '2026-08-01', [
+      { cycleId: 'future', endDate: '2026-08-31', accountId: 'bank-a', closingStated: 10_000 },
+    ])).toBeNull();
+  });
+
+
   it('computes recorded movement and delta from paid primary-account rows', () => {
     const result = reconciliationPreview({
       accountId: 'bank',

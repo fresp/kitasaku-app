@@ -3,11 +3,22 @@ import type { QueryClient } from '@tanstack/react-query';
 import { requireSupabase } from './supabase';
 import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
 import { isRepaymentMode } from './obligation';
+import { calcCashflow as calculateHomeCashflow, homeCashBalances } from './cashflow';
+import type { CashflowTxn } from './cashflow';
 import type { RepaymentMode } from './obligation';
 import type { InstallmentMode } from './installments';
 import type { Beneficiary } from './beneficiary';
 import { cleanAccountNumber } from './beneficiary';
+import { assertEligibleCashAccountForHousehold } from './cash-account';
+import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
+import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
+export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
+export type { SourceFundRow } from './zero-based-accounting';
+export { calcCashflow, homeCashBalances } from './cashflow';
+export type { Cashflow } from './cashflow';
 import {
+  defaultAccountId,
+  isZeroBasedCashAccount,
   normalizeAccountNumber,
   sortAccounts,
   validateAccountNumber,
@@ -19,6 +30,7 @@ import {
   defaultFlowType,
   isObligationPaydown,
   ledgerDisplayAmount,
+  openingBalanceFromPriorReconciliation,
   reconciliationPreview,
   resolveModeAmount,
 } from './zero-based';
@@ -794,6 +806,12 @@ export function useAccountZeroBasedSummary(
     enabled: !!householdId && !!cycleId && !!accountId,
     queryFn: async () => {
       const sb = requireSupabase();
+      const { data: accountData, error: accountError } = await sb.from('accounts')
+        .select('type').eq('id', accountId!).eq('household_id', householdId!).maybeSingle();
+      if (accountError) throw accountError;
+      if (!accountData || !isZeroBasedCashAccount(accountData)) {
+        throw new Error('Zero-Based hanya tersedia untuk rekening bank dan e-wallet.');
+      }
       const { data, error } = await sb.from('transactions')
         .select('account_id, counter_account_id, flow_type, direction, planned_amount, actual_amount, status, obligation_id')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!);
@@ -930,6 +948,46 @@ export interface CycleReconciliationPreview {
   issues: ReconciliationBlockingIssue[];
 }
 
+export function useHomeCashBalance(
+  householdId: string | undefined,
+  cycle: Cycle | null | undefined,
+  transactions: CashflowTxn[],
+) {
+  const query = useQuery({
+    queryKey: ['home-cash-balance', householdId, cycle?.id, cycle?.primary_account_id],
+    enabled: !!householdId && !!cycle?.id && !!cycle.primary_account_id,
+    queryFn: async () => {
+      const accountId = cycle!.primary_account_id!;
+      const sb = requireSupabase();
+      const { data: priorCycles, error: cycleError } = await sb.from('cycles')
+        .select('id, end_date').eq('household_id', householdId!)
+        .lt('end_date', cycle!.start_date).order('end_date', { ascending: false }).limit(1);
+      if (cycleError) throw cycleError;
+      const prior = priorCycles?.[0];
+      let openingStated: number | null = null;
+      if (prior) {
+        const { data: anchor, error: anchorError } = await sb.from('cycle_reconciliations')
+          .select('closing_stated, account_id').eq('household_id', householdId!).eq('cycle_id', prior.id).maybeSingle();
+        if (anchorError) throw anchorError;
+        if (anchor?.account_id === accountId) openingStated = anchor.closing_stated ?? null;
+      }
+      const { data: reconciliation, error: reconciliationError } = await sb.from('cycle_reconciliations')
+        .select('closing_stated, account_id').eq('household_id', householdId!).eq('cycle_id', cycle!.id).maybeSingle();
+      if (reconciliationError) throw reconciliationError;
+      const closingStated = reconciliation?.account_id === accountId
+        ? reconciliation.closing_stated
+        : null;
+      return { openingStated, closingStated };
+    },
+  });
+  const movement = calculateHomeCashflow(transactions, cycle?.primary_account_id);
+  const balances = homeCashBalances(movement, query.data?.openingStated ?? null);
+  return {
+    ...query,
+    data: query.data ? { ...query.data, movement, ...balances } : undefined,
+  };
+}
+
 export function useCycleReconciliation(householdId: string | undefined, cycleId: string | undefined) {
   return useQuery({
     queryKey: ['reconciliation', householdId, cycleId],
@@ -990,12 +1048,32 @@ export function useCycleReconciliationPreview(
       const priorCycleId = (priorCycleData ?? [])[0]?.id;
       let openingStated: number | null = null;
       if (priorCycleId) {
-        const { data: priorReconciliation, error: priorReconciliationErr } = await sb
-          .from('cycle_reconciliations').select('closing_stated')
-          .eq('household_id', householdId!).eq('cycle_id', priorCycleId).maybeSingle();
+        const [{ data: priorCycle, error: priorCycleReadErr }, { data: priorReconciliation, error: priorReconciliationErr }] = await Promise.all([
+          sb.from('cycles').select('id, end_date').eq('household_id', householdId!).eq('id', priorCycleId).single(),
+          sb.from('cycle_reconciliations').select('closing_stated, account_id')
+            .eq('household_id', householdId!).eq('cycle_id', priorCycleId).maybeSingle(),
+        ]);
+        if (priorCycleReadErr) throw priorCycleReadErr;
         if (priorReconciliationErr) throw priorReconciliationErr;
-        openingStated = (priorReconciliation as { closing_stated?: number } | null)?.closing_stated ?? null;
+        const anchor = priorReconciliation as { closing_stated?: number; account_id?: string } | null;
+        if (anchor?.closing_stated != null && anchor.account_id) {
+          openingStated = openingBalanceFromPriorReconciliation(cycle.primary_account_id, cycle.start_date, [{
+            cycleId: priorCycle.id,
+            endDate: priorCycle.end_date,
+            accountId: anchor.account_id,
+            closingStated: anchor.closing_stated,
+          }]);
+        }
       }
+      // A closing balance belongs to that specific bank account. If the family
+      // changes the cycle's primary bank, this account needs a fresh opening
+      // balance instead of inheriting another account's closing snapshot.
+      // The latest prior cycle is the only eligible anchor; an unreconciled
+      // latest cycle must not fall back to an older snapshot.
+
+      // A closing balance belongs to that specific bank account. If the family
+      // changes the cycle's primary bank, this account needs a fresh opening
+      // balance instead of inheriting another account's closing snapshot.
       const preview = reconciliationPreview({
         accountId: cycle.primary_account_id,
         openingStated,
@@ -1096,11 +1174,23 @@ export function useCreateCycle() {
     }) => {
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
+      const { data: activeBankAccounts, error: bankAccountsError } = await sb.from('accounts')
+        .select('id, type').eq('household_id', args.householdId).eq('type', 'BANK').eq('is_active', true)
+        .order('sort_order', { ascending: true }).order('name', { ascending: true });
+      if (bankAccountsError) throw bankAccountsError;
+      const primaryAccountId = args.primaryAccountId ?? defaultAccountId((activeBankAccounts ?? []) as Account[]);
+      if (!primaryAccountId || !(activeBankAccounts ?? []).some((account) => account.id === primaryAccountId)) {
+        throw new Error('Pilih rekening BANK aktif sebelum membuka siklus baru.');
+      }
+      const incomeAccountId = args.incomeAccountId ?? primaryAccountId;
+      if (!(activeBankAccounts ?? []).some((account) => account.id === incomeAccountId)) {
+        throw new Error('Akun pemasukan harus rekening BANK aktif.');
+      }
       await sb.from('cycles').update({ is_active: false }).eq('household_id', args.householdId).eq('is_active', true);
       const { data: cycle, error: cErr } = await sb.from('cycles').insert({
         household_id: args.householdId, name: args.name,
         start_date: args.start, end_date: args.end, is_active: true,
-        primary_account_id: args.primaryAccountId,
+        primary_account_id: primaryAccountId,
       }).select('*').single();
       if (cErr) throw cErr;
       const cid = (cycle as Cycle).id;
@@ -1261,53 +1351,6 @@ export function useCreateObligation() {
   });
 }
 
-export interface Cashflow {
-  actualCash: number;
-  projectedRemaining: number;
-  /** Every row not yet executed. Counts both directions — this is the ledger total. */
-  pendingCount: number;
-  paidCount: number;
-  /**
-   * PENDING **outflow** rows: the ones that still owe money and therefore
-   * belong in Home's "N transaksi belum dibayar" alert. Counting every PENDING
-   * row there made an un-cleared salary ("Gaji Bulanan", pending until payday)
-   * read as a bill the family had not paid.
-   */
-  unpaidExpenseCount: number;
-  /** PENDING inflow rows — money expected but not landed yet ("menunggu cair"). */
-  pendingIncomeCount: number;
-}
-
-export function calcCashflow(txns: Txn[]): Cashflow {
-  let cashIn = 0, cashOut = 0, pendingOut = 0, pendingCount = 0, paidCount = 0;
-  let unpaidExpenseCount = 0, pendingIncomeCount = 0;
-  for (const t of txns) {
-    if (t.status === 'PAID') {
-      paidCount += 1;
-      if (t.direction === 'INCOME') cashIn += t.actual_amount;
-      else cashOut += t.actual_amount;
-    } else if (t.status === 'PENDING') {
-      pendingCount += 1;
-      if (t.direction === 'EXPENSE') {
-        pendingOut += t.planned_amount;
-        unpaidExpenseCount += 1;
-      } else {
-        pendingOut -= t.planned_amount;
-        pendingIncomeCount += 1;
-      }
-    }
-  }
-  const actualCash = cashIn - cashOut;
-  return {
-    actualCash,
-    projectedRemaining: actualCash - pendingOut,
-    pendingCount,
-    paidCount,
-    unpaidExpenseCount,
-    pendingIncomeCount,
-  };
-}
-
 // ============ Phase 1: zero-based projection + allocation mutations ============
 //
 // Anti-double-count: the allocation total comes ONLY from cycle_allocations
@@ -1322,7 +1365,7 @@ export interface CycleAllocation {
   cancelled_at?: string | null; cancelled_by?: string | null; cancellation_reason?: string | null;
   categories?: { name: string; icon?: string | null } | null;
   obligations?: { title: string } | null;
-  accounts?: { name: string } | null;
+  accounts?: { name?: string; type?: string } | null;
 }
 
 export interface LedgerRow extends Txn {
@@ -1340,36 +1383,6 @@ export interface LedgerRow extends Txn {
   displayAmount: number;
 }
 
-function aggregateSourceFunds(
-  rows: Pick<Txn, 'direction' | 'flow_type' | 'obligation_id' | 'planned_amount' | 'actual_amount' | 'status'>[],
-  mode: SummaryMode
-): SourceFundsBreakdown {
-  let operatingIncome = 0, financingInflow = 0, assetRelease = 0;
-  for (const t of rows) {
-    const flow = t.flow_type ?? defaultFlowType(t.direction, t.obligation_id);
-    const amount = resolveModeAmount(t, mode);
-    if (flow === 'OPERATING_INCOME') operatingIncome += amount;
-    else if (flow === 'FINANCING_INFLOW') financingInflow += amount;
-    else if (flow === 'ASSET_RELEASE') assetRelease += amount;
-  }
-  return { operatingIncome, financingInflow, assetRelease, total: operatingIncome + financingInflow + assetRelease };
-}
-
-function aggregateAllocations(rows: Pick<CycleAllocation, 'allocation_type' | 'amount' | 'cancelled_at'>[]) {
-  const byType: Record<AllocationType, number> = {
-    EXPENSE: 0, DEBT_PAYMENT: 0, ASSET: 0, SAVINGS: 0,
-    INVESTMENT: 0, EMERGENCY_FUND: 0, OTHER: 0,
-  };
-  for (const r of rows) {
-    if (r.cancelled_at) continue;
-    byType[r.allocation_type] += Math.max(0, r.amount);
-  }
-  return {
-    expense: byType.EXPENSE, debtPayment: byType.DEBT_PAYMENT, asset: byType.ASSET,
-    savings: byType.SAVINGS, investment: byType.INVESTMENT,
-    emergencyFund: byType.EMERGENCY_FUND, other: byType.OTHER,
-  };
-}
 
 export function useCycleSourceFunds(
   householdId: string | undefined, cycleId: string | undefined, mode: SummaryMode = 'planned'
@@ -1380,10 +1393,11 @@ export function useCycleSourceFunds(
     queryFn: async (): Promise<SourceFundsBreakdown> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id')
+        .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, accounts!transactions_account_id_fkey(type)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!);
       if (error) throw error;
-      return aggregateSourceFunds((data ?? []) as Txn[], mode);
+      const rows = (data ?? []).map((row: any) => ({ ...row, account_type: (Array.isArray(row.accounts) ? row.accounts[0]?.type : row.accounts?.type) ?? '' })) as SourceFundRow[];
+      return aggregateSourceFunds(rows, mode);
     },
   });
 }
@@ -1395,7 +1409,7 @@ export function useCycleAllocations(householdId: string | undefined, cycleId: st
     queryFn: async (): Promise<CycleAllocation[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('cycle_allocations')
-        .select('*, categories(name, icon), obligations(title), accounts(name)')
+        .select('*, categories(name, icon), obligations(title), accounts(name, type)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!);
       if (error) throw error;
       return (data ?? []) as CycleAllocation[];
@@ -1413,22 +1427,27 @@ export function useZeroBasedSummary(
       const sb = requireSupabase();
       const [txnsRes, allocsRes] = await Promise.all([
         sb.from('transactions')
-          .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id')
+          .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, accounts!transactions_account_id_fkey(type)')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
         sb.from('cycle_allocations')
-          .select('allocation_type, amount, cancelled_at')
+          .select('allocation_type, amount, cancelled_at, accounts(type)')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
       ]);
       if (txnsRes.error) throw txnsRes.error;
       if (allocsRes.error) throw allocsRes.error;
-      const txnRows = (txnsRes.data ?? []).filter((row) => (row as Txn).status !== 'CANCELLED') as Txn[];
-      const allocRows = (allocsRes.data ?? []) as Pick<CycleAllocation, 'allocation_type' | 'amount' | 'cancelled_at'>[];
+      const txnRows = (txnsRes.data ?? [])
+        .filter((row: any) => row.status !== 'CANCELLED')
+        .map((row: any) => ({ ...row, account_type: (Array.isArray(row.accounts) ? row.accounts[0]?.type : row.accounts?.type) ?? '' })) as SourceFundRow[];
+      const allocRows = (allocsRes.data ?? []).map((row: any) => ({
+        ...row,
+        accounts: Array.isArray(row.accounts) ? row.accounts[0] ?? null : row.accounts,
+      })) as AllocationAccountingRow[];
       const source = aggregateSourceFunds(txnRows, mode);
       // Required allocation is always the planned total, regardless of
       // mode; mode only affects the source-funds side. Cancelled commitments
       // remain queryable for audit but are no longer required funding.
       const requiredAllocation = allocRows.reduce(
-        (s, r) => s + (r.cancelled_at ? 0 : Math.max(0, r.amount)),
+        (s, r) => s + (r.cancelled_at || !eligibleCashAllocation(r) ? 0 : Math.max(0, r.amount)),
         0,
       );
       return calculateZeroBasedSummary({
@@ -1606,11 +1625,18 @@ export function useCreateAllocation() {
       if (!(args.amount > 0)) throw new Error('Nominal alokasi harus lebih dari 0.');
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
+      if (!args.accountId) throw new Error('Pilih rekening bank atau e-wallet untuk alokasi.');
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('type, is_active').eq('id', args.accountId).eq('household_id', args.householdId).maybeSingle();
+      if (accountError) throw accountError;
+      if (!account || account.is_active === false || !isZeroBasedCashAccount(account)) {
+        throw new Error('Alokasi hanya dapat dicatat pada rekening bank atau e-wallet aktif.');
+      }
       const { data, error } = await sb.from('cycle_allocations').insert({
         household_id: args.householdId, cycle_id: args.cycleId,
         allocation_type: args.allocationType, amount: args.amount,
         category_id: args.categoryId ?? null, obligation_id: args.obligationId ?? null,
-        account_id: args.accountId ?? null, note: args.note ?? null,
+        account_id: args.accountId, note: args.note ?? null,
         created_by: user?.id ?? null,
       }).select('*').single();
       if (error) throw error;
@@ -1635,12 +1661,24 @@ export function useUpdateAllocation() {
         throw new Error('Nominal alokasi harus lebih dari 0.');
       }
       const sb = requireSupabase();
+      const { data: allocation, error: allocationError } = await sb.from('cycle_allocations')
+        .select('household_id').eq('id', args.id).maybeSingle();
+      if (allocationError) throw allocationError;
+      if (!allocation) throw new Error('Alokasi tidak ditemukan.');
       const patch: Record<string, string | number | null> = {};
       if (args.allocationType !== undefined) patch.allocation_type = args.allocationType;
       if (args.amount !== undefined) patch.amount = args.amount;
       if (args.categoryId !== undefined) patch.category_id = args.categoryId;
       if (args.obligationId !== undefined) patch.obligation_id = args.obligationId;
-      if (args.accountId !== undefined) patch.account_id = args.accountId;
+      if (args.accountId !== undefined) {
+        if (!args.accountId) throw new Error('Pilih rekening bank atau e-wallet untuk alokasi.');
+        const { data: account, error: accountError } = await sb.from('accounts')
+          .select('household_id, type, is_active').eq('id', args.accountId)
+          .eq('household_id', allocation.household_id).maybeSingle();
+        if (accountError) throw accountError;
+        assertEligibleCashAccountForHousehold(account, allocation.household_id);
+        patch.account_id = args.accountId;
+      }
       if (args.note !== undefined) patch.note = args.note;
       const { data, error } = await sb.from('cycle_allocations').update(patch).eq('id', args.id).select('*').single();
       if (error) throw error;
@@ -1964,7 +2002,13 @@ export function useAllocateDebtPayment() {
       amount: number; accountId?: string | null;
     }) => {
       if (!(args.amount > 0)) throw new Error('Nominal pembayaran harus lebih dari 0.');
+      if (!args.accountId) throw new Error('Pilih rekening bank atau e-wallet untuk pembayaran.');
       const sb = requireSupabase();
+      const { data: account, error: accountError } = await sb.from('accounts')
+        .select('household_id, type, is_active').eq('id', args.accountId)
+        .eq('household_id', args.householdId).maybeSingle();
+      if (accountError) throw accountError;
+      assertEligibleCashAccountForHousehold(account, args.householdId);
       const { data, error } = await sb.rpc('allocate_debt_payment', {
         p_household_id: args.householdId, p_cycle_id: args.cycleId,
         p_obligation_id: args.obligationId, p_amount: args.amount,

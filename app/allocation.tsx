@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
-import { defaultAccountId } from '../lib/account';
+import { defaultAccountId, isZeroBasedCashAccount } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
   useAccounts,
@@ -74,17 +74,29 @@ export default function AllocationScreen() {
   const allocations = useMemo(() => allocsQ.data ?? [], [allocsQ.data]);
   const categories = useMemo(() => catsQ.data ?? [], [catsQ.data]);
   const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
-  const accounts = useMemo(() => accsQ.data ?? [], [accsQ.data]);
+  const accounts = useMemo(() => (accsQ.data ?? []).filter(isZeroBasedCashAccount), [accsQ.data]);
+  const legacyAllocations = useMemo(
+    () => allocations.filter((a) => !isZeroBasedCashAccount({ type: a.accounts?.type ?? '' })),
+    [allocations],
+  );
+  const eligibleAllocations = useMemo(
+    () => allocations.filter((a) => isZeroBasedCashAccount({ type: a.accounts?.type ?? '' })),
+    [allocations],
+  );
+  const hasLegacyUnassigned = legacyAllocations.some((row) => !row.accounts);
+  const legacyTotal = legacyAllocations.reduce((sum, row) => sum + (row.cancelled_at ? 0 : Math.max(0, row.amount)), 0);
+  const eligibleDefaultAccountId = defaultAccountId(accounts);
+  const selectedAccountId = accounts.some((account) => account.id === accountId)
+    ? accountId
+    : eligibleDefaultAccountId;
+  const displayedAllocations = eligibleAllocations;
+  const hasExcludedAllocations = legacyAllocations.length > 0;
   const amount = parseAmount(amountText);
 
-  // The cycle balance is reconciled against the primary account, so the form
-  // pre-selects the bank rather than whatever sorts first; a wallet or card
-  // first in the list would silently mislabel where the money actually sits.
-  const selectedAccountId = accountId ?? defaultAccountId(accounts);
-
+  // Rebuild allocations grouped by the same eligible-account rule as summary.
   const grouped = useMemo(() => {
     const map = new Map<AllocationType, CycleAllocation[]>();
-    for (const a of allocations) {
+    for (const a of displayedAllocations) {
       const list = map.get(a.allocation_type) ?? [];
       list.push(a);
       map.set(a.allocation_type, list);
@@ -92,9 +104,10 @@ export default function AllocationScreen() {
     return ALLOCATION_ORDER.filter((t) => map.has(t)).map((t) => ({
       type: t,
       rows: map.get(t)!,
-      total: map.get(t)!.reduce((s, r) => s + r.amount, 0),
+      total: map.get(t)!.reduce((s, r) => s + (r.cancelled_at ? 0 : r.amount), 0),
     }));
-  }, [allocations]);
+  }, [displayedAllocations]);
+
 
   async function submit() {
     setErr(null);
@@ -105,6 +118,10 @@ export default function AllocationScreen() {
       return;
     }
     try {
+      if (!selectedAccountId) {
+        setErr('Pilih rekening bank atau e-wallet untuk alokasi.');
+        return;
+      }
       await createAlloc.mutateAsync({
         householdId,
         cycleId,
@@ -148,6 +165,7 @@ export default function AllocationScreen() {
 
         {summary && (
           <View style={styles.summary}>
+            <Text style={styles.summarySub}>Sumber dan alokasi hanya menghitung rekening bank serta e-wallet.</Text>
             <SummaryRow label="Total Sumber Dana" value={summary.sourceFunds.total} />
             <Text style={styles.summarySub}>
               Income {formatRupiah(summary.sourceFunds.operatingIncome)} · Pendanaan{' '}
@@ -172,6 +190,16 @@ export default function AllocationScreen() {
                 </Text>
               </>
             )}
+          </View>
+        )}
+
+        {hasExcludedAllocations && (
+          <View style={styles.legacyNotice}>
+            <Text style={styles.legacyTitle}>Alokasi lama di luar saldo Zero-Based</Text>
+            <Text style={styles.legacyText}>
+              {hasLegacyUnassigned ? 'Ada alokasi tanpa akun atau akun non-kas; ' : 'Ada alokasi pada akun non-kas; '}
+              {formatRupiah(legacyTotal)} tidak dihitung dalam total kas. Data historis tetap tersimpan.
+            </Text>
           </View>
         )}
 
@@ -268,7 +296,11 @@ export default function AllocationScreen() {
                   </Pressable>
                 );
               })}
-              {accounts.length === 0 && <Text style={styles.muted}>Memuat akun…</Text>}
+              {accounts.length === 0 && (
+                <Text style={styles.muted}>
+                  {accsQ.isLoading ? 'Memuat akun…' : 'Tambahkan rekening bank atau e-wallet terlebih dahulu.'}
+                </Text>
+              )}
             </View>
 
             <PrimaryButton
@@ -400,6 +432,9 @@ const styles = StyleSheet.create({
   rowMeta: { color: Colors.textMuted, fontSize: FontSize.caption },
   rowAmount: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600', fontVariant: ['tabular-nums'] },
   rowDelete: { color: Colors.pendingText, fontSize: FontSize.caption, fontWeight: '600' },
+  legacyNotice: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12, gap: 4 },
+  legacyTitle: { color: Colors.pendingText, fontSize: FontSize.body, fontWeight: '700' },
+  legacyText: { color: Colors.pendingText, fontSize: FontSize.caption, lineHeight: 18 },
   errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
   errText: { color: Colors.pendingText, fontSize: FontSize.body },
 });

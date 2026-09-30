@@ -205,12 +205,12 @@ describe('account helpers and presentation rules (Flow J)', () => {
       expect(defaultAccountId(sorted)).toBe('bank');
     });
 
-    it('falls back to the first account when there is no bank', () => {
+    it('returns null rather than selecting an invalid primary when there is no bank', () => {
       const noBank = [
         { id: 'wallet', name: 'ShopeePay', type: 'E_WALLET', sort_order: 1 },
         { id: 'cash', name: 'Tunai', type: 'CASH', sort_order: 2 },
       ];
-      expect(defaultAccountId(sortAccounts(noBank))).toBe('wallet');
+      expect(defaultAccountId(sortAccounts(noBank))).toBeNull();
     });
 
     it('returns null when there are no accounts at all', () => {

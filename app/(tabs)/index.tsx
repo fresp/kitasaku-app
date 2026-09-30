@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Plus from 'lucide-react-native/icons/plus';
@@ -11,7 +11,7 @@ import Eye from 'lucide-react-native/icons/eye';
 import X from 'lucide-react-native/icons/x';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
-import { calcCashflow, useActiveCycle, useCycleReconciliation, useTransactions, useZeroBasedSummary } from '../../lib/queries';
+import { calcCashflow, useActiveCycle, useBankAccounts, useCycleReconciliation, useHomeCashBalance, useTransactions, useUpdateCyclePrimaryAccount, useZeroBasedSummary } from '../../lib/queries';
 import { formatShortDate } from '../../lib/zero-based';
 import { cycleRangeLabel, memberInitials } from '../../lib/profile';
 import { formatRupiah } from '../../lib/format';
@@ -81,6 +81,9 @@ export default function HomeScreen() {
 
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
+  const bankAccountsQ = useBankAccounts(householdId);
+  const updatePrimaryAccount = useUpdateCyclePrimaryAccount();
+  const primaryAccount = bankAccountsQ.data?.find((account) => account.id === cycleQ.data?.primary_account_id);
   const txnsQ = useTransactions(householdId, cycleId);
   // The summary is still used by the cycle selector to route a funding gap to
   // its explanation screen. The Home hero itself is intentionally lighter:
@@ -88,6 +91,7 @@ export default function HomeScreen() {
   // own screen.
   const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
   const reconciliationQ = useCycleReconciliation(householdId, cycleId);
+  const homeCashQ = useHomeCashBalance(householdId, cycleQ.data, txnsQ.data ?? []);
 
   // This screen used to fall back to `lib/mockData` whenever a live query had
   // not resolved — which is not a rare state but the *normal* one just after
@@ -95,25 +99,40 @@ export default function HomeScreen() {
   // amounts presented as their own. There is no longer anything to fall back
   // to: a failed read shows an error, and a missing cycle shows the honest
   // empty state below.
-  const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError || reconciliationQ.isError;
+  const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError || reconciliationQ.isError || homeCashQ.isError;
   const retryAll = () => {
     cycleQ.refetch();
     txnsQ.refetch();
     summaryQ.refetch();
+    reconciliationQ.refetch();
+    homeCashQ.refetch();
+  };
+  const loadingCash = !!cycleId && (!!txnsQ.isLoading || homeCashQ.isLoading);
+  const refreshHome = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        cycleQ.refetch(),
+        txnsQ.refetch(),
+        summaryQ.refetch(),
+        reconciliationQ.refetch(),
+        homeCashQ.refetch(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const txns = useMemo(() => txnsQ.data ?? [], [txnsQ.data]);
-  const flow = useMemo(() => calcCashflow(txns.filter((txn) => txn.status !== 'CANCELLED')), [txns]);
-  const liveTotals = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    for (const txn of txns) {
-      if (txn.status !== 'PAID') continue;
-      if (txn.direction === 'INCOME') income += txn.actual_amount;
-      else expense += txn.actual_amount;
+  const flow = useMemo(() => calcCashflow(txns, cycleQ.data?.primary_account_id), [txns, cycleQ.data?.primary_account_id]);
+  const selectPrimaryAccount = async (accountId: string) => {
+    if (!householdId || !cycleId) return;
+    try {
+      await updatePrimaryAccount.mutateAsync({ householdId, cycleId, accountId });
+    } catch (error: any) {
+      Alert.alert('Gagal memilih rekening primer', error?.message ?? 'Coba lagi.');
     }
-    return { income, expense };
-  }, [txns]);
+  };
 
   // The home feed is a glance, not a second ledger. Three rows keep the next
   // action visible without making the first screen feel like a report.
@@ -124,10 +143,15 @@ export default function HomeScreen() {
   // un-cleared salary, and "Gaji Bulanan belum dibayar" is not a sentence this
   // screen should say.
   const unpaidCount = flow.unpaidExpenseCount;
-  const income = liveTotals.income;
-  const expense = liveTotals.expense;
-  const actualCash = failed ? 0 : flow.actualCash;
-  const projectedRemaining = failed ? 0 : flow.projectedRemaining;
+  const numbersUnavailable = failed || (householdId !== undefined && (!cycleQ.data || txnsQ.isLoading));
+  const income = numbersUnavailable ? null : flow.income;
+  const expense = numbersUnavailable ? null : flow.expense;
+  const balances = homeCashQ.data;
+  const actualCash = numbersUnavailable || loadingCash || homeCashQ.isLoading || homeCashQ.isError ? null : balances?.actualBalance ?? null;
+  const projectedRemaining = numbersUnavailable || loadingCash || homeCashQ.isLoading || homeCashQ.isError ? null : balances?.projectedBalance ?? null;
+  const unanchoredMovement = numbersUnavailable || loadingCash || homeCashQ.isError ? null : flow.actualCash;
+  const cycleMovementLabel = balances?.openingStated == null ? 'Pergerakan bersih siklus' : 'Saldo akun saat ini';
+  const amountLabel = (value: number | null) => value === null ? '—' : signedRupiah(value);
 
   const todayISO = new Date().toISOString().slice(0, 10);
   const rangeLabel = cycleRangeLabel(cycleQ.data?.start_date, cycleQ.data?.end_date, todayISO);
@@ -150,12 +174,8 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing || txnsQ.isFetching || summaryQ.isFetching}
-            onRefresh={async () => {
-              setRefreshing(true);
-              await Promise.all([cycleQ.refetch(), txnsQ.refetch(), summaryQ.refetch()]);
-              setRefreshing(false);
-            }}
+            refreshing={refreshing || txnsQ.isFetching || summaryQ.isFetching || homeCashQ.isFetching}
+            onRefresh={refreshHome}
           />
         }
       >
@@ -213,24 +233,64 @@ export default function HomeScreen() {
         {/* Shown above the hero on purpose: if the read failed, every number
             below it is a zero that means "unknown", not "nothing". */}
         {failed && householdId && (
-          <QueryError onRetry={retryAll} retrying={txnsQ.isFetching || cycleQ.isFetching} />
+          <QueryError onRetry={retryAll} retrying={txnsQ.isFetching || cycleQ.isFetching || homeCashQ.isFetching} />
+        )}
+        {!failed && loadingCash && householdId && (
+          <Text style={styles.empty}>Memuat saldo dan pergerakan siklus…</Text>
+        )}
+        {!failed && homeCashQ.isFetching && homeCashQ.data && householdId && (
+          <Text style={styles.empty}>Memperbarui saldo…</Text>
         )}
 
         <Pressable onPress={() => router.push('/allocation')} style={styles.hero}>
           <View style={styles.heroLabelRow}>
-            <Text style={styles.heroLabel}>SALDO KAS RIIL</Text>
+            <Text style={styles.heroLabel}>{actualCash === null ? 'KAS SIKLUS' : 'SALDO KAS RIIL'}</Text>
             <Eye size={15} color="#AEBCCD" />
           </View>
-          <Text style={styles.heroAmount}>{signedRupiah(actualCash)}</Text>
-          <Text style={styles.heroHelper}>Estimasi sisa akhir {signedRupiah(projectedRemaining)}</Text>
+          <View style={styles.primarySetup}>
+            <Text style={styles.accountCaption}>
+              {primaryAccount ? `Acuan: ${primaryAccount.name}` : 'Pilih rekening primer untuk melihat saldo akun.'}
+            </Text>
+            {(bankAccountsQ.data ?? []).length > 0 ? (
+              <View style={styles.accountChoices}>
+                {(bankAccountsQ.data ?? []).map((account) => (
+                  <Pressable
+                    key={account.id}
+                    disabled={updatePrimaryAccount.isPending || account.id === primaryAccount?.id}
+                    onPress={() => selectPrimaryAccount(account.id)}
+                    style={[styles.accountChoice, account.id === primaryAccount?.id && styles.accountChoiceActive]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih ${account.name} sebagai rekening primer`}
+                    accessibilityState={{ selected: account.id === primaryAccount?.id }}
+                  >
+                    <Text style={styles.accountChoiceText}>{account.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <Pressable onPress={() => router.push('/manage-accounts')}>
+                <Text style={styles.accountChoiceText}>Tambah rekening bank</Text>
+              </Pressable>
+            )}
+          </View>
+          <Text style={styles.heroAmount}>{primaryAccount ? amountLabel(actualCash) : '—'}</Text>
+          <Text style={styles.heroHelper}>
+            {primaryAccount
+              ? actualCash === null
+                ? unanchoredMovement === null
+                  ? 'Saldo dan pergerakan belum tersedia'
+                  : `${cycleMovementLabel}: ${signedRupiah(unanchoredMovement)} · saldo awal belum direkonsiliasi`
+                : `Estimasi akhir siklus ${amountLabel(projectedRemaining)}`
+              : 'Saldo belum tersedia'}
+          </Text>
           <View style={styles.heroRule} />
           <View style={styles.statsRow}>
             <View style={styles.stat}>
-              <Text style={styles.incomeValue}>{formatRupiah(income)}</Text>
+              <Text style={styles.incomeValue}>{income === null ? '—' : formatRupiah(income)}</Text>
               <Text style={styles.statLabel}>Masuk</Text>
             </View>
             <View style={styles.stat}>
-              <Text style={styles.expenseValue}>− {formatRupiah(expense)}</Text>
+              <Text style={styles.expenseValue}>{expense === null ? '—' : `− ${formatRupiah(expense)}`}</Text>
               <Text style={styles.statLabel}>Keluar</Text>
             </View>
           </View>
@@ -435,6 +495,12 @@ const styles = StyleSheet.create({
   hero: { backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16 },
   heroLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
   heroLabel: { color: '#AEBCCD', fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.7 },
+  accountCaption: { color: '#AEBCCD', fontSize: FontSize.caption, marginBottom: 4 },
+  primarySetup: { gap: 8, marginBottom: 6 },
+  accountChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  accountChoice: { borderWidth: 1, borderColor: '#526276', borderRadius: Radius.pill, paddingHorizontal: 10, paddingVertical: 6 },
+  accountChoiceActive: { backgroundColor: '#526276', borderColor: '#AEBCCD' },
+  accountChoiceText: { color: Colors.white, fontSize: FontSize.caption, fontWeight: '600' },
   heroAmount: { color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
   heroHelper: { color: '#AEBCCD', fontSize: FontSize.caption, marginTop: 3 },
   heroRule: { height: 1, backgroundColor: '#2E3E51', marginVertical: 14 },
