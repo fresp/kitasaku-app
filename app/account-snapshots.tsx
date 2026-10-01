@@ -33,20 +33,32 @@ export default function AccountSnapshotsScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = accounts.find((account) => account.id === selectedId) ?? accounts[0] ?? null;
   const saved = snapshotsQ.data?.find((snapshot) => snapshot.account_id === selected?.id);
-  const [text, setText] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const cycleId = cycleQ.data?.id ?? null;
-  const [formContext, setFormContext] = useState({ cycleId, accountId: selected?.id ?? null });
+  const contextKey = `${cycleId ?? ''}:${selected?.id ?? ''}`;
+  const [form, setForm] = useState({ contextKey, text: '', editing: false, error: null as string | null });
+  const formIsCurrent = form.contextKey === contextKey;
+  const text = formIsCurrent ? form.text : '';
+  const editing = formIsCurrent && form.editing;
+  const error = formIsCurrent ? form.error : null;
 
-  useEffect(() => {
-    const accountId = selected?.id ?? null;
-    if (formContext.cycleId === cycleId && formContext.accountId === accountId) return;
-    setFormContext({ cycleId, accountId });
-    setText('');
-    setEditing(false);
-    setError(null);
-  }, [cycleId, selected?.id, formContext.cycleId, formContext.accountId]);
+  function updateForm(values: Partial<{ text: string; editing: boolean; error: string | null }>) {
+    setForm((current) => ({
+      contextKey,
+      text: values.text !== undefined ? values.text : current.contextKey === contextKey ? current.text : '',
+      editing: values.editing !== undefined ? values.editing : current.contextKey === contextKey ? current.editing : false,
+      error: Object.prototype.hasOwnProperty.call(values, 'error') ? values.error ?? null : current.contextKey === contextKey ? current.error : null,
+    }));
+  }
+
+  function selectAccount(accountId: string) {
+    setSelectedId(accountId);
+    const nextAccount = accounts.find((account) => account.id === accountId);
+    setForm({ contextKey: `${cycleId ?? ''}:${nextAccount?.id ?? ''}`, text: '', editing: false, error: null });
+  }
+
+  function beginEditing() {
+    setForm({ contextKey, text: String(saved?.closing_stated ?? ''), editing: true, error: null });
+  }
 
   const canEdit = !!householdId && !!cycleId && !!selected
     && !cycleQ.isLoading && !cycleQ.isError
@@ -56,36 +68,21 @@ export default function AccountSnapshotsScreen() {
   const amountError = editing && text.length > 0 && parseAmount(text) === null;
   const canSave = canEdit && editing && closing !== null && !amountError && !saveSnapshot.isPending;
 
-  function selectAccount(accountId: string) {
-    setSelectedId(accountId);
-    setText('');
-    setEditing(false);
-    setError(null);
-  }
-
-  function beginEditing() {
-    setText(String(saved?.closing_stated ?? ''));
-    setEditing(true);
-    setError(null);
-  }
-
   async function submit() {
-    setError(null);
+    updateForm({ error: null });
     if (!householdId || !cycleId || !selected) {
-      setError('Pilih rekening kas dan pastikan ada siklus aktif.');
+      updateForm({ error: 'Pilih rekening kas dan pastikan ada siklus aktif.' });
       return;
     }
     if (!canSave || closing === null) {
-      setError('Masukkan saldo akhir yang benar-benar dinyatakan sebagai bilangan bulat yang aman.');
+      updateForm({ error: 'Masukkan saldo akhir yang benar-benar dinyatakan sebagai bilangan bulat yang aman.' });
       return;
     }
     try {
       await saveSnapshot.mutateAsync({ householdId, cycleId, accountId: selected.id, closingStated: closing });
-      setEditing(false);
-      setText('');
-      setError(null);
+      updateForm({ editing: false, text: '', error: null });
     } catch (e: any) {
-      setError(e?.message ?? 'Snapshot saldo belum tersimpan.');
+      updateForm({ error: e?.message ?? 'Snapshot saldo belum tersimpan.' });
     }
   }
 
@@ -112,7 +109,7 @@ export default function AccountSnapshotsScreen() {
             <Text style={styles.note}>Saldo akhir tersimpan · {new Date(saved.noted_at).toLocaleDateString('id-ID')}</Text>
             <SecondaryButton label="Perbarui saldo yang dinyatakan" onPress={canEdit && !saveSnapshot.isPending ? beginEditing : undefined} />
           </> : <>
-            <TextInput value={text} onChangeText={(value) => { setText(value); setEditing(true); setError(null); }} keyboardType="number-pad" placeholder="Masukkan saldo akhir" placeholderTextColor={Colors.textMuted} style={styles.input} editable={canEdit && !saveSnapshot.isPending} />
+            <TextInput value={text} onChangeText={(value) => updateForm({ text: value, editing: true, error: null })} keyboardType="number-pad" placeholder="Masukkan saldo akhir" placeholderTextColor={Colors.textMuted} style={styles.input} editable={canEdit && !saveSnapshot.isPending} />
             <Text style={styles.note}>Tidak ada angka saldo yang akan dibuat otomatis dari transaksi.</Text>
             {amountError && <Text style={styles.error}>Nominal harus berupa bilangan bulat yang aman.</Text>}
             {error && <Text style={styles.error}>{error}</Text>}

@@ -12,8 +12,8 @@ function txn(overrides: Partial<Txn>): Txn {
   };
 }
 
-describe('primary-account Home cashflow', () => {
-  it('counts only primary-account paid inflows and outflows', () => {
+describe('account Home cashflow', () => {
+  it('counts only selected-account paid inflows/outflows and ignores other accounts', () => {
     const result = calcCashflow([
       txn({ direction: 'INCOME', flow_type: 'OPERATING_INCOME', actual_amount: 2_000_000 }),
       txn({ actual_amount: 500_000 }),
@@ -23,7 +23,22 @@ describe('primary-account Home cashflow', () => {
     expect(result.actualCash).toBe(1_500_000);
   });
 
-  it('projects pending primary movements and counts transfer directionally', () => {
+  it('includes directional transfer movement, including for a CASH account', () => {
+    const txns = [
+      txn({ flow_type: 'TRANSFER', account_id: 'bank', counter_account_id: 'cash', planned_amount: 200_000, actual_amount: 200_000 }),
+      txn({ flow_type: 'TRANSFER', account_id: 'cash', counter_account_id: 'bank', planned_amount: 50_000, actual_amount: 50_000 }),
+      txn({ direction: 'INCOME', flow_type: 'OPERATING_INCOME', account_id: 'cash', actual_amount: 300_000 }),
+      txn({ account_id: 'card', actual_amount: 900_000 }),
+    ];
+    const cash = calcCashflow(txns, 'cash');
+    expect(cash.transferIn).toBe(200_000);
+    expect(cash.transferOut).toBe(50_000);
+    expect(cash.actualCash).toBe(450_000);
+    expect(cash.income + cash.transferIn).toBe(500_000);
+    expect(cash.expense + cash.transferOut).toBe(50_000);
+  });
+
+  it('projects pending movements and counts transfer directionally', () => {
     const result = calcCashflow([
       txn({ direction: 'INCOME', flow_type: 'OPERATING_INCOME', status: 'PENDING', planned_amount: 3_000_000 }),
       txn({ status: 'PENDING', planned_amount: 400_000 }),
@@ -38,24 +53,18 @@ describe('primary-account Home cashflow', () => {
     expect(result.pendingIncomeCount).toBe(1);
   });
 
-  it('exposes paid flow totals and computes an absolute balance only from an opening anchor', () => {
+  it('computes an absolute balance only from a stated opening anchor', () => {
     const result = calcCashflow([
       txn({ direction: 'INCOME', flow_type: 'OPERATING_INCOME', actual_amount: 2_000_000 }),
       txn({ flow_type: 'EXPENSE', actual_amount: 500_000 }),
     ], 'bank');
     expect(result.income).toBe(2_000_000);
     expect(result.expense).toBe(500_000);
-    expect(homeCashBalances(result, 10_000_000)).toEqual({
-      actualBalance: 11_500_000,
-      projectedBalance: 11_500_000,
-    });
-    expect(homeCashBalances(result, null)).toEqual({
-      actualBalance: null,
-      projectedBalance: null,
-    });
+    expect(homeCashBalances(result, 10_000_000)).toEqual({ actualBalance: 11_500_000, projectedBalance: 11_500_000 });
+    expect(homeCashBalances(result, null)).toEqual({ actualBalance: null, projectedBalance: null });
   });
 
-  it('ignores cancelled transactions and all cash movement when primary is unset', () => {
+  it('ignores cancelled transactions and keeps movement zero when no account is selected', () => {
     const result = calcCashflow([
       txn({ status: 'CANCELLED', actual_amount: 10_000 }),
       txn({ actual_amount: 99_000 }),
@@ -65,5 +74,3 @@ describe('primary-account Home cashflow', () => {
     expect(result.paidCount).toBe(1);
   });
 });
-
-

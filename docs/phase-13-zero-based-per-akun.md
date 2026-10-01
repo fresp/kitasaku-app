@@ -4,7 +4,7 @@ Dokumen ini menjawab satu pertanyaan yang muncul di akhir Phase 12: **apakah
 siklus sebaiknya zero-based per akun, bukan hanya per rumah tangga?** Dokumen ini
 juga memuat **grilling** — pencarian bug/grey area — atas model tersebut.
 
-Status aktual (2026-10-01): fondasi Phase 13 sudah tersedia pada kode dan migration lokal: `TRANSFER`/`counter_account_id`, tabel aset/valuasi, jalur tulis asset allocation/release, kebijakan sweep, agregasi Zero-Based kas, dan ringkasan per akun beserta snapshot saldo yang dinyatakan. Tes unit mencakup sejumlah kontrak domain, tetapi belum memverifikasi seluruh behavior lewat Supabase lokal/remote. Migration 026 untuk guard bentuk cash movement dan pengecualian CASH pada sweep masih berupa pekerjaan; status remote Supabase tidak diverifikasi.
+Status aktual (2026-10-01): fondasi Phase 13 sudah tersedia pada kode dan migration lokal: `TRANSFER`/`counter_account_id`, tabel aset/valuasi, jalur tulis asset allocation/release, kebijakan sweep, agregasi Zero-Based kas, dan ringkasan per akun beserta snapshot saldo yang dinyatakan. Tes unit mencakup sejumlah kontrak domain, tetapi belum memverifikasi seluruh behavior lewat Supabase lokal/remote. Migration 026 tercatat di repo untuk guard bentuk cash movement dan pengecualian CASH pada sweep; penerapan pada Supabase remote tidak diverifikasi.
 
 Bagian berikut mempertahankan keputusan dan temuan historis. Checklist yang ditandai selesai adalah catatan pada tanggalnya; klaim di bagian grilling bahwa fitur tertentu belum ada adalah keadaan saat dokumen ditulis, bukan daftar status terkini.
 

@@ -12,7 +12,7 @@ Bagian di bawah mempertahankan alasan dan keputusan historis. Rekomendasi serta 
 - Penutupan menyimpan snapshot, adjustment, dan sweep secara atomik melalui RPC. Delta negatif membuat transaksi penyesuaian dan alokasi `OTHER`; delta nullable tetap tidak diketahui bila opening anchor tidak tersedia.
 - Opening akun primer menggunakan rekonsiliasi pada siklus terdahulu paling baru hanya untuk akun yang sama; tidak ada fallback ke siklus lebih lama atau akun lain.
 - Pending, transaksi tanpa akun, dan transaksi primer non-siklus menjadi isu yang ditampilkan/diblokir dalam pratinjau. Push H-7/H-3 belum diimplementasikan.
-- Migration lokal 025 mengaktifkan snapshot saldo sekunder BANK/E_WALLET. Perubahan migration 026 untuk mengecualikan CASH dari sweep dan memperketat bentuk cash-movement masih dalam pengembangan/static review; belum diterapkan.
+- Migration 025 mengaktifkan snapshot saldo sekunder BANK/E_WALLET. Migration 026 tercatat di repo dan menambahkan guard bentuk cash-movement serta mengecualikan CASH dari sweep; penerapan pada Supabase remote belum diverifikasi.
 - Status di atas merujuk pada kode dan migration lokal saja, bukan deployment remote.
 
 ---

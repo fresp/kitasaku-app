@@ -24,9 +24,9 @@ import {
   validateAccountNumber,
 } from './account';
 import {
+  accountOpeningBalanceFromPriorClosing,
   accountZeroBased,
   calculateZeroBasedSummary,
-  openingBalanceFromPriorReconciliation,
   canMarkAsPaid,
   defaultFlowType,
   ledgerDisplayAmount,
@@ -335,6 +335,26 @@ export function useBankAccounts(householdId: string | undefined) {
         .eq('household_id', householdId!)
         .eq('type', 'BANK')
         .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Account[];
+    },
+  });
+}
+
+export function useHomeCashAccounts(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['home-cash-accounts', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Account[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb
+        .from('accounts')
+        .select('*')
+        .eq('household_id', householdId!)
+        .eq('is_active', true)
+        .in('type', ['BANK', 'E_WALLET', 'CASH'])
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
       if (error) throw error;
@@ -864,7 +884,7 @@ export function useAccountZeroBasedSummary(
       if (!accountData || !isZeroBasedCashAccount(accountData)) {
         throw new Error('Zero-Based hanya tersedia untuk rekening bank dan e-wallet.');
       }
-      const [txnsResult, allocationsResult, cycleResult, snapshotResult] = await Promise.all([
+      const [txnsResult, allocationsResult, cycleResult, snapshotResult, currentReconciliationResult] = await Promise.all([
         sb.from('transactions')
           .select('account_id, counter_account_id, flow_type, direction, planned_amount, actual_amount, status, obligation_id')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
@@ -875,11 +895,14 @@ export function useAccountZeroBasedSummary(
           .eq('household_id', householdId!).eq('id', cycleId!).single(),
         sb.from('cycle_account_snapshots').select('closing_stated')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!).eq('account_id', accountId!).maybeSingle(),
+        sb.from('cycle_reconciliations').select('account_id, closing_stated')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!).maybeSingle(),
       ]);
       if (txnsResult.error) throw txnsResult.error;
       if (allocationsResult.error) throw allocationsResult.error;
       if (cycleResult.error) throw cycleResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
+      if (currentReconciliationResult.error) throw currentReconciliationResult.error;
       const cycle = cycleResult.data;
       const { data: priorCycles, error: priorCyclesError } = await sb.from('cycles')
         .select('id, end_date').eq('household_id', householdId!)
@@ -887,28 +910,29 @@ export function useAccountZeroBasedSummary(
       if (priorCyclesError) throw priorCyclesError;
       let openingStated: number | null = null;
       const priorCycle = priorCycles?.[0];
-      if (priorCycle) {
+      if (priorCycle && accountId) {
         const [{ data: primaryAnchor, error: primaryAnchorError }, { data: secondaryAnchor, error: secondaryAnchorError }] = await Promise.all([
           sb.from('cycle_reconciliations').select('account_id, closing_stated')
             .eq('household_id', householdId!).eq('cycle_id', priorCycle.id).maybeSingle(),
           sb.from('cycle_account_snapshots').select('closing_stated')
-            .eq('household_id', householdId!).eq('cycle_id', priorCycle.id).eq('account_id', accountId!).maybeSingle(),
+            .eq('household_id', householdId!).eq('cycle_id', priorCycle.id).eq('account_id', accountId).maybeSingle(),
         ]);
         if (primaryAnchorError) throw primaryAnchorError;
         if (secondaryAnchorError) throw secondaryAnchorError;
-        const anchorAmount = primaryAnchor?.account_id === accountId
-          ? primaryAnchor?.closing_stated
-          : secondaryAnchor?.closing_stated;
-        const anchor = anchorAmount == null ? null : { closing_stated: anchorAmount };
-        if (anchor?.closing_stated != null) {
-          openingStated = openingBalanceFromPriorReconciliation(accountId!, cycle.start_date, [{
-            cycleId: priorCycle.id,
-            endDate: priorCycle.end_date,
-            accountId: accountId!,
-            closingStated: anchor.closing_stated,
-          }]);
-        }
+        openingStated = accountOpeningBalanceFromPriorClosing(accountId, cycle.start_date,
+          primaryAnchor?.account_id === accountId && primaryAnchor.closing_stated != null
+            ? [{ cycleId: priorCycle.id, endDate: priorCycle.end_date, accountId, closingStated: primaryAnchor.closing_stated }]
+            : [],
+          secondaryAnchor?.closing_stated != null
+            ? [{ cycleId: priorCycle.id, endDate: priorCycle.end_date, accountId, closingStated: secondaryAnchor.closing_stated }]
+            : [],
+        );
       }
+      const currentReconciliation = currentReconciliationResult.data;
+      const currentSnapshot = snapshotResult.data;
+      const closingStated = currentReconciliation?.account_id === accountId
+        ? currentReconciliation?.closing_stated ?? null
+        : currentSnapshot?.closing_stated ?? null;
       const movement = accountZeroBased({
         accountId: accountId!,
         transactions: (txnsResult.data ?? []) as AccountZeroBasedTransaction[],
@@ -920,7 +944,7 @@ export function useAccountZeroBasedSummary(
         ...movement,
         allocations,
         openingStated,
-        closingStated: snapshotResult.data?.closing_stated ?? null,
+        closingStated,
         // A movement projection is not an account balance and does not infer
         // the period's balance when either stated endpoint is unknown.
         projectedClosingStated: openingStated === null ? null : openingStated + movement.netCashflow,
@@ -989,6 +1013,14 @@ export function useAllocateObligation() {
     onSuccess: () => invalidateMoneyKeys(qc),
   });
 }
+
+
+/**
+ * Opens a cycle: the moment a plan becomes binding, so everything the plan
+ * commits to is materialised here — not later, not implicitly.
+ */
+
+
 
 /**
  * Opens a cycle: the moment a plan becomes binding, so everything the plan
@@ -1060,12 +1092,12 @@ export function useHomeCashBalance(
   householdId: string | undefined,
   cycle: Cycle | null | undefined,
   transactions: CashflowTxn[],
+  accountId: string | undefined,
 ) {
   const query = useQuery({
-    queryKey: ['home-cash-balance', householdId, cycle?.id, cycle?.primary_account_id],
-    enabled: !!householdId && !!cycle?.id && !!cycle.primary_account_id,
+    queryKey: ['home-cash-balance', householdId, cycle?.id, accountId],
+    enabled: !!householdId && !!cycle?.id && !!accountId,
     queryFn: async () => {
-      const accountId = cycle!.primary_account_id!;
       const sb = requireSupabase();
       const { data: priorCycles, error: cycleError } = await sb.from('cycles')
         .select('id, end_date').eq('household_id', householdId!)
@@ -1074,21 +1106,38 @@ export function useHomeCashBalance(
       const prior = priorCycles?.[0];
       let openingStated: number | null = null;
       if (prior) {
-        const { data: anchor, error: anchorError } = await sb.from('cycle_reconciliations')
-          .select('closing_stated, account_id').eq('household_id', householdId!).eq('cycle_id', prior.id).maybeSingle();
-        if (anchorError) throw anchorError;
-        if (anchor?.account_id === accountId) openingStated = anchor.closing_stated ?? null;
+        const [{ data: reconciliation, error: reconciliationError }, { data: snapshot, error: snapshotError }] = await Promise.all([
+          sb.from('cycle_reconciliations').select('closing_stated, account_id')
+            .eq('household_id', householdId!).eq('cycle_id', prior.id).maybeSingle(),
+          sb.from('cycle_account_snapshots').select('closing_stated')
+            .eq('household_id', householdId!).eq('cycle_id', prior.id).eq('account_id', accountId!).maybeSingle(),
+        ]);
+        if (reconciliationError) throw reconciliationError;
+        if (snapshotError) throw snapshotError;
+        openingStated = accountOpeningBalanceFromPriorClosing(accountId!, cycle!.start_date,
+          reconciliation?.account_id === accountId && reconciliation?.closing_stated != null
+            ? [{ cycleId: prior.id, endDate: prior.end_date, accountId: accountId!, closingStated: reconciliation.closing_stated }]
+            : [],
+          snapshot?.closing_stated != null
+            ? [{ cycleId: prior.id, endDate: prior.end_date, accountId: accountId!, closingStated: snapshot.closing_stated }]
+            : [],
+        );
       }
-      const { data: reconciliation, error: reconciliationError } = await sb.from('cycle_reconciliations')
-        .select('closing_stated, account_id').eq('household_id', householdId!).eq('cycle_id', cycle!.id).maybeSingle();
+      const [{ data: reconciliation, error: reconciliationError }, { data: snapshot, error: snapshotError }] = await Promise.all([
+        sb.from('cycle_reconciliations').select('closing_stated, account_id')
+          .eq('household_id', householdId!).eq('cycle_id', cycle!.id).maybeSingle(),
+        sb.from('cycle_account_snapshots').select('closing_stated')
+          .eq('household_id', householdId!).eq('cycle_id', cycle!.id).eq('account_id', accountId!).maybeSingle(),
+      ]);
       if (reconciliationError) throw reconciliationError;
-      const closingStated = reconciliation?.account_id === accountId
+      if (snapshotError) throw snapshotError;
+      const closingStated = reconciliation?.account_id === accountId && reconciliation?.closing_stated != null
         ? reconciliation.closing_stated
-        : null;
+        : snapshot?.closing_stated ?? null;
       return { openingStated, closingStated };
     },
   });
-  const movement = calculateHomeCashflow(transactions, cycle?.primary_account_id);
+  const movement = calculateHomeCashflow(transactions, accountId);
   const balances = homeCashBalances(movement, query.data?.openingStated ?? null);
   return {
     ...query,
@@ -1135,7 +1184,7 @@ export function useCycleReconciliationPreview(
         throw new Error('Siklus ini belum memiliki akun primer BANK.');
       }
 
-      const [{ data: accountData, error: accountErr }, { data: txnData, error: txnErr }, { count: outsideCount, error: outsideErr }, { data: priorCycleData, error: priorCycleErr }] = await Promise.all([
+      const [{ data: accountData, error: accountErr }, { data: txnData, error: txnErr }, { count: outsideCount, error: outsideErr }, { data: priorCycleData, error: priorCycleErr }, { data: currentReconciliation, error: currentReconciliationErr }] = await Promise.all([
         sb.from('accounts').select('*').eq('id', cycle.primary_account_id).eq('household_id', householdId!).single(),
         sb.from('transactions')
           .select('account_id, counter_account_id, direction, flow_type, planned_amount, actual_amount, status, obligation_id')
@@ -1146,32 +1195,38 @@ export function useCycleReconciliationPreview(
         sb.from('cycles').select('id')
           .eq('household_id', householdId!).lt('end_date', cycle.start_date)
           .order('end_date', { ascending: false }).limit(1),
+        sb.from('cycle_reconciliations').select('*')
+          .eq('household_id', householdId!).eq('cycle_id', cycleId!).maybeSingle(),
       ]);
       if (accountErr) throw accountErr;
       if (txnErr) throw txnErr;
       if (outsideErr) throw outsideErr;
       if (priorCycleErr) throw priorCycleErr;
+      if (currentReconciliationErr) throw currentReconciliationErr;
 
       const primaryAccount = accountData as Account;
       const priorCycleId = (priorCycleData ?? [])[0]?.id;
       let openingStated: number | null = null;
       if (priorCycleId) {
-        const [{ data: priorCycle, error: priorCycleReadErr }, { data: priorReconciliation, error: priorReconciliationErr }] = await Promise.all([
+        const [{ data: priorCycle, error: priorCycleReadErr }, { data: priorReconciliation, error: priorReconciliationErr }, { data: priorSnapshot, error: priorSnapshotErr }] = await Promise.all([
           sb.from('cycles').select('id, end_date').eq('household_id', householdId!).eq('id', priorCycleId).single(),
           sb.from('cycle_reconciliations').select('closing_stated, account_id')
             .eq('household_id', householdId!).eq('cycle_id', priorCycleId).maybeSingle(),
+          sb.from('cycle_account_snapshots').select('closing_stated')
+            .eq('household_id', householdId!).eq('cycle_id', priorCycleId).eq('account_id', cycle.primary_account_id).maybeSingle(),
         ]);
         if (priorCycleReadErr) throw priorCycleReadErr;
         if (priorReconciliationErr) throw priorReconciliationErr;
+        if (priorSnapshotErr) throw priorSnapshotErr;
         const anchor = priorReconciliation as { closing_stated?: number; account_id?: string } | null;
-        if (anchor?.closing_stated != null && anchor.account_id) {
-          openingStated = openingBalanceFromPriorReconciliation(cycle.primary_account_id, cycle.start_date, [{
-            cycleId: priorCycle.id,
-            endDate: priorCycle.end_date,
-            accountId: anchor.account_id,
-            closingStated: anchor.closing_stated,
-          }]);
-        }
+        openingStated = accountOpeningBalanceFromPriorClosing(cycle.primary_account_id, cycle.start_date,
+          anchor?.account_id === cycle.primary_account_id && anchor.closing_stated != null
+            ? [{ cycleId: priorCycle.id, endDate: priorCycle.end_date, accountId: cycle.primary_account_id, closingStated: anchor.closing_stated }]
+            : [],
+          priorSnapshot?.closing_stated != null
+            ? [{ cycleId: priorCycle.id, endDate: priorCycle.end_date, accountId: cycle.primary_account_id, closingStated: priorSnapshot.closing_stated }]
+            : [],
+        );
       }
       // Only the immediately preceding cycle is eligible. If it has no stated
       // closing for this bank account, leave the opening unknown; do not fall
@@ -1189,7 +1244,7 @@ export function useCycleReconciliationPreview(
       if (preview.outsideCyclePrimaryCount > 0) {
         issues.push({ kind: 'OUTSIDE_CYCLE_PRIMARY', count: preview.outsideCyclePrimaryCount });
       }
-      return { cycle, reconciliation: null, primaryAccount, preview, issues };
+      return { cycle, reconciliation: currentReconciliation as CycleReconciliation | null, primaryAccount, preview, issues };
     },
   });
 }

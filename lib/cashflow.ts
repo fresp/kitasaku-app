@@ -6,13 +6,8 @@ export interface HomeCashBalances {
   projectedBalance: number | null;
 }
 
-export function homeCashBalances(
-  cashflow: Cashflow,
-  openingStated: number | null,
-): HomeCashBalances {
-  if (openingStated === null) {
-    return { actualBalance: null, projectedBalance: null };
-  }
+export function homeCashBalances(cashflow: Cashflow, openingStated: number | null): HomeCashBalances {
+  if (openingStated === null) return { actualBalance: null, projectedBalance: null };
   return {
     actualBalance: openingStated + cashflow.actualCash,
     projectedBalance: openingStated + cashflow.projectedRemaining,
@@ -48,12 +43,22 @@ export interface Cashflow {
   pendingIncomeCount: number;
 }
 
-/** Calculates cycle movement for the selected primary bank account. */
-export function calcCashflow(txns: CashflowTxn[], primaryAccountId?: string | null): Cashflow {
-  let cashIn = 0, cashOut = 0, pendingOut = 0;
-  let transferIn = 0, transferOut = 0;
-  let pendingCount = 0, paidCount = 0, unpaidExpenseCount = 0, pendingIncomeCount = 0;
-  let income = 0, expense = 0, pendingIncome = 0, pendingExpense = 0;
+/** Calculates cycle movement for one selected account. */
+export function calcCashflow(txns: CashflowTxn[], accountId?: string | null): Cashflow {
+  let cashIn = 0;
+  let cashOut = 0;
+  let pendingOut = 0;
+  let transferIn = 0;
+  let transferOut = 0;
+  let pendingCount = 0;
+  let paidCount = 0;
+  let unpaidExpenseCount = 0;
+  let pendingIncomeCount = 0;
+  let income = 0;
+  let expense = 0;
+  let pendingIncome = 0;
+  let pendingExpense = 0;
+
   for (const t of txns) {
     if (t.status === 'CANCELLED') continue;
     if (t.status === 'PENDING') {
@@ -61,29 +66,28 @@ export function calcCashflow(txns: CashflowTxn[], primaryAccountId?: string | nu
       if (t.direction === 'EXPENSE') unpaidExpenseCount += 1;
     }
     if (t.status === 'PAID') paidCount += 1;
-    if (!primaryAccountId) continue;
-
+    if (!accountId) continue;
 
     const flow = t.flow_type ?? defaultFlowType(t.direction, t.obligation_id ?? null);
     const transfer = flow === 'TRANSFER';
-    const sourceIsPrimary = t.account_id === primaryAccountId;
-    const destinationIsPrimary = transfer && t.counter_account_id === primaryAccountId;
-    if (!sourceIsPrimary && !destinationIsPrimary) continue;
+    const sourceIsAccount = t.account_id === accountId;
+    const destinationIsAccount = transfer && t.counter_account_id === accountId;
+    if (!sourceIsAccount && !destinationIsAccount) continue;
 
     const incoming = transfer
-      ? destinationIsPrimary
-      : sourceIsPrimary && ['OPERATING_INCOME', 'FINANCING_INFLOW', 'ASSET_RELEASE'].includes(flow);
+      ? destinationIsAccount
+      : sourceIsAccount && ['OPERATING_INCOME', 'FINANCING_INFLOW', 'ASSET_RELEASE'].includes(flow);
     const outgoing = transfer
-      ? sourceIsPrimary
-      : sourceIsPrimary && ['EXPENSE', 'DEBT_PAYMENT', 'ASSET_ALLOCATION'].includes(flow);
+      ? sourceIsAccount
+      : sourceIsAccount && ['EXPENSE', 'DEBT_PAYMENT', 'ASSET_ALLOCATION'].includes(flow);
     const amount = t.status === 'PAID' ? t.actual_amount : t.planned_amount;
 
     if (t.status === 'PAID') {
       if (incoming) cashIn += amount;
       if (outgoing) cashOut += amount;
       if (transfer) {
-        if (destinationIsPrimary) transferIn += amount;
-        if (sourceIsPrimary) transferOut += amount;
+        if (destinationIsAccount) transferIn += amount;
+        if (sourceIsAccount) transferOut += amount;
       } else if (incoming) income += amount;
       else if (outgoing) expense += amount;
     } else if (t.status === 'PENDING') {
@@ -97,6 +101,7 @@ export function calcCashflow(txns: CashflowTxn[], primaryAccountId?: string | nu
       }
     }
   }
+
   const actualCash = cashIn - cashOut;
   return {
     actualCash,

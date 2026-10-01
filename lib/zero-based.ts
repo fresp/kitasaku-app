@@ -68,6 +68,42 @@ export interface ZeroBasedSummary {
 }
 
 /** One transaction projected against one cash account. */
+export interface ClosingBalanceAnchor {
+  cycleId: string;
+  endDate: string;
+  accountId: string;
+  closingStated: number;
+}
+
+/** Picks a stated closing fact from the latest prior cycle for this account. */
+export function accountOpeningBalanceFromPriorClosing(
+  accountId: string,
+  currentCycleStartDate: string,
+  reconciliationAnchors: ClosingBalanceAnchor[],
+  snapshotAnchors: ClosingBalanceAnchor[],
+): number | null {
+  const reconciliation = reconciliationAnchors
+    .filter((anchor) => anchor.endDate < currentCycleStartDate)
+    .sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
+  const snapshot = snapshotAnchors
+    .filter((anchor) => anchor.endDate < currentCycleStartDate)
+    .sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
+  const latestEndDate = [reconciliation?.endDate, snapshot?.endDate]
+    .filter((endDate): endDate is string => endDate !== undefined)
+    .sort((a, b) => b.localeCompare(a))[0];
+  if (!latestEndDate) return null;
+
+  // An anchor from an older cycle cannot fill a missing fact in the latest one.
+  const matchingReconciliation = reconciliation?.endDate === latestEndDate && reconciliation.accountId === accountId
+    ? reconciliation
+    : null;
+  const matchingSnapshot = snapshot?.endDate === latestEndDate && snapshot.accountId === accountId
+    ? snapshot
+    : null;
+  const closingStated = matchingReconciliation?.closingStated ?? matchingSnapshot?.closingStated;
+  return closingStated == null ? null : normalizeAmount(closingStated);
+}
+
 export interface AccountZeroBasedTransaction {
   account_id?: string | null;
   counter_account_id?: string | null;

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { accountZeroBased, openingBalanceFromPriorReconciliation, reconciliationPreview } from '../zero-based';
+import {
+  accountOpeningBalanceFromPriorClosing,
+  accountZeroBased,
+  openingBalanceFromPriorReconciliation,
+  reconciliationPreview,
+} from '../zero-based';
 import type { ReconciliationTransaction } from '../zero-based';
 
 const txn = (overrides: Partial<ReconciliationTransaction>): ReconciliationTransaction => ({
@@ -12,6 +17,32 @@ const txn = (overrides: Partial<ReconciliationTransaction>): ReconciliationTrans
 });
 
 describe('cycle reconciliation preview', () => {
+  it('prefers the latest prior reconciliation and falls back only to that cycle snapshot', () => {
+    const reconciliations = [
+      { cycleId: 'older', endDate: '2026-07-31', accountId: 'wallet', closingStated: 700 },
+      { cycleId: 'latest', endDate: '2026-08-31', accountId: 'bank', closingStated: 900 },
+    ];
+    const snapshots = [
+      { cycleId: 'latest', endDate: '2026-08-31', accountId: 'wallet', closingStated: 800 },
+      { cycleId: 'latest', endDate: '2026-08-31', accountId: 'bank', closingStated: 850 },
+    ];
+
+    expect(accountOpeningBalanceFromPriorClosing('bank', '2026-09-01', reconciliations, snapshots)).toBe(900);
+    expect(accountOpeningBalanceFromPriorClosing('wallet', '2026-09-01', reconciliations, snapshots)).toBe(800);
+  });
+
+  it('does not skip the latest prior cycle when that cycle has no same-account closing fact', () => {
+    const reconciliations = [
+      { cycleId: 'older', endDate: '2026-07-31', accountId: 'bank', closingStated: 700 },
+      { cycleId: 'latest', endDate: '2026-08-31', accountId: 'other-bank', closingStated: 900 },
+    ];
+    const snapshots = [
+      { cycleId: 'older', endDate: '2026-07-31', accountId: 'wallet', closingStated: 600 },
+    ];
+
+    expect(accountOpeningBalanceFromPriorClosing('bank', '2026-09-01', reconciliations, snapshots)).toBeNull();
+  });
+
   it('uses the previous closing anchor only for the same account', () => {
     const anchors = [
       { cycleId: 'old', endDate: '2026-08-31', accountId: 'bank-a', closingStated: 12_000 },

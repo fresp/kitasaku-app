@@ -141,6 +141,11 @@ export function cyclePrimaryAccountId<T extends { id: string; type: string; is_a
   return prior?.id ?? defaultAccountId(accounts);
 }
 
+/** Bank, e-wallet, and physical cash accounts used for Home movement browsing. */
+export function isHomeCashAccount(account: { type: string }): boolean {
+  return account.type === 'BANK' || account.type === 'E_WALLET' || account.type === 'CASH';
+}
+
 /** Bank accounts and e-wallets are the cash accounts eligible for allocation. */
 export function isZeroBasedCashAccount(account: { type: string }): boolean {
   return account.type === 'BANK' || account.type === 'E_WALLET';
