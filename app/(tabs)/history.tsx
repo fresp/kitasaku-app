@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Search from 'lucide-react-native/icons/search';
@@ -12,7 +12,7 @@ import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
 import { QueryError } from '../../components/ui/QueryError';
 import { useAuth } from '../../lib/auth-context';
-import { useAccounts, useActiveCycle, useTransactionLedger } from '../../lib/queries';
+import { useAccounts, useActiveCycle, useHouseholdCycles, useTransactionLedger } from '../../lib/queries';
 import type { LedgerRow } from '../../lib/queries';
 import {
   filterLedger,
@@ -74,12 +74,17 @@ function statusFromParam(value: string | string[] | undefined): StatusFilter {
 
 export default function HistoryScreen() {
   const router = useRouter();
-  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
+  const { status: statusParam, cycle: cycleParam } = useLocalSearchParams<{ status?: string; cycle?: string }>();
   const { household } = useAuth();
   const householdId = household?.id;
 
   const cycleQ = useActiveCycle(householdId);
-  const cycleId = cycleQ.data?.id;
+  const cyclesQ = useHouseholdCycles(householdId);
+  const requestedCycleId = Array.isArray(cycleParam) ? cycleParam[0] : cycleParam;
+  const selectedCycle = cyclesQ.data?.find((cycle) => cycle.id === requestedCycleId)
+    ?? cycleQ.data
+    ?? null;
+  const cycleId = selectedCycle?.id;
   const accsQ = useAccounts(householdId);
   // actual mode: the ledger reports what was executed, not what was planned.
   // The *amounts on screen* come from `displayAmount` instead, so an unexecuted
@@ -90,6 +95,7 @@ export default function HistoryScreen() {
   const [direction, setDirection] = useState<DirectionFilter>('ALL');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showCycles, setShowCycles] = useState(false);
   const [visible, setVisible] = useState(PAGE_SIZE);
 
   const status = statusFromParam(statusParam);
@@ -195,6 +201,7 @@ export default function HistoryScreen() {
             refreshing={ledgerQ.isFetching}
             onRefresh={() => {
               void cycleQ.refetch();
+              void cyclesQ.refetch();
               void ledgerQ.refetch();
             }}
           />
@@ -207,13 +214,57 @@ export default function HistoryScreen() {
           </View>
         </View>
 
-        <Pressable onPress={() => router.push('/new-cycle')} style={styles.cyclePill}>
-          <Calendar size={14} color={Colors.textSecondary} />
-          <Text style={styles.cyclePillText} numberOfLines={1}>
-            {cycleQ.data?.name ?? 'Belum ada siklus aktif'}
-          </Text>
-          <ChevronRight size={14} color={Colors.textSecondary} />
-        </Pressable>
+        <View style={styles.cycleActions}>
+          <Pressable onPress={() => setShowCycles(true)} style={styles.cyclePill}>
+            <Calendar size={14} color={Colors.textSecondary} />
+            <Text style={styles.cyclePillText} numberOfLines={1}>
+              {selectedCycle?.name ?? 'Belum ada siklus'}
+            </Text>
+            <ChevronRight size={14} color={Colors.textSecondary} />
+          </Pressable>
+          <Pressable onPress={() => router.push('/new-cycle')} style={styles.newCycleButton}>
+            <Text style={styles.newCycleText}>Siklus baru</Text>
+          </Pressable>
+        </View>
+
+        <Modal visible={showCycles} transparent animationType="slide" onRequestClose={() => setShowCycles(false)}>
+          <View style={styles.sheetOverlay}>
+            <Pressable style={styles.sheetBackdrop} onPress={() => setShowCycles(false)} />
+            <View style={styles.cycleSheet}>
+              <View style={styles.sheetHandle} />
+              <View style={styles.sheetHeader}>
+                <Text style={styles.sheetTitle}>Pilih siklus</Text>
+                <Pressable onPress={() => setShowCycles(false)} hitSlop={10}>
+                  <Text style={styles.sheetClose}>Tutup</Text>
+                </Pressable>
+              </View>
+              {cyclesQ.isLoading && <Text style={styles.muted}>Memuat daftar siklus…</Text>}
+              {cyclesQ.isError && <QueryError onRetry={() => cyclesQ.refetch()} retrying={cyclesQ.isFetching} message="Daftar siklus belum bisa dibaca." />}
+              <ScrollView style={styles.cycleList}>
+                {(cyclesQ.data ?? []).map((cycle) => (
+                  <Pressable
+                    key={cycle.id}
+                    style={[styles.cycleOption, cycle.id === selectedCycle?.id && styles.cycleOptionActive]}
+                    onPress={() => {
+                      router.setParams({ cycle: cycle.id });
+                      setVisible(PAGE_SIZE);
+                      setShowCycles(false);
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cycleOptionName}>{cycle.name}{cycle.is_active ? ' · Aktif' : ''}</Text>
+                      <Text style={styles.cycleOptionDate}>{formatShortDate(cycle.start_date)} – {formatShortDate(cycle.end_date)}</Text>
+                    </View>
+                    {cycle.id === selectedCycle?.id && <Text style={styles.cycleSelected}>Dipilih</Text>}
+                  </Pressable>
+                ))}
+                {!cyclesQ.isLoading && !cyclesQ.isError && (cyclesQ.data?.length ?? 0) === 0 && (
+                  <Text style={styles.muted}>Belum ada siklus.</Text>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
 
         <View style={styles.searchRow}>
           <View style={styles.search}>
@@ -497,8 +548,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center' },
   eyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
   title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700', marginTop: 2 },
+  cycleActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cyclePill: {
+    flex: 1,
     alignSelf: 'flex-start',
+    maxWidth: '75%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -509,7 +563,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  cyclePillText: { color: Colors.textPrimary, fontSize: 12, fontWeight: '600' },
+  cyclePillText: { flex: 1, color: Colors.textPrimary, fontSize: 12, fontWeight: '600' },
+  newCycleButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, backgroundColor: Colors.brandPrimary },
+  newCycleText: { color: Colors.white, fontSize: 12, fontWeight: '700' },
+  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' },
+  sheetBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  cycleSheet: { maxHeight: '75%', backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32, gap: 12 },
+  sheetHandle: { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.borderStrong },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sheetTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
+  sheetClose: { color: Colors.brandPrimary, fontSize: 13, fontWeight: '600' },
+  cycleList: { flexGrow: 0 },
+  cycleOption: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, marginBottom: 8 },
+  cycleOptionActive: { borderColor: Colors.brandPrimary, backgroundColor: Colors.subtle },
+  cycleOptionName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  cycleOptionDate: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 3 },
+  cycleSelected: { color: Colors.brandPrimary, fontSize: FontSize.caption, fontWeight: '700' },
   searchRow: { flexDirection: 'row', gap: 8 },
   search: {
     flex: 1,

@@ -230,6 +230,21 @@ export function useActiveCycle(householdId: string | undefined) {
   });
 }
 
+export function useHouseholdCycles(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['cycles', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Cycle[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('cycles').select('*')
+        .eq('household_id', householdId!)
+        .order('start_date', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Cycle[];
+    },
+  });
+}
+
 export function useCycleAccountSnapshots(householdId: string | undefined, cycleId: string | undefined) {
   return useQuery({
     queryKey: ['account-snapshots', householdId, cycleId],
