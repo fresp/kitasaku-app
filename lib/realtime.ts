@@ -56,6 +56,13 @@ export function useHouseholdRealtime(householdId: string | undefined) {
         { event: '*', schema: 'public', table: 'cycles', filter: `household_id=eq.${householdId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['cycle'] });
+          qc.invalidateQueries({ queryKey: ['cycles'] });
+          qc.invalidateQueries({ queryKey: ['cancelled-cycles'] });
+          qc.invalidateQueries({ queryKey: ['home-cash-balance'] });
+          qc.invalidateQueries({ queryKey: ['zero-summary'] });
+          qc.invalidateQueries({ queryKey: ['reconciliation-preview'] });
+          qc.invalidateQueries({ queryKey: ['account-snapshots'] });
+          qc.invalidateQueries({ queryKey: ['installments'] });
           qc.invalidateQueries({ queryKey: ['reconciliation'] });
           qc.invalidateQueries({ queryKey: ['audit-txns'] });
           // Insight & Aset reads the cycle list directly (which cycles exist,

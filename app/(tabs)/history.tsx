@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Search from 'lucide-react-native/icons/search';
@@ -9,10 +9,11 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
+import { selectHistoryCycle } from '../../lib/cycle-history';
 import { BrandIcon } from '../../components/ui/BrandIcon';
 import { QueryError } from '../../components/ui/QueryError';
 import { useAuth } from '../../lib/auth-context';
-import { useAccounts, useActiveCycle, useHouseholdCycles, useTransactionLedger } from '../../lib/queries';
+import { useAccounts, useActiveCycle, useCancelCycle, useCancelledCycles, useHouseholdCycles, useTransactionLedger } from '../../lib/queries';
 import type { LedgerRow } from '../../lib/queries';
 import {
   filterLedger,
@@ -80,10 +81,13 @@ export default function HistoryScreen() {
 
   const cycleQ = useActiveCycle(householdId);
   const cyclesQ = useHouseholdCycles(householdId);
+  const cancelledCyclesQ = useCancelledCycles(householdId);
+  const cancelCycle = useCancelCycle();
   const requestedCycleId = Array.isArray(cycleParam) ? cycleParam[0] : cycleParam;
-  const selectedCycle = cyclesQ.data?.find((cycle) => cycle.id === requestedCycleId)
-    ?? cycleQ.data
-    ?? null;
+  const selectedCycle = selectHistoryCycle(
+    requestedCycleId, cyclesQ.data ?? [], cancelledCyclesQ.data ?? [], cycleQ.data ?? null,
+  );
+  const viewingCancelled = !!selectedCycle?.cancelled_at;
   const cycleId = selectedCycle?.id;
   const accsQ = useAccounts(householdId);
   // actual mode: the ledger reports what was executed, not what was planned.
@@ -99,6 +103,33 @@ export default function HistoryScreen() {
   const [visible, setVisible] = useState(PAGE_SIZE);
 
   const status = statusFromParam(statusParam);
+
+  const confirmCancelCycle = (cycle: NonNullable<typeof selectedCycle>) => {
+    if (!householdId || cancelCycle.isPending) return;
+    Alert.alert(
+      'Batalkan siklus?',
+      `${cycle.name} · #${cycle.id.slice(0, 8)} akan disimpan sebagai arsip batal. Seluruh rencana yang belum dieksekusi di siklus ini ikut dibatalkan. Transaksi yang sudah dieksekusi atau saldo yang pernah dicatat tidak akan dihapus; siklus dengan data tersebut akan ditolak.`,
+      [
+        { text: 'Kembali', style: 'cancel' },
+        {
+          text: 'Batalkan siklus', style: 'destructive',
+          onPress: () => {
+            void cancelCycle.mutateAsync({ householdId, cycleId: cycle.id }).then(() => {
+              setShowCycles(false);
+              router.setParams({ cycle: undefined, status: undefined });
+            }).catch((error: unknown) => {
+              const message = error instanceof Error
+                ? error.message
+                : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+                  ? error.message
+                  : 'Coba lagi setelah memuat ulang data.';
+              Alert.alert('Siklus tidak dibatalkan', message);
+            });
+          },
+        },
+      ],
+    );
+  };
 
   const setStatus = (next: StatusFilter) => {
     setVisible(PAGE_SIZE);
@@ -202,6 +233,7 @@ export default function HistoryScreen() {
             onRefresh={() => {
               void cycleQ.refetch();
               void cyclesQ.refetch();
+              void cancelledCyclesQ.refetch();
               void ledgerQ.refetch();
             }}
           />
@@ -218,7 +250,7 @@ export default function HistoryScreen() {
           <Pressable onPress={() => setShowCycles(true)} style={styles.cyclePill}>
             <Calendar size={14} color={Colors.textSecondary} />
             <Text style={styles.cyclePillText} numberOfLines={1}>
-              {selectedCycle?.name ?? 'Belum ada siklus'}
+              {selectedCycle ? `${selectedCycle.name}${viewingCancelled ? ' · Batal' : ''}` : 'Belum ada siklus'}
             </Text>
             <ChevronRight size={14} color={Colors.textSecondary} />
           </Pressable>
@@ -242,29 +274,74 @@ export default function HistoryScreen() {
               {cyclesQ.isError && <QueryError onRetry={() => cyclesQ.refetch()} retrying={cyclesQ.isFetching} message="Daftar siklus belum bisa dibaca." />}
               <ScrollView style={styles.cycleList}>
                 {(cyclesQ.data ?? []).map((cycle) => (
-                  <Pressable
+                  <View
                     key={cycle.id}
                     style={[styles.cycleOption, cycle.id === selectedCycle?.id && styles.cycleOptionActive]}
+                  >
+                    <Pressable
+                      style={styles.cycleOptionSelect}
+                      onPress={() => {
+                        router.setParams({ cycle: cycle.id });
+                        setVisible(PAGE_SIZE);
+                        setShowCycles(false);
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.cycleOptionName}>{cycle.name}{cycle.is_active ? ' · Aktif' : ''}</Text>
+                        <Text style={styles.cycleOptionDate}>
+                          {formatShortDate(cycle.start_date)} – {formatShortDate(cycle.end_date)} · #{cycle.id.slice(0, 8)}
+                        </Text>
+                      </View>
+                      {cycle.id === selectedCycle?.id && <Text style={styles.cycleSelected}>Dipilih</Text>}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => confirmCancelCycle(cycle)}
+                      disabled={cancelCycle.isPending}
+                      style={styles.cancelCycleButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Batalkan ${cycle.name}, ID ${cycle.id.slice(0, 8)}`}
+                    >
+                      <Text style={styles.cancelCycleText}>
+                        {cancelCycle.isPending ? '…' : 'Batalkan'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+                {!cyclesQ.isLoading && !cyclesQ.isError && (cyclesQ.data?.length ?? 0) === 0 && (
+                  <Text style={styles.muted}>Belum ada siklus.</Text>
+                )}
+                <Text style={styles.cancelledHeading}>Siklus dibatalkan (arsip)</Text>
+                {cancelledCyclesQ.isError && (
+                  <QueryError onRetry={() => cancelledCyclesQ.refetch()} retrying={cancelledCyclesQ.isFetching} message="Arsip siklus batal belum bisa dibaca." />
+                )}
+                {(cancelledCyclesQ.data ?? []).map((cycle) => (
+                  <Pressable
+                    key={cycle.id}
+                    style={[styles.cancelledCycleRow, cycle.id === selectedCycle?.id && styles.cycleOptionActive]}
                     onPress={() => {
-                      router.setParams({ cycle: cycle.id });
+                      router.setParams({ cycle: cycle.id, status: undefined });
                       setVisible(PAGE_SIZE);
                       setShowCycles(false);
                     }}
                   >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cycleOptionName}>{cycle.name}{cycle.is_active ? ' · Aktif' : ''}</Text>
-                      <Text style={styles.cycleOptionDate}>{formatShortDate(cycle.start_date)} – {formatShortDate(cycle.end_date)}</Text>
-                    </View>
-                    {cycle.id === selectedCycle?.id && <Text style={styles.cycleSelected}>Dipilih</Text>}
+                    <Text style={styles.cancelledCycleName}>{cycle.name}</Text>
+                    <Text style={styles.cycleOptionDate}>{formatShortDate(cycle.start_date)} – {formatShortDate(cycle.end_date)} · dibatalkan</Text>
                   </Pressable>
                 ))}
-                {!cyclesQ.isLoading && !cyclesQ.isError && (cyclesQ.data?.length ?? 0) === 0 && (
-                  <Text style={styles.muted}>Belum ada siklus.</Text>
+                {!cancelledCyclesQ.isLoading && !cancelledCyclesQ.isError && !cancelledCyclesQ.data?.length && (
+                  <Text style={styles.muted}>Belum ada siklus dibatalkan.</Text>
                 )}
               </ScrollView>
             </View>
           </View>
         </Modal>
+
+        {viewingCancelled && (
+          <View style={styles.archiveNotice}>
+            <Text style={styles.archiveTitle}>Arsip siklus batal · hanya baca</Text>
+            <Text style={styles.archiveDetail}>Rencana yang dibatalkan tetap terlihat untuk audit, tetapi tidak dihitung sebagai aktivitas keuangan.{selectedCycle?.cancelled_at ? ` Dibatalkan ${formatShortDate(selectedCycle.cancelled_at.slice(0, 10))}.` : ''}</Text>
+          </View>
+        )}
 
         <View style={styles.searchRow}>
           <View style={styles.search}>
@@ -295,14 +372,14 @@ export default function HistoryScreen() {
         <View style={styles.summary}>
           <View style={{ flex: 1 }}>
             <Text style={styles.sumLabel}>
-              PENGELUARAN{cycleQ.data ? ` ${formatShortDate(cycleQ.data.end_date)?.split(' ')[1]?.toUpperCase() ?? ''}` : ''}
+              {viewingCancelled ? 'ARSIP RENCANA PENGELUARAN' : 'PENGELUARAN'}{selectedCycle ? ` ${formatShortDate(selectedCycle.end_date)?.split(' ')[1]?.toUpperCase() ?? ''}` : ''}
             </Text>
             <Text style={styles.sumOut}>−{formatRupiah(totals.expense)}</Text>
             <Text style={styles.sumMeta}>{totals.expenseCount} transaksi</Text>
           </View>
           <View style={styles.sumDivider} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.sumLabel}>PEMASUKAN</Text>
+            <Text style={styles.sumLabel}>{viewingCancelled ? 'ARSIP RENCANA PEMASUKAN' : 'PEMASUKAN'}</Text>
             <Text style={styles.sumIn}>+{formatRupiah(totals.income)}</Text>
             <Text style={styles.sumMeta}>{totals.incomeCount} transaksi</Text>
           </View>
@@ -370,7 +447,7 @@ export default function HistoryScreen() {
           <Text style={styles.muted}>Mode offline — login untuk riwayat live.</Text>
         )}
 
-        {pendingCount > 0 && (
+        {!viewingCancelled && pendingCount > 0 && (
           <Pressable style={styles.bulkButton} onPress={() => router.push('/bulk-execute')}>
             <Text style={styles.bulkButtonText}>Checklist eksekusi {pendingCount} transaksi</Text>
             <Text style={styles.bulkButtonSub}>Pilih, lihat preview, lalu bagikan ke keluarga</Text>
@@ -427,7 +504,7 @@ export default function HistoryScreen() {
                   key={r.id}
                   row={r}
                   first={i === 0}
-                  onPress={() => router.push({
+                  onPress={viewingCancelled ? undefined : () => router.push({
                     pathname: r.status === 'PENDING' ? '/payment-confirm' : '/transaction-edit',
                     params: { id: r.id },
                   })}
@@ -574,9 +651,18 @@ const styles = StyleSheet.create({
   sheetTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
   sheetClose: { color: Colors.brandPrimary, fontSize: 13, fontWeight: '600' },
   cycleList: { flexGrow: 0 },
-  cycleOption: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 10, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, marginBottom: 8 },
+  cycleOption: { flexDirection: 'row', alignItems: 'center', padding: 8, gap: 8, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, marginBottom: 8 },
+  cycleOptionSelect: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 6, gap: 10 },
   cycleOptionActive: { borderColor: Colors.brandPrimary, backgroundColor: Colors.subtle },
   cycleOptionName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  cancelCycleButton: { paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: Colors.pendingText, borderRadius: Radius.md, marginTop: 6 },
+  cancelCycleText: { color: Colors.pendingText, fontSize: 13, fontWeight: '700' },
+  cancelledHeading: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 14 },
+  cancelledCycleRow: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: Radius.md },
+  cancelledCycleName: { color: Colors.textMuted, fontSize: 13, fontWeight: '600' },
+  archiveNotice: { backgroundColor: Colors.subtle, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, gap: 3 },
+  archiveTitle: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  archiveDetail: { color: Colors.textSecondary, fontSize: 12 },
   cycleOptionDate: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 3 },
   cycleSelected: { color: Colors.brandPrimary, fontSize: FontSize.caption, fontWeight: '700' },
   searchRow: { flexDirection: 'row', gap: 8 },

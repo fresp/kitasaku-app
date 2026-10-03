@@ -64,6 +64,9 @@ export interface Cycle {
   primary_account_id: string | null;
   closed_at?: string | null;
   closed_by?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancellation_reason?: string | null;
   sweep_completed_at?: string | null;
   sweep_skipped?: boolean;
 }
@@ -222,10 +225,10 @@ export function useActiveCycle(householdId: string | undefined) {
     queryFn: async (): Promise<Cycle | null> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('cycles').select('*')
-        .eq('household_id', householdId!).order('start_date', { ascending: false }).limit(5);
+        .eq('household_id', householdId!).eq('is_active', true).is('cancelled_at', null)
+        .order('start_date', { ascending: false }).limit(1);
       if (error) throw error;
-      const rows = (data ?? []) as Cycle[];
-      return rows.find((c) => c.is_active) ?? rows[0] ?? null;
+      return ((data ?? [])[0] as Cycle | undefined) ?? null;
     },
   });
 }
@@ -237,10 +240,46 @@ export function useHouseholdCycles(householdId: string | undefined) {
     queryFn: async (): Promise<Cycle[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('cycles').select('*')
-        .eq('household_id', householdId!)
+        .eq('household_id', householdId!).is('cancelled_at', null)
         .order('start_date', { ascending: false });
       if (error) throw error;
       return (data ?? []) as Cycle[];
+    },
+  });
+}
+
+export function useCancelledCycles(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['cancelled-cycles', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Cycle[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('cycles').select('*')
+        .eq('household_id', householdId!).not('cancelled_at', 'is', null)
+        .order('cancelled_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Cycle[];
+    },
+  });
+}
+
+export function useCancelCycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { householdId: string; cycleId: string }) => {
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('cancel_cycle', {
+        p_household_id: args.householdId, p_cycle_id: args.cycleId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      for (const key of ['cycle', 'cycles', 'cancelled-cycles', 'cycle-years',
+        'home-cash-balance', 'account-snapshots',
+        'reconciliation-preview', 'installments']) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
     },
   });
 }
@@ -920,7 +959,7 @@ export function useAccountZeroBasedSummary(
       if (currentReconciliationResult.error) throw currentReconciliationResult.error;
       const cycle = cycleResult.data;
       const { data: priorCycles, error: priorCyclesError } = await sb.from('cycles')
-        .select('id, end_date').eq('household_id', householdId!)
+        .select('id, end_date').eq('household_id', householdId!).is('cancelled_at', null)
         .lt('end_date', cycle.start_date).order('end_date', { ascending: false }).limit(1);
       if (priorCyclesError) throw priorCyclesError;
       let openingStated: number | null = null;
@@ -1115,7 +1154,7 @@ export function useHomeCashBalance(
     queryFn: async () => {
       const sb = requireSupabase();
       const { data: priorCycles, error: cycleError } = await sb.from('cycles')
-        .select('id, end_date').eq('household_id', householdId!)
+        .select('id, end_date').eq('household_id', householdId!).is('cancelled_at', null)
         .lt('end_date', cycle!.start_date).order('end_date', { ascending: false }).limit(1);
       if (cycleError) throw cycleError;
       const prior = priorCycles?.[0];
@@ -1208,7 +1247,7 @@ export function useCycleReconciliationPreview(
           .eq('household_id', householdId!).is('cycle_id', null)
           .or(`account_id.eq.${cycle.primary_account_id},counter_account_id.eq.${cycle.primary_account_id}`),
         sb.from('cycles').select('id')
-          .eq('household_id', householdId!).lt('end_date', cycle.start_date)
+          .eq('household_id', householdId!).is('cancelled_at', null).lt('end_date', cycle.start_date)
           .order('end_date', { ascending: false }).limit(1),
         sb.from('cycle_reconciliations').select('*')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!).maybeSingle(),
@@ -1358,7 +1397,9 @@ export function useCreateCycle() {
       if (!(activeBankAccounts ?? []).some((account) => account.id === incomeAccountId)) {
         throw new Error('Akun pemasukan harus rekening BANK aktif.');
       }
-      await sb.from('cycles').update({ is_active: false }).eq('household_id', args.householdId).eq('is_active', true);
+      const { error: deactivateError } = await sb.from('cycles').update({ is_active: false })
+        .eq('household_id', args.householdId).eq('is_active', true).is('cancelled_at', null);
+      if (deactivateError) throw deactivateError;
       const { data: cycle, error: cErr } = await sb.from('cycles').insert({
         household_id: args.householdId, name: args.name,
         start_date: args.start, end_date: args.end, is_active: true,
@@ -1439,6 +1480,7 @@ export function useCreateCycle() {
     onSuccess: () => {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['cycle'] });
+      qc.invalidateQueries({ queryKey: ['cycles'] });
       // A new cycle can be the first in a brand-new year. Insight & Aset's year
       // selector is built from this list, so without it the year the family
       // just opened a cycle in would be missing from the dropdown.
@@ -1691,7 +1733,7 @@ export function useYearInsight(householdId: string | undefined, year: number) {
       const { data: cycleData, error: cycleErr } = await sb
         .from('cycles')
         .select('*')
-        .eq('household_id', householdId!)
+        .eq('household_id', householdId!).is('cancelled_at', null)
         .lte('start_date', yearEnd)
         .gte('end_date', yearStart)
         .order('end_date', { ascending: true });
@@ -1743,7 +1785,7 @@ export function useCycleYears(householdId: string | undefined) {
       const { data, error } = await sb
         .from('cycles')
         .select('start_date, end_date')
-        .eq('household_id', householdId!);
+        .eq('household_id', householdId!).is('cancelled_at', null);
       if (error) throw error;
       const set = new Set<number>();
       for (const c of (data ?? []) as { start_date: string; end_date: string }[]) {
