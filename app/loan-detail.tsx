@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -14,11 +14,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
-import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Check from 'lucide-react-native/icons/check';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Copy from 'lucide-react-native/icons/copy';
+import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
+import Pencil from 'lucide-react-native/icons/pencil';
 import ReceiptText from 'lucide-react-native/icons/receipt-text';
-import { Colors, FontSize, Radius } from '../constants/theme';
+import Trash2 from 'lucide-react-native/icons/trash';
+import X from 'lucide-react-native/icons/x';
+import { Colors, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
@@ -38,49 +43,28 @@ import {
   useObligationInstallments,
   useObligationPayments,
   useObligations,
-  useSetRepaymentMode,
   useTransactionById,
 } from '../lib/queries';
 import {
   installmentProgressLabel,
-  loanState,
   longDateFullLabel,
   nextOpenInstallment,
   normalizeObligationType,
-  obligationBadge,
   obligationTypeLabel,
-  paidAmount,
-  progressPct,
-  repaymentModeOf,
-  REPAYMENT_MODES,
+  repaymentModeLabel,
   type RepaymentMode,
 } from '../lib/obligation';
 import {
   calculateInstallmentSchedule,
-  scheduleInterest,
   scheduleTotal,
   type InstallmentMode,
 } from '../lib/installments';
-import { Badge } from '../components/ui/Badge';
+import { categoryIconName } from '../lib/category-icon';
+import { BrandIcon } from '../components/ui/BrandIcon';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
-/**
- * Screen - Detail Pinjaman.
- *
- * The single-obligation view: what is left, what the plan is, what has been
- * paid, and the two things a person comes here to do — pay it, or change the
- * plan.
- *
- * Everything the header and hero say comes from lib/obligation.ts, the same
- * functions the Tanggungan card uses. That is the point of the module: the card
- * says "Berjalan • 20%" and this screen must not say something else about the
- * same row.
- *
- * The Mode Pembayaran card is the only write on this screen besides payment.
- * It stores the plan shape via `set_obligation_repayment_mode`; when nothing is
- * stored, the card shows the derived display default AND says it is a guess
- * (`derived`), because a plan nobody chose should not look chosen.
- */
+type DetailTab = 'detail' | 'history';
+
 export default function LoanDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -94,11 +78,11 @@ export default function LoanDetailScreen() {
   const payQ = useObligationPayments(householdId, id);
   const accsQ = useAccounts(householdId);
   const beneficiariesQ = useBeneficiaries(householdId);
-  const setMode = useSetRepaymentMode();
   const configureInstallments = useConfigureObligationInstallments();
   const pay = useAllocateDebtPayment();
   const cancelObligation = useCancelObligation();
 
+  const [activeTab, setActiveTab] = useState<DetailTab>('detail');
   const [err, setErr] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -113,7 +97,6 @@ export default function LoanDetailScreen() {
   const [scheduleStartDate, setScheduleStartDate] = useState('');
   const [copied, setCopied] = useState(false);
   const todayISO = new Date().toISOString().slice(0, 10);
-  const scrollRef = useRef<ScrollView>(null);
 
   const obligation = useMemo(
     () => (obligQ.data ?? []).find((o) => o.id === id) ?? null,
@@ -121,34 +104,41 @@ export default function LoanDetailScreen() {
   );
   const installments = useMemo(() => instQ.data ?? [], [instQ.data]);
   const payments = useMemo(() => payQ.data ?? [], [payQ.data]);
+
   const schedulePrincipal = Number(schedulePrincipalText.replace(/[^0-9]/g, '') || 0);
   const scheduleTenor = Number(scheduleTenorText.replace(/[^0-9]/g, '') || 0);
   const scheduleRateBps = Math.round((Number(scheduleRateText.replace(',', '.')) || 0) * 100);
   const scheduleFee = Number(scheduleFeeText.replace(/[^0-9]/g, '') || 0);
   const schedulePreview = useMemo(
-    () => schedulePrincipal > 0 && scheduleTenor > 0
-      ? calculateInstallmentSchedule({
-          principalAmount: schedulePrincipal,
-          tenor: scheduleTenor,
-          mode: scheduleMode,
-          monthlyInterestRateBps: scheduleRateBps,
-        })
-      : [],
-    [schedulePrincipal, scheduleTenor, scheduleMode, scheduleRateBps],
+    () =>
+      schedulePrincipal > 0 && scheduleTenor > 0
+        ? calculateInstallmentSchedule({
+            principalAmount: schedulePrincipal,
+            tenor: scheduleTenor,
+            mode: scheduleMode,
+            monthlyInterestRateBps: scheduleRateBps,
+          })
+        : [],
+    [schedulePrincipal, scheduleTenor, scheduleMode, scheduleRateBps]
   );
   const schedulePreviewBaseTotal = scheduleTotal(schedulePreview);
-  const schedulePreviewInterest = scheduleInterest(schedulePreview);
-  const schedulePreviewTotal = schedulePreviewBaseTotal + (scheduleMode === 'FIXED_INSTALLMENT' ? scheduleFee : 0);
-  const schedulePreviewFeePerCycle = scheduleTenor > 0 && scheduleMode === 'FIXED_INSTALLMENT'
-    ? Math.floor(scheduleFee / scheduleTenor)
-    : 0;
+  const schedulePreviewTotal =
+    schedulePreviewBaseTotal + (scheduleMode === 'FIXED_INSTALLMENT' ? scheduleFee : 0);
+  const schedulePreviewFeePerCycle =
+    scheduleTenor > 0 && scheduleMode === 'FIXED_INSTALLMENT'
+      ? Math.floor(scheduleFee / scheduleTenor)
+      : 0;
 
   function openSchedule() {
     setErr(null);
-    setSchedulePrincipalText(String(obligation?.principal_amount ?? obligation?.remaining_amount ?? 0));
+    setSchedulePrincipalText(
+      String(obligation?.principal_amount ?? obligation?.remaining_amount ?? 0)
+    );
     setScheduleTenorText(String(obligation?.installment_count ?? ''));
     setScheduleRateText(
-      obligation?.interest_rate_bps ? String(obligation.interest_rate_bps / 100).replace('.', ',') : '',
+      obligation?.interest_rate_bps
+        ? String(obligation.interest_rate_bps / 100).replace('.', ',')
+        : ''
     );
     setScheduleFeeText(String(obligation?.interest_fee_amount ?? 0));
     setScheduleStartDate(obligation?.start_date ?? todayISO);
@@ -158,9 +148,18 @@ export default function LoanDetailScreen() {
 
   async function saveSchedule() {
     setErr(null);
-    if (!householdId) { setErr('Login dulu untuk mengatur cicilan.'); return; }
-    if (!obligation) { setErr('Tanggungan tidak ditemukan.'); return; }
-    if (schedulePreview.length === 0) { setErr('Isi pokok dan tenor yang valid terlebih dahulu.'); return; }
+    if (!householdId) {
+      setErr('Login dulu untuk mengatur cicilan.');
+      return;
+    }
+    if (!obligation) {
+      setErr('Tanggungan tidak ditemukan.');
+      return;
+    }
+    if (schedulePreview.length === 0) {
+      setErr('Isi pokok dan tenor yang valid terlebih dahulu.');
+      return;
+    }
     try {
       await configureInstallments.mutateAsync({
         householdId,
@@ -174,58 +173,10 @@ export default function LoanDetailScreen() {
         monthlyInterestRateBps: scheduleMode === 'FLOATING_INTEREST' ? scheduleRateBps : 0,
       });
       setScheduleOpen(false);
-    } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan jadwal cicilan.'); }
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal menyimpan jadwal cicilan.');
+    }
   }
-
-  const scheduleModal = (
-    <Modal visible={scheduleOpen} transparent animationType="slide" onRequestClose={() => setScheduleOpen(false)}>
-      <View style={styles.modalBackdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.scheduleKeyboard}>
-          <View style={styles.scheduleCard}>
-            <View style={styles.scheduleHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Atur jadwal cicilan</Text>
-                <Text style={styles.modalBody}>Jadwal dibuat sekali dan tidak menimpa pembayaran yang sudah tercatat.</Text>
-              </View>
-              <Pressable onPress={() => setScheduleOpen(false)}><Text style={styles.cancel}>Tutup</Text></Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.scheduleContent} keyboardShouldPersistTaps="handled">
-              <Text style={styles.sectionLabel}>MODEL CICILAN</Text>
-              <View style={styles.modeRow}>
-                {(['FIXED_INSTALLMENT', 'FLOATING_INTEREST'] as InstallmentMode[]).map((mode) => (
-                  <Pressable key={mode} onPress={() => setScheduleMode(mode)} style={[styles.modeOpt, scheduleMode === mode && styles.modeOptActive]}>
-                    <Text style={[styles.modeText, scheduleMode === mode && styles.modeTextActive]}>{mode === 'FIXED_INSTALLMENT' ? 'Cicilan tetap' : 'Bunga mengambang'}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.sectionLabel}>POKOK YANG DICICIL</Text>
-              <TextInput value={schedulePrincipalText} onChangeText={setSchedulePrincipalText} keyboardType="number-pad" placeholder="mis. 5000000" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
-              <Text style={styles.sectionLabel}>TENOR (SIKLUS)</Text>
-              <TextInput value={scheduleTenorText} onChangeText={setScheduleTenorText} keyboardType="number-pad" placeholder="mis. 12" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
-              {scheduleMode === 'FIXED_INSTALLMENT' && <>
-                <Text style={styles.sectionLabel}>BIAYA / BUNGA TETAP (OPSIONAL)</Text>
-                <TextInput value={scheduleFeeText} onChangeText={setScheduleFeeText} keyboardType="number-pad" placeholder="mis. 250000" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
-              </>}
-              {scheduleMode === 'FLOATING_INTEREST' && <>
-                <Text style={styles.sectionLabel}>BUNGA PER BULAN (%)</Text>
-                <TextInput value={scheduleRateText} onChangeText={setScheduleRateText} keyboardType="decimal-pad" placeholder="mis. 1,5" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
-              </>}
-              <Text style={styles.sectionLabel}>CICILAN DIMULAI</Text>
-              <TextInput value={scheduleStartDate} onChangeText={setScheduleStartDate} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textMuted} style={styles.scheduleInput} />
-              {schedulePreview.length > 0 && <View style={styles.schedulePreview}>
-                <Text style={styles.previewTitle}>{schedulePreview.length}× cicilan • total {formatRupiah(schedulePreviewTotal)}</Text>
-                <Text style={styles.previewLine}>Perkiraan pertama {formatRupiah(schedulePreview[0].totalAmount + schedulePreviewFeePerCycle)}{schedulePreview.length > 1 ? ` • terakhir ${formatRupiah(schedulePreview[schedulePreview.length - 1].totalAmount + Math.max(0, scheduleFee - (schedulePreviewFeePerCycle * Math.max(0, schedulePreview.length - 1))))}` : ''}</Text>
-                {schedulePreviewInterest > 0 && <Text style={styles.previewLine}>Total bunga {formatRupiah(schedulePreviewInterest)}</Text>}
-              </View>}
-              {err && <Text style={styles.errText}>{err}</Text>}
-              <PrimaryButton label={configureInstallments.isPending ? 'Menyimpan…' : 'Simpan jadwal cicilan'} onPress={saveSchedule} />
-              <SecondaryButton label="Batal" onPress={() => setScheduleOpen(false)} />
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
 
   const beneficiary = useMemo(() => {
     if (obligation?.beneficiary) return obligation.beneficiary;
@@ -241,9 +192,6 @@ export default function LoanDetailScreen() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // The loan's own receipt transaction, so the hero can name the account the
-  // money landed in. Fetched by id because the receipt may sit in a cycle that
-  // is no longer the active one.
   const sourceQ = useTransactionById(householdId, obligation?.source_transaction_id ?? undefined);
 
   if (!obligation) {
@@ -253,11 +201,6 @@ export default function LoanDetailScreen() {
           <Text style={styles.missingTitle}>
             {obligQ.isLoading ? 'Memuat…' : 'Kewajiban tidak ditemukan'}
           </Text>
-          {!obligQ.isLoading && (
-            <Text style={styles.missingBody}>
-              Baris ini mungkin sudah lunas dan tidak lagi ada di daftar tanggungan aktif.
-            </Text>
-          )}
           <SecondaryButton label="Kembali" onPress={() => router.back()} />
         </View>
       </SafeAreaView>
@@ -265,62 +208,48 @@ export default function LoanDetailScreen() {
   }
 
   const type = normalizeObligationType(obligation.type);
-  const state = loanState(obligation, todayISO);
-  const pct = progressPct(obligation.total_amount, obligation.remaining_amount);
-  const badge = obligationBadge(state, pct);
-  const paid = paidAmount(obligation.total_amount, obligation.remaining_amount);
-  const cancelled = state === 'CANCELLED';
-  const settled = state === 'SETTLED';
+  const settled = obligation.status === 'SETTLED';
+  const cancelled = obligation.status === 'CANCELLED';
 
-  const schedule = repaymentModeOf(obligation);
   const nextInst = nextOpenInstallment(installments);
   const nextDueISO = nextInst?.due_date ?? obligation.due_date ?? null;
-  const instalmentPlan = obligation.planned_installment_amount;
-
-  // "Diterima 25 September 2026 • Dana masuk ke Mandiri" — the receipt side of
-  // the loan, so the screen makes clear this money moved *in* at some point.
-  const receivedISO = obligation.start_date ?? null;
-  const receivedLabel = longDateFullLabel(receivedISO) ?? longDateFullLabel(obligation.created_at?.slice(0, 10));
-  const receivedAccount = sourceQ.data?.accounts?.name ?? null;
-  const heroSub = receivedLabel
-    ? `Diterima ${receivedLabel}${receivedAccount ? ` • Dana masuk ke ${receivedAccount}` : ''}`
-    : null;
-
   const nextOpenAmount =
     nextInst?.planned_amount ?? obligation.planned_installment_amount ?? obligation.remaining_amount;
 
-  // Narrowed copy for use inside the handlers below: TypeScript cannot carry
-  // the `if (!obligation) return` narrowing into a closure that runs later.
   const ob = obligation;
-
-  async function chooseMode(mode: RepaymentMode) {
-    setErr(null);
-    if (!householdId) { setErr('Login dulu untuk mengubah rencana.'); return; }
-    if (schedule.mode === mode && !schedule.derived) return;
-    try {
-      await setMode.mutateAsync({ householdId, obligationId: ob.id, mode });
-    } catch (e: any) { setErr(e?.message ?? 'Gagal menyimpan rencana.'); }
-  }
 
   async function payNow() {
     setErr(null);
-    if (!householdId || !cycleId) { setErr('Buka siklus aktif dulu sebelum membayar.'); return; }
+    if (!householdId || !cycleId) {
+      setErr('Buka siklus aktif dulu sebelum membayar.');
+      return;
+    }
     const amount = Math.min(nextOpenAmount, ob.remaining_amount);
-    if (!(amount > 0)) { setErr('Tidak ada sisa yang perlu dibayar.'); return; }
+    if (!(amount > 0)) {
+      setErr('Tidak ada sisa yang perlu dibayar.');
+      return;
+    }
     try {
       await pay.mutateAsync({
-        householdId, cycleId, obligationId: ob.id,
+        householdId,
+        cycleId,
+        obligationId: ob.id,
         amount,
         accountId: accsQ.data?.[0]?.id ?? null,
       });
       setPayOpen(false);
-    } catch (e: any) { setErr(e?.message ?? 'Gagal mencatat pembayaran.'); }
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal mencatat pembayaran.');
+    }
   }
 
   async function cancel() {
     setErr(null);
     if (!householdId) return;
-    if (!cancelReason) { setErr('Pilih alasan pembatalan.'); return; }
+    if (!cancelReason) {
+      setErr('Pilih alasan pembatalan.');
+      return;
+    }
     try {
       await cancelObligation.mutateAsync({
         householdId,
@@ -330,462 +259,884 @@ export default function LoanDetailScreen() {
       });
       setCancelOpen(false);
       router.back();
-    } catch (e: any) { setErr(e?.message ?? 'Gagal membatalkan tanggungan.'); }
+    } catch (e: any) {
+      setErr(e?.message ?? 'Gagal membatalkan tanggungan.');
+    }
   }
 
-  const cancelModal = (
-    <Modal visible={cancelOpen} transparent animationType="slide" onRequestClose={() => setCancelOpen(false)}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>Batalkan tanggungan?</Text>
-          <Text style={styles.modalBody}>
-            Tanggungan dan rencana cicilan yang belum dibayar akan ditutup. Tidak ada uang yang dibalikkan; catatan ini tetap tersimpan untuk audit.
-          </Text>
-          <Text style={styles.sectionLabel}>Alasan</Text>
-          <View style={styles.reasonList}>
-            {CANCELLATION_REASONS.map((item) => (
-              <Pressable key={item.value} onPress={() => setCancelReason(item.value)} style={[styles.reason, cancelReason === item.value && styles.reasonActive]}>
-                <Text style={[styles.reasonText, cancelReason === item.value && styles.reasonTextActive]}>{item.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <TextInput
-            value={cancelNote}
-            onChangeText={setCancelNote}
-            placeholder="Catatan tambahan (opsional)"
-            placeholderTextColor={Colors.textMuted}
-            multiline
-            maxLength={500}
-            style={styles.noteInput}
-          />
-          <Text style={styles.charCount}>{cancelNote.length}/500</Text>
-          {err && <Text style={styles.errText}>{err}</Text>}
-          <View style={styles.modalActions}>
-            <View style={{ flex: 1 }}><SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} /></View>
-            <View style={{ flex: 1 }}><PrimaryButton label={cancelObligation.isPending ? 'Menyimpan…' : 'Batalkan tanggungan'} onPress={cancel} /></View>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-  const canCancel = !settled && payments.length === 0;
-
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView edges={['top']} style={styles.safe}>
+      {/* Top Header */}
+      <View style={styles.topBar}>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+          <ChevronLeft size={24} color={Colors.textPrimary} />
+        </Pressable>
+        <Text style={styles.topBarTitle}>Detail Tanggungan</Text>
+        <Pressable onPress={() => setCancelOpen(true)} hitSlop={12} style={styles.moreBtn}>
+          <MoreVertical size={20} color={Colors.textPrimary} />
+        </Pressable>
+      </View>
+
       <ScrollView
-        ref={scrollRef}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={instQ.isFetching || payQ.isFetching}
-            onRefresh={() => { void instQ.refetch(); void payQ.refetch(); void obligQ.refetch(); }}
+            onRefresh={() => {
+              void instQ.refetch();
+              void payQ.refetch();
+              void obligQ.refetch();
+            }}
           />
         }
       >
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <ArrowLeft size={18} color={Colors.textPrimary} />
-          </Pressable>
-          <View style={{ flex: 1, gap: 2 }}>
-            <View style={styles.titleRow}>
-              <Text style={styles.title} numberOfLines={1}>{obligation.title}</Text>
-              <Badge label={obligationTypeLabel(obligation.type)} />
-            </View>
-            <Text style={styles.sub}>
-              {type === 'LOAN' ? 'Pemberi pinjaman' : 'Kepada'}: {obligation.recipient ?? 'Tidak dicatat'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.hero}>
-          <View style={styles.heroTop}>
-            <Text style={styles.heroLabel}>
-              {cancelled ? 'RENCANA DIBATALKAN' : type === 'LOAN' ? 'SISA PINJAMAN' : 'SISA KEWAJIBAN'}
-            </Text>
-            {!cancelled && <Text style={styles.heroPct}>{pct}% dibayar</Text>}
-          </View>
-          <Text style={styles.heroAmount}>{cancelled ? 'Tidak ada pembayaran yang dicatat' : formatRupiah(obligation.remaining_amount)}</Text>
-          <View style={styles.track}>
-            <View
-              style={[
-                styles.fill,
-                {
-                  width: `${Math.max(pct, settled || cancelled ? 100 : 2)}%` as any,
-                  backgroundColor: cancelled
-                    ? Colors.textMuted
-                    : settled
-                      ? Colors.paidText
-                      : state === 'OVERDUE'
-                        ? Colors.pendingBorder
-                        : Colors.heroFooter,
-                },
-              ]}
+        {/* Hero Card with Squircle Icon */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroSquircle}>
+            <BrandIcon
+              name={categoryIconName({
+                name: obligation.title,
+                type: 'EXPENSE',
+              })}
+              size={28}
+              label=""
             />
           </View>
-          {!!heroSub && <Text style={styles.heroSub}>{heroSub}</Text>}
-          <Badge label={badge.label} tone={badge.tone} />
+          <View style={styles.heroText}>
+            <Text style={styles.heroTitle} numberOfLines={1}>
+              {obligation.title}
+            </Text>
+            <Text style={styles.heroAmount}>
+              {formatRupiah(obligation.remaining_amount || obligation.total_amount)}
+            </Text>
+          </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>RINGKASAN KEWAJIBAN</Text>
-          {cancelled && <Text style={styles.modeNote}>Rencana ini dibatalkan dan dipertahankan sebagai catatan audit.</Text>}
-          <SummaryRow
-            label="Total pokok"
-            value={formatRupiah(Math.max(0, obligation.total_amount - (obligation.interest_fee_amount ?? 0)))}
-          />
-          {(obligation.interest_fee_amount ?? 0) > 0 && (
-            <SummaryRow label="Bunga & biaya" value={formatRupiah(obligation.interest_fee_amount ?? 0)} />
-          )}
-          <SummaryRow label="Sudah dibayar" value={formatRupiah(paid)} />
-          <SummaryRow label="Sisa pokok" value={formatRupiah(obligation.remaining_amount)} strong />
-          <View style={styles.divider} />
-          <SummaryRow
-            label="Jadwal berikutnya"
-            value={nextDueISO ? longDateFullLabel(nextDueISO) ?? '—' : 'Belum dijadwalkan'}
-          />
-          <SummaryRow
-            label="Rencana cicilan"
-            value={
-              instalmentPlan && instalmentPlan > 0
-                ? `${formatRupiah(instalmentPlan)} / siklus${obligation.installment_count ? ` (${obligation.installment_count}x)` : ''}`
-                : 'Nominal manual'
-            }
-          />
-          {!!installmentProgressLabel(installments) && (
-            <SummaryRow label="Progres cicilan" value={installmentProgressLabel(installments)!} />
-          )}
+        {/* 2-Segment Control: Detail | Riwayat */}
+        <View style={styles.segmentedControl}>
+          <Pressable
+            onPress={() => setActiveTab('detail')}
+            style={[styles.segmentTab, activeTab === 'detail' && styles.segmentTabActive]}
+          >
+            <Text
+              style={[
+                styles.segmentTabText,
+                activeTab === 'detail' && styles.segmentTabTextActive,
+              ]}
+            >
+              Detail
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setActiveTab('history')}
+            style={[styles.segmentTab, activeTab === 'history' && styles.segmentTabActive]}
+          >
+            <Text
+              style={[
+                styles.segmentTabText,
+                activeTab === 'history' && styles.segmentTabTextActive,
+              ]}
+            >
+              Riwayat
+            </Text>
+          </Pressable>
         </View>
 
-        {beneficiary && (
-          <View style={styles.card}>
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.sectionLabel}>INFO TRANSFER PEMBAYARAN</Text>
-              <Badge label={formatBankBadge(beneficiary.bank_name)} tone="dark" />
+        {/* Tab 1: Detail View */}
+        {activeTab === 'detail' && (
+          <View style={styles.metaCard}>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Kategori</Text>
+              <Text style={styles.metaValue}>{obligationTypeLabel(obligation.type)}</Text>
             </View>
 
-            <View style={styles.transferBox}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={styles.transferDestName}>{beneficiary.name}</Text>
-                <Text style={styles.transferAccountNumber}>
-                  {formatAccountNumberDisplay(beneficiary.account_number)}
-                </Text>
-                {!!formatBeneficiaryHolder(beneficiary.account_holder_name) && (
-                  <Text style={styles.transferHolder}>
-                    {formatBeneficiaryHolder(beneficiary.account_holder_name)}
-                  </Text>
-                )}
-              </View>
-
-              <Pressable
-                onPress={handleCopyBeneficiary}
-                style={[styles.copyActionBtn, copied && styles.copyActionBtnCopied]}
-                accessibilityRole="button"
-                accessibilityLabel="Salin nomor rekening"
-              >
-                {copied ? (
-                  <>
-                    <Check size={14} color={Colors.paidText} strokeWidth={2.5} />
-                    <Text style={styles.copyActionTextCopied}>✓ Tersalin</Text>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} color={Colors.brandPrimary} />
-                    <Text style={styles.copyActionText}>Salin</Text>
-                  </>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        )}
-
-        {!cancelled && installments.length === 0 && payments.length === 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>JADWAL CICILAN</Text>
-            <Text style={styles.modeHint}>
-              Tanggungan ini belum memiliki jadwal per cicilan. Atur tenor dan model bunga untuk melihat nominal setiap siklus.
-            </Text>
-            <PrimaryButton label="Atur cicilan & tenor" onPress={openSchedule} />
-          </View>
-        )}
-
-        {!cancelled && <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Mode Pembayaran</Text>
-          <View style={styles.modeRow}>
-            {REPAYMENT_MODES.map((m) => {
-              const active = schedule.mode === m.value;
-              return (
-                <Pressable
-                  key={m.value}
-                  onPress={() => chooseMode(m.value)}
-                  style={[styles.modeOpt, active && styles.modeOptActive]}
-                >
-                  <Text style={[styles.modeText, active && styles.modeTextActive]} numberOfLines={1}>
-                    {m.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.modeHint}>
-            {REPAYMENT_MODES.find((m) => m.value === schedule.mode)?.hint}
-          </Text>
-          {schedule.derived && (
-            <Text style={styles.modeNote}>
-              Belum pernah dipilih — ini perkiraan dari data yang ada. Ketuk salah satu untuk
-              menetapkannya.
-            </Text>
-          )}
-          {setMode.isPending && <Text style={styles.modeNote}>Menyimpan…</Text>}
-        </View>}
-
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Riwayat Pembayaran</Text>
-          {payments.length === 0 ? (
-            <View style={styles.empty}>
-              <ReceiptText size={20} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>Belum ada pembayaran untuk pinjaman ini</Text>
-              <Text style={styles.emptyBody}>
-                Setiap cicilan atau pelunasan akan tercatat di sini dan otomatis mengurangi sisa
-                pokok.
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Tanggal jatuh tempo</Text>
+              <Text style={styles.metaValue}>
+                {nextDueISO ? longDateFullLabel(nextDueISO) ?? '—' : 'Belum ditentukan'}
               </Text>
             </View>
-          ) : (
-            payments.map((p) => (
-              <View key={p.id} style={styles.histRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.histName} numberOfLines={1}>
-                    {p.accounts?.name ?? 'Tanpa akun'}
+
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Frekuensi</Text>
+              <Text style={styles.metaValue}>
+                {repaymentModeLabel(obligation.repayment_mode as RepaymentMode) ?? 'Bulanan'}
+              </Text>
+            </View>
+
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Akun pembayaran</Text>
+              <Text style={styles.metaValue}>
+                {beneficiary?.bank_name
+                  ? formatBankBadge(beneficiary.bank_name)
+                  : sourceQ.data?.accounts?.name ?? 'BCA'}
+              </Text>
+            </View>
+
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Pengingat</Text>
+              <Text style={styles.metaValue}>2 hari sebelum</Text>
+            </View>
+
+            <View style={[styles.metaRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.metaLabel}>Catatan</Text>
+              <View style={styles.notesRight}>
+                <Text style={styles.metaValue} numberOfLines={1}>
+                  {obligation.notes || '—'}
+                </Text>
+                <ChevronRight size={14} color={Colors.textMuted} />
+              </View>
+            </View>
+
+            {/* If Beneficiary Account details exist, show copy card */}
+            {beneficiary && (
+              <View style={styles.transferBox}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.transferBank}>
+                    {formatBankBadge(beneficiary.bank_name)} · {beneficiary.name}
                   </Text>
-                  <Text style={styles.histDate}>
-                    {longDateFullLabel(p.release_date ?? p.created_at.slice(0, 10)) ?? 'Tanggal tidak dicatat'}
-                    {p.is_final_payment ? ' • Pelunasan terakhir' : ''}
+                  <Text style={styles.transferNumber}>
+                    {formatAccountNumberDisplay(beneficiary.account_number)}
+                    {formatBeneficiaryHolder(beneficiary.account_holder_name)
+                      ? ` (${formatBeneficiaryHolder(beneficiary.account_holder_name)})`
+                      : ''}
                   </Text>
                 </View>
-                <Text style={styles.histAmt}>{formatRupiah(p.actual_amount)}</Text>
+                <Pressable
+                  onPress={handleCopyBeneficiary}
+                  style={[styles.copyBtn, copied && styles.copyBtnActive]}
+                >
+                  {copied ? (
+                    <>
+                      <Check size={12} color={Colors.accentStrong} />
+                      <Text style={styles.copyBtnTextCopied}>Tersalin</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={12} color={Colors.info} />
+                      <Text style={styles.copyBtnText}>Salin</Text>
+                    </>
+                  )}
+                </Pressable>
               </View>
-            ))
-          )}
-        </View>
+            )}
 
-        {err && (
-          <View style={styles.errBox}>
-            <Text style={styles.errText}>{err}</Text>
+            {/* Installment configuration helper if applicable */}
+            {!cancelled && (type === 'LOAN' || type === 'INSTALLMENT') && (
+              <View style={styles.installmentBox}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.installmentTitle}>Atur Tenor & Cicilan</Text>
+                  <Text style={styles.installmentSub}>
+                    {installmentProgressLabel(installments) || 'Buat jadwal nominal per siklus'}
+                  </Text>
+                </View>
+                <Pressable onPress={openSchedule} style={styles.scheduleBtn}>
+                  <Text style={styles.scheduleBtnText}>Atur</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         )}
 
-        {!settled && (
-          <>
-            {payOpen ? (
-              <View style={styles.card}>
-                <Text style={styles.sectionLabel}>CATAT PEMBAYARAN</Text>
-                <Text style={styles.payAmount}>
-                  {formatRupiah(Math.min(nextOpenAmount, obligation.remaining_amount))}
+        {/* Tab 2: Riwayat View */}
+        {activeTab === 'history' && (
+          <View style={styles.metaCard}>
+            {payments.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <ReceiptText size={24} color={Colors.textMuted} />
+                <Text style={styles.emptyTitle}>Belum ada riwayat pembayaran</Text>
+                <Text style={styles.emptySub}>
+                  Setiap cicilan atau pelunasan akan tercatat otomatis di sini.
                 </Text>
-                <Text style={styles.modeHint}>
-                  {nextInst
-                    ? `Cicilan berikutnya jatuh tempo ${longDateFullLabel(nextInst.due_date) ?? 'tanpa tanggal'}.`
-                    : 'Nominal diambil dari sisa kewajiban.'}
-                </Text>
-                <PrimaryButton
-                  label={pay.isPending ? 'Menyimpan…' : 'Konfirmasi Pembayaran'}
-                  onPress={payNow}
-                />
-                <Pressable onPress={() => setPayOpen(false)}>
-                  <Text style={styles.cancel}>Batal</Text>
-                </Pressable>
               </View>
             ) : (
-              <PrimaryButton label="Bayar Pinjaman" onPress={() => setPayOpen(true)} />
+              payments.map((p, idx) => {
+                const isLast = idx === payments.length - 1;
+                return (
+                  <View
+                    key={p.id}
+                    style={[styles.histRow, !isLast && styles.histRowBorder]}
+                  >
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.histName}>
+                        {p.accounts?.name ?? 'Pembayaran Tanggungan'}
+                      </Text>
+                      <Text style={styles.histDate}>
+                        {longDateFullLabel(p.release_date ?? p.created_at.slice(0, 10))}
+                        {p.is_final_payment ? ' · Pelunasan' : ''}
+                      </Text>
+                    </View>
+                    <Text style={styles.histAmt}>{formatRupiah(p.actual_amount)}</Text>
+                  </View>
+                );
+              })
             )}
-          </>
+          </View>
         )}
-        {canCancel && (
-          <Pressable onPress={() => { setErr(null); setCancelOpen(true); }} style={styles.cancelLink}>
-            <Text style={styles.cancelLinkText}>Batalkan tanggungan</Text>
+
+        {err && <Text style={styles.errBanner}>{err}</Text>}
+
+        {/* Primary Action Button: Tandai sudah dibayar */}
+        {!settled && !cancelled && (
+          <View style={{ marginTop: 8, gap: 8 }}>
+            {payOpen ? (
+              <View style={styles.payConfirmCard}>
+                <Text style={styles.payConfirmTitle}>Konfirmasi Pembayaran</Text>
+                <Text style={styles.payConfirmAmount}>
+                  {formatRupiah(Math.min(nextOpenAmount, obligation.remaining_amount))}
+                </Text>
+                <Text style={styles.payConfirmHint}>
+                  {nextInst
+                    ? `Sesuai tagihan cicilan per ${longDateFullLabel(nextInst.due_date) ?? 'siklus ini'}.`
+                    : 'Nominal akan dicatat sebagai pelunasan tanggungan.'}
+                </Text>
+                <PrimaryButton
+                  label={pay.isPending ? 'Menyimpan…' : 'Konfirmasi Sekarang'}
+                  onPress={payNow}
+                />
+                <SecondaryButton label="Batal" onPress={() => setPayOpen(false)} />
+              </View>
+            ) : (
+              <Pressable onPress={() => setPayOpen(true)} style={styles.markPaidBtn}>
+                <Text style={styles.markPaidBtnText}>Tandai sudah dibayar</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {/* Dual Actions: Ubah & Hapus */}
+        <View style={styles.dualActionRow}>
+          <Pressable
+            onPress={openSchedule}
+            style={styles.editBtn}
+            accessibilityLabel="Ubah tanggungan"
+          >
+            <Pencil size={16} color={Colors.textPrimary} />
+            <Text style={styles.editBtnText}>Ubah</Text>
           </Pressable>
-        )}
+
+          <Pressable
+            onPress={() => setCancelOpen(true)}
+            style={styles.deleteBtn}
+            accessibilityLabel="Hapus tanggungan"
+          >
+            <Trash2 size={16} color={Colors.negative} />
+            <Text style={styles.deleteBtnText}>Hapus</Text>
+          </Pressable>
+        </View>
       </ScrollView>
-      {cancelModal}
-      {scheduleModal}
+
+      {/* Cancel Modal */}
+      <Modal
+        visible={cancelOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCancelOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setCancelOpen(false)}
+        >
+          <Pressable style={styles.cancelCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Batalkan tanggungan?</Text>
+            <Text style={styles.modalBody}>
+              Tanggungan yang belum dibayar akan ditutup. Catatan audit tetap tersimpan aman.
+            </Text>
+            <View style={styles.reasonList}>
+              {CANCELLATION_REASONS.map((item) => (
+                <Pressable
+                  key={item.value}
+                  onPress={() => setCancelReason(item.value)}
+                  style={[
+                    styles.reason,
+                    cancelReason === item.value && styles.reasonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.reasonText,
+                      cancelReason === item.value && styles.reasonTextActive,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput
+              value={cancelNote}
+              onChangeText={setCancelNote}
+              placeholder="Catatan tambahan (opsional)"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.noteInput}
+            />
+            <View style={styles.modalActions}>
+              <View style={{ flex: 1 }}>
+                <SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <PrimaryButton
+                  label={cancelObligation.isPending ? 'Menyimpan…' : 'Batalkan'}
+                  onPress={cancel}
+                />
+              </View>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Schedule Configuration Modal */}
+      <Modal
+        visible={scheduleOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setScheduleOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.scheduleCard}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.scheduleHeader}>
+              <Text style={styles.modalTitle}>Atur Tenor & Cicilan</Text>
+              <Pressable onPress={() => setScheduleOpen(false)} hitSlop={10}>
+                <X size={20} color={Colors.textPrimary} />
+              </Pressable>
+            </View>
+            <ScrollView
+              contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={styles.fieldLabel}>POKOK CICILAN</Text>
+              <TextInput
+                value={schedulePrincipalText}
+                onChangeText={setSchedulePrincipalText}
+                keyboardType="number-pad"
+                placeholder="mis. 5000000"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.inputBox}
+              />
+              <Text style={styles.fieldLabel}>TENOR (JUMLAH BULAN/SIKLUS)</Text>
+              <TextInput
+                value={scheduleTenorText}
+                onChangeText={setScheduleTenorText}
+                keyboardType="number-pad"
+                placeholder="mis. 12"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.inputBox}
+              />
+              <Text style={styles.fieldLabel}>BIAYA / BUNGA TETAP (OPSIONAL)</Text>
+              <TextInput
+                value={scheduleFeeText}
+                onChangeText={setScheduleFeeText}
+                keyboardType="number-pad"
+                placeholder="mis. 250000"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.inputBox}
+              />
+              <Text style={styles.fieldLabel}>TANGGAL MULAI</Text>
+              <TextInput
+                value={scheduleStartDate}
+                onChangeText={setScheduleStartDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={Colors.textMuted}
+                style={styles.inputBox}
+              />
+
+              {schedulePreview.length > 0 && (
+                <View style={styles.previewBox}>
+                  <Text style={styles.previewTitle}>
+                    {schedulePreview.length}× cicilan · total {formatRupiah(schedulePreviewTotal)}
+                  </Text>
+                  <Text style={styles.previewLine}>
+                    Perkiraan per siklus:{' '}
+                    {formatRupiah(schedulePreview[0].totalAmount + schedulePreviewFeePerCycle)}
+                  </Text>
+                </View>
+              )}
+
+              <PrimaryButton
+                label={configureInstallments.isPending ? 'Menyimpan…' : 'Simpan Perubahan'}
+                onPress={saveSchedule}
+              />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-function SummaryRow({
-  label,
-  value,
-  strong,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <View style={styles.sumRow}>
-      <Text style={styles.sumLabel}>{label}</Text>
-      <Text style={[styles.sumValue, strong && styles.sumValueStrong]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.canvas },
-  container: { padding: 16, gap: 12, paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  backBtn: {
-    width: 34, height: 34, borderRadius: Radius.md, backgroundColor: Colors.surface,
-    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  safe: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
   },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700', flexShrink: 1 },
-  sub: { color: Colors.textSecondary, fontSize: FontSize.body },
-
-  hero: {
-    backgroundColor: Colors.brandPrimary, borderRadius: Radius.lg, padding: 16, gap: 10,
-  },
-  heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  heroLabel: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1 },
-  heroPct: { color: Colors.borderStrong, fontSize: FontSize.caption, fontWeight: '600' },
-  heroAmount: {
-    color: Colors.white, fontSize: FontSize.heroNumeral, fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  heroSub: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
-  track: { height: 6, borderRadius: 3, backgroundColor: Colors.heroFooter, overflow: 'hidden' },
-  fill: { height: 6, borderRadius: 3 },
-
-  card: {
-    backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14, gap: 8,
-  },
-  cardHeaderRow: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#F8FAFC',
   },
+  topBarTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  container: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 40,
+    gap: 16,
+  },
+
+  /* Hero Card */
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 8,
+  },
+  heroSquircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 20,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroText: {
+    flex: 1,
+    gap: 4,
+  },
+  heroTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  heroAmount: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.5,
+  },
+
+  /* Segmented Control */
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: Radius.pill,
+    padding: 3,
+  },
+  segmentTab: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: Radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentTabActive: {
+    backgroundColor: Colors.navy,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  segmentTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  segmentTabTextActive: {
+    color: Colors.white,
+    fontWeight: '700',
+  },
+
+  /* Metadata Card */
+  metaCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  metaLabel: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  metaValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+  notesRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  /* Transfer & Installment Boxes */
   transferBox: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.canvas,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
     padding: 12,
-    gap: 12,
-    marginTop: 4,
+    marginTop: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  transferDestName: {
-    fontSize: FontSize.cardTitle,
+  transferBank: {
+    fontSize: 12,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
-  transferAccountNumber: {
-    fontSize: FontSize.currencyLarge,
-    fontWeight: '700',
-    color: Colors.brandPrimary,
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0.5,
-  },
-  transferHolder: {
-    fontSize: FontSize.caption,
+  transferNumber: {
+    fontSize: 12,
     color: Colors.textSecondary,
-    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
-  copyActionBtn: {
+  copyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.subtle,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.borderSubtle,
   },
-  copyActionBtnCopied: {
-    backgroundColor: Colors.paidBg,
-    borderColor: Colors.paidText,
+  copyBtnActive: {
+    backgroundColor: Colors.accentSoft,
   },
-  copyActionText: {
-    fontSize: FontSize.body,
+  copyBtnText: {
+    fontSize: 11,
     fontWeight: '600',
-    color: Colors.brandPrimary,
+    color: Colors.info,
   },
-  copyActionTextCopied: {
-    fontSize: FontSize.body,
+  copyBtnTextCopied: {
+    fontSize: 11,
     fontWeight: '600',
-    color: Colors.paidText,
+    color: Colors.accentStrong,
   },
-  sectionLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
-  sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  sumLabel: { color: Colors.textSecondary, fontSize: FontSize.body },
-  sumValue: {
-    color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600',
-    fontVariant: ['tabular-nums'], flexShrink: 1, textAlign: 'right',
+
+  installmentBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  sumValueStrong: { fontSize: 15, fontWeight: '700' },
-  divider: { height: 1, backgroundColor: Colors.borderSubtle, marginVertical: 4 },
-
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeOpt: {
-    flex: 1, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
-    paddingVertical: 10, alignItems: 'center', backgroundColor: Colors.surface,
+  installmentTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textPrimary,
   },
-  modeOptActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
-  modeText: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '600' },
-  modeTextActive: { color: Colors.white },
-  modeHint: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
-  modeNote: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
+  installmentSub: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+  },
+  scheduleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.navy,
+  },
+  scheduleBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.white,
+  },
 
-  empty: { alignItems: 'center', gap: 6, paddingVertical: 16 },
-  emptyTitle: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600', textAlign: 'center' },
-  emptyBody: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center', lineHeight: 16 },
-
+  /* Empty Box */
+  emptyBox: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptyTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  emptySub: {
+    fontSize: 11.5,
+    color: Colors.textMuted,
+    textAlign: 'center',
+  },
   histRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    borderTopWidth: 1, borderTopColor: Colors.borderSubtle, paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
   },
-  histName: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600' },
-  histDate: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 1 },
+  histRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  histName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  histDate: {
+    fontSize: 11,
+    color: Colors.textMuted,
+  },
   histAmt: {
-    color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
 
-  payAmount: {
-    color: Colors.textPrimary, fontSize: FontSize.heroNumeral, fontWeight: '700',
+  /* Actions */
+  markPaidBtn: {
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markPaidBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+  dualActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  editBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  editBtnText: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+  deleteBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  deleteBtnText: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
+
+  /* Pay Confirm Card */
+  payConfirmCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    gap: 10,
+  },
+  payConfirmTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  payConfirmAmount: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: Colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
-  cancel: { color: Colors.textSecondary, fontWeight: '600', textAlign: 'center', paddingVertical: 6 },
-  footNote: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center' },
-  cancelLink: { alignItems: 'center', paddingVertical: 8 },
-  cancelLinkText: { color: Colors.pendingText, fontWeight: '600' },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15, 23, 42, 0.35)' },
-  scheduleKeyboard: { width: '100%' },
-  scheduleCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, maxHeight: '92%' },
-  scheduleHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 20, borderBottomWidth: 1, borderBottomColor: Colors.borderSubtle },
-  scheduleContent: { padding: 20, paddingBottom: 36, gap: 10 },
-  scheduleInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, color: Colors.textPrimary, backgroundColor: Colors.canvas },
-  schedulePreview: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 12, gap: 4 },
-  previewTitle: { color: Colors.textPrimary, fontWeight: '600', fontSize: FontSize.body },
-  previewLine: { color: Colors.textSecondary, fontSize: FontSize.caption },
-  modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.lg, borderTopRightRadius: Radius.lg, padding: 20, gap: 10 },
-  modalTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },
-  modalBody: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 19 },
-  reasonList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  reason: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 8 },
-  reasonActive: { backgroundColor: Colors.brandPrimary, borderColor: Colors.brandPrimary },
-  reasonText: { color: Colors.textSecondary, fontWeight: '600' },
-  reasonTextActive: { color: Colors.white },
-  noteInput: { minHeight: 76, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, color: Colors.textPrimary, textAlignVertical: 'top' },
-  charCount: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'right' },
-  errText: { color: Colors.pendingText, fontSize: FontSize.body },
-  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
+  payConfirmHint: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginBottom: 4,
+  },
 
-  missing: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
-  missingTitle: { color: Colors.textPrimary, fontSize: FontSize.sectionTitle, fontWeight: '700' },
-  missingBody: { color: Colors.textSecondary, fontSize: FontSize.body, lineHeight: 18 },
+  /* Modals */
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: Colors.overlayScrim,
+    justifyContent: 'flex-end',
+  },
+  cancelCard: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+    gap: 12,
+  },
+  scheduleCard: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  sheetHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.borderStrong,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  modalBody: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  reasonList: {
+    gap: 8,
+    marginVertical: 4,
+  },
+  reason: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
+  reasonActive: {
+    borderColor: Colors.navy,
+    backgroundColor: '#F1F5F9',
+  },
+  reasonText: {
+    fontSize: 13,
+    color: Colors.textPrimary,
+  },
+  reasonTextActive: {
+    fontWeight: '700',
+  },
+  noteInput: {
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    paddingHorizontal: 12,
+    fontSize: 13,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  scheduleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  inputBox: {
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    fontSize: 13.5,
+    color: Colors.textPrimary,
+  },
+  previewBox: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    gap: 4,
+  },
+  previewTitle: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  previewLine: {
+    fontSize: 11.5,
+    color: Colors.textSecondary,
+  },
+  errBanner: {
+    fontSize: 12,
+    color: Colors.negative,
+    backgroundColor: '#FEF2F2',
+    padding: 10,
+    borderRadius: 10,
+  },
+  missing: {
+    flex: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  missingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
 });

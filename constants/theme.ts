@@ -67,6 +67,31 @@ export const Colors = {
   overlayScrimLight: '#0F172A33',
   overlayGhost: '#FFFFFFCC',
   overlayTint: '#FFFFFF1A',
+
+  // Revamp Design System & Dark Hero Tokens (from 01_home and revamp suite)
+  navy: '#0B1527',
+  navyRaised: '#152735',
+  navySoft: '#253746',
+  accent: '#1ED9AE',
+  accentSoft: '#DDF8F0',
+  accentStrong: '#008A6E',
+  positive: '#4CE2BB',
+  positiveSoft: '#075E4F',
+  negative: '#F16E64',
+  negativeSoft: '#583735',
+  warning: '#CE8723',
+  warningSoft: '#FFFAF2',
+  warningSoftIcon: '#FFF0D9',
+  warningBorder: '#F2E3CB',
+  info: '#3178E8',
+  infoSoft: '#EAF3FF',
+  purple: '#7963DB',
+  purpleSoft: '#F0EDFF',
+  textOnDark: '#F7FAFC',
+  textOnDarkSecondary: '#C4D0D9',
+  textOnDarkMuted: '#AAB8C3',
+  borderOnDark: '#41515E',
+  avatarBorder: '#657480',
 } as const;
 
 export const FontSize = {

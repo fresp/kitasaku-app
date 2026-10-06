@@ -96,6 +96,8 @@ function Gate() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="cycle-detail" options={{ presentation: 'card' }} />
+        <Stack.Screen name="cycle-history" options={{ presentation: 'card' }} />
         <Stack.Screen name="new-cycle" options={{ presentation: 'card' }} />
         <Stack.Screen name="templates" options={{ presentation: 'card' }} />
         <Stack.Screen name="category-detail" options={{ presentation: 'card' }} />

@@ -44,3 +44,5 @@ yarn-error.*
 # asset backups
 *.original.png
 /.claude
+/revamp_screens
+/docs/mockups

@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Plus from 'lucide-react-native/icons/plus';
-import EllipsisVertical from 'lucide-react-native/icons/ellipsis-vertical';
+import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import Check from 'lucide-react-native/icons/check';
 import X from 'lucide-react-native/icons/x';
 import Copy from 'lucide-react-native/icons/copy';
@@ -30,14 +30,13 @@ import Trash2 from 'lucide-react-native/icons/trash';
 import Archive from 'lucide-react-native/icons/archive';
 import CircleAlert from 'lucide-react-native/icons/circle-alert';
 
-import { Colors, FontSize, Radius } from '../constants/theme';
+import { Colors, Radius } from '../constants/theme';
 import { useAuth } from '../lib/auth-context';
+import { formatRupiah } from '../lib/format';
 import {
   ACCOUNT_ICON_CHOICES,
   ACCOUNT_TYPE_DEFAULT_ICONS,
-  accountSubline,
   maskAccountNumber,
-  resolveAccountIcon,
   validateAccountNumber,
 } from '../lib/account';
 import type { AccountType } from '../lib/account';
@@ -45,6 +44,7 @@ import {
   useAccountUsage,
   useAccounts,
   useActiveCycle,
+  useCycleAccountSnapshots,
   useUpdateCyclePrimaryAccount,
   useArchiveAccount,
   useCreateAccount,
@@ -55,16 +55,6 @@ import {
 import type { Account } from '../lib/queries';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
-
-/**
- * Screen "Kelola Akun" — Flow J: Managed Account.
- *
- * Slices 3 frames from design.pen:
- *   - Frame J1: List view (Active Accounts, Archived Accounts, Empty State)
- *   - Frame J2: Add / Edit form (Account Name, Type Grid, Account Number with live preview & copy,
- *               Account Holder Name, Icon Picker, and smart Archive vs Delete action)
- *   - Frame J3: Confirmation bottom sheet for archiving accounts
- */
 
 interface FormDraft {
   id: string | null;
@@ -112,6 +102,66 @@ function renderAccountIconGlyph(iconName: string, size = 18, color: string = Col
   }
 }
 
+function getAccountBrand(acc: Account) {
+  const nameLower = (acc.name || '').toLowerCase();
+  if (nameLower.includes('bca')) {
+    return { bg: '#0060AF', glyph: Landmark };
+  }
+  if (nameLower.includes('gopay')) {
+    return { bg: '#00AED6', glyph: Wallet };
+  }
+  if (nameLower.includes('dana')) {
+    return { bg: '#118EEA', glyph: Smartphone };
+  }
+  if (nameLower.includes('ovo')) {
+    return { bg: '#4C3494', glyph: CreditCard };
+  }
+  if (nameLower.includes('cash') || acc.type === 'CASH') {
+    return { bg: '#10B981', glyph: Banknote };
+  }
+  if (nameLower.includes('mandiri')) {
+    return { bg: '#003D79', glyph: Landmark };
+  }
+  if (nameLower.includes('bri')) {
+    return { bg: '#00529C', glyph: Landmark };
+  }
+  if (nameLower.includes('bni')) {
+    return { bg: '#F15A24', glyph: Landmark };
+  }
+  if (nameLower.includes('jago')) {
+    return { bg: '#F37021', glyph: Landmark };
+  }
+  switch (acc.type) {
+    case 'BANK':
+      return { bg: '#2563EB', glyph: Landmark };
+    case 'E_WALLET':
+      return { bg: '#0284C7', glyph: Wallet };
+    case 'CREDIT_CARD':
+      return { bg: '#4F46E5', glyph: CreditCard };
+    case 'CASH':
+      return { bg: '#10B981', glyph: Banknote };
+    default:
+      return { bg: '#475569', glyph: Wallet };
+  }
+}
+
+function getAccountTypeSubline(acc: Account) {
+  const last4 = acc.account_number ? acc.account_number.replace(/[\s-]/g, '').slice(-4) : '';
+  if (acc.type === 'BANK') {
+    return last4 ? `Rekening · ${last4}` : 'Rekening Bank';
+  }
+  if (acc.type === 'E_WALLET') {
+    return 'E-Wallet';
+  }
+  if (acc.type === 'CASH') {
+    return 'Uang Tunai';
+  }
+  if (acc.type === 'CREDIT_CARD') {
+    return last4 ? `Kartu Kredit · ${last4}` : 'Kartu Kredit';
+  }
+  return acc.type;
+}
+
 export default function ManagedAccountScreen() {
   const router = useRouter();
   const { household } = useAuth();
@@ -119,6 +169,7 @@ export default function ManagedAccountScreen() {
 
   const accsQ = useAccounts(householdId, { includeArchived: true });
   const activeCycleQ = useActiveCycle(householdId);
+  const snapshotsQ = useCycleAccountSnapshots(householdId, activeCycleQ.data?.id);
   const updatePrimaryAccount = useUpdateCyclePrimaryAccount();
   const createAccount = useCreateAccount();
   const updateAccount = useUpdateAccount();
@@ -131,6 +182,7 @@ export default function ManagedAccountScreen() {
   const [draft, setDraft] = useState<FormDraft>(EMPTY_DRAFT);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [topMenuVisible, setTopMenuVisible] = useState(false);
 
   // Bottom sheet state for J3 Archive Confirmation
   const [archiveTarget, setArchiveTarget] = useState<Account | null>(null);
@@ -140,7 +192,7 @@ export default function ManagedAccountScreen() {
 
   // Check usage for the editing account
   const usageQ = useAccountUsage(draft.id ?? undefined);
-  const isReferenced = usageQ.data?.isUsed ?? true; // Safe default: assume referenced until proven otherwise
+  const isReferenced = usageQ.data?.isUsed ?? true;
 
   const allAccounts = useMemo(() => accsQ.data ?? [], [accsQ.data]);
   const activeAccounts = useMemo(
@@ -151,6 +203,14 @@ export default function ManagedAccountScreen() {
     () => allAccounts.filter((a) => a.is_active === false),
     [allAccounts]
   );
+
+  const snapshotsByAccount = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of snapshotsQ.data ?? []) {
+      map[s.account_id] = s.closing_stated;
+    }
+    return map;
+  }, [snapshotsQ.data]);
 
   const saving = createAccount.isPending || updateAccount.isPending;
   const primaryAccountId = activeCycleQ.data?.primary_account_id ?? null;
@@ -289,41 +349,30 @@ export default function ManagedAccountScreen() {
   }
 
   // ==========================================
-  // FRAME J2: FORM VIEW (Tambah / Ubah Akun)
+  // FORM VIEW (Tambah / Ubah Akun)
   // ==========================================
   if (viewMode === 'form') {
     const isEdit = !!draft.id;
     const effectiveDefaultIcon = ACCOUNT_TYPE_DEFAULT_ICONS[draft.type] ?? 'wallet';
     const effectiveIcon = draft.icon ?? effectiveDefaultIcon;
-    const maskedPreview = draft.accountNumber.trim().length >= 4
-      ? maskAccountNumber(draft.accountNumber)
-      : null;
+    const maskedPreview =
+      draft.accountNumber.trim().length >= 4
+        ? maskAccountNumber(draft.accountNumber)
+        : null;
 
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           {/* Top Bar */}
           <View style={styles.topBar}>
-            <Pressable onPress={() => setViewMode('list')} style={styles.backBtn}>
-              <ArrowLeft size={18} color={Colors.textPrimary} />
+            <Pressable onPress={() => setViewMode('list')} style={styles.navBtn}>
+              <ArrowLeft size={20} color="#0B1527" />
             </Pressable>
-            <Text style={styles.crumb}>
-              Kelola Akun / {isEdit ? 'Ubah Akun' : 'Tambah Akun'}
-            </Text>
+            <Text style={styles.headerTitle}>{isEdit ? 'Ubah Akun' : 'Tambah Akun'}</Text>
+            <View style={{ width: 36 }} />
           </View>
 
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.eyebrow}>KELOLA AKUN</Text>
-            <Text style={styles.title}>{isEdit ? 'Ubah Akun' : 'Tambah Akun'}</Text>
-            <Text style={styles.supporting}>
-              {isEdit
-                ? 'Perbarui data rekening atau kartu keluarga'
-                : 'Tambah data rekening, kartu, atau e-wallet keluarga'}
-            </Text>
-          </View>
-
-          {/* Form Fields */}
+          {/* Form Fields Card */}
           <View style={styles.formCard}>
             {/* Field 1: Nama Akun */}
             <View style={styles.fieldGroup}>
@@ -332,7 +381,7 @@ export default function ManagedAccountScreen() {
                 <TextInput
                   value={draft.name}
                   onChangeText={(v) => setDraft({ ...draft, name: v })}
-                  placeholder="Contoh: Mandiri"
+                  placeholder="Contoh: BCA, GoPay, Mandiri"
                   placeholderTextColor={Colors.textMuted}
                   style={styles.inputFlex}
                 />
@@ -406,7 +455,7 @@ export default function ManagedAccountScreen() {
                         copied && { color: Colors.paidText },
                       ]}
                     >
-                      {copied ? 'Tersalin' : 'Salin nomor'}
+                      {copied ? 'Tersalin' : 'Salin'}
                     </Text>
                   </Pressable>
                 )}
@@ -418,12 +467,6 @@ export default function ManagedAccountScreen() {
                   <Text style={styles.previewText}>Tampil sebagai {maskedPreview}</Text>
                 </View>
               ) : null}
-
-              <Text style={styles.helperText}>
-                {draft.accountNumber.trim().length > 0
-                  ? 'Disimpan lengkap, tapi hanya 4 digit terakhir yang tampil di layar lain.'
-                  : 'Kosongkan kalau tidak ingin mencatat nomornya.'}
-              </Text>
             </View>
 
             {/* Field 4: Nama Pemilik Rekening */}
@@ -432,22 +475,19 @@ export default function ManagedAccountScreen() {
               <TextInput
                 value={draft.accountHolderName}
                 onChangeText={(v) => setDraft({ ...draft, accountHolderName: v })}
-                placeholder="Contoh: Andra Pratama"
+                placeholder="Nama yang tertera di rekening"
                 placeholderTextColor={Colors.textMuted}
                 style={styles.input}
               />
-              <Text style={styles.helperText}>
-                Nama yang tertera di rekening. Boleh berbeda dari nama kamu.
-              </Text>
             </View>
 
             {/* Field 5: Icon Akun */}
             <View style={styles.fieldGroup}>
               <View style={styles.labelRow}>
-                <Text style={styles.label}>ICON AKUN (OPSIONAL)</Text>
+                <Text style={styles.label}>ICON AKUN</Text>
                 {draft.icon && (
                   <Pressable onPress={() => setDraft({ ...draft, icon: null })}>
-                    <Text style={styles.resetLink}>Gunakan default</Text>
+                    <Text style={styles.resetLink}>Default</Text>
                   </Pressable>
                 )}
               </View>
@@ -489,7 +529,7 @@ export default function ManagedAccountScreen() {
               </View>
             )}
 
-            {/* Action Row */}
+            {/* Action Buttons */}
             <View style={styles.actionRow}>
               <View style={{ flex: 1 }}>
                 <SecondaryButton
@@ -513,77 +553,60 @@ export default function ManagedAccountScreen() {
               <View style={styles.destructiveSection}>
                 <View style={styles.divider} />
                 {isReferenced ? (
-                  <View style={{ gap: 8 }}>
-                    <Pressable
-                      onPress={() => {
-                        const target = allAccounts.find((a) => a.id === draft.id);
-                        if (target) setArchiveTarget(target);
-                      }}
-                      style={styles.archiveBtn}
-                    >
-                      <Archive size={16} color={Colors.alertText} />
-                      <Text style={styles.archiveBtnText}>Arsipkan Akun</Text>
-                    </Pressable>
-                    <Text style={styles.destructiveHelper}>
-                      Akun ini memiliki referensi riwayat atau dipakai sebagai rekening utama. Tidak bisa dihapus; arsipkan setelah memilih rekening utama pengganti bila diperlukan.
-                    </Text>
-                  </View>
+                  <Pressable
+                    onPress={() => {
+                      const target = allAccounts.find((a) => a.id === draft.id);
+                      if (target) setArchiveTarget(target);
+                    }}
+                    style={styles.archiveBtn}
+                  >
+                    <Archive size={16} color={Colors.alertText} />
+                    <Text style={styles.archiveBtnText}>Arsipkan Akun</Text>
+                  </Pressable>
                 ) : (
-                  <View style={{ gap: 8 }}>
-                    <Pressable
-                      onPress={() => {
-                        const target = allAccounts.find((a) => a.id === draft.id);
-                        if (target) executeDelete(target);
-                      }}
-                      style={styles.deleteBtn}
-                    >
-                      <Trash2 size={16} color={Colors.pendingText} />
-                      <Text style={styles.deleteBtnText}>Hapus Akun</Text>
-                    </Pressable>
-                    <Text style={styles.destructiveHelper}>
-                      Akun ini belum pernah digunakan di transaksi atau template. Bisa dihapus secara permanen.
-                    </Text>
-                  </View>
+                  <Pressable
+                    onPress={() => {
+                      const target = allAccounts.find((a) => a.id === draft.id);
+                      if (target) executeDelete(target);
+                    }}
+                    style={styles.deleteBtn}
+                  >
+                    <Trash2 size={16} color={Colors.pendingText} />
+                    <Text style={styles.deleteBtnText}>Hapus Akun</Text>
+                  </Pressable>
                 )}
               </View>
             )}
           </View>
         </ScrollView>
 
-        {/* J3 Bottom Sheet Modal if opened from form view */}
         {renderArchiveBottomSheet()}
       </SafeAreaView>
     );
   }
 
   // ==========================================
-  // FRAME J1: LIST VIEW (Screen - Managed Account)
+  // LIST VIEW (Matches 12_kelola_akun.png)
   // ==========================================
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Top Bar */}
+        {/* Top Header Bar */}
         <View style={styles.topBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <ArrowLeft size={18} color={Colors.textPrimary} />
+          <Pressable onPress={() => router.back()} style={styles.navBtn}>
+            <ArrowLeft size={20} color="#0B1527" />
           </Pressable>
-          <Text style={styles.crumb}>My Profile / Kelola Akun</Text>
+          <Text style={styles.headerTitle}>Akun</Text>
+          <Pressable onPress={() => setTopMenuVisible(true)} style={styles.navBtn}>
+            <MoreVertical size={20} color="#0B1527" />
+          </Pressable>
         </View>
 
-        {/* Screen Header */}
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={styles.eyebrow}>MY PROFILE · PREFERENSI</Text>
-            <Text style={styles.title}>Kelola Akun</Text>
-            <Text style={styles.supporting}>
-              Rekening, kartu, dan e-wallet keluarga
-            </Text>
-          </View>
-          <Pressable onPress={openCreateForm} style={styles.addBtn}>
-            <Plus size={14} color={Colors.white} />
-            <Text style={styles.addBtnText}>Tambah Akun</Text>
-          </Pressable>
-        </View>
+        {/* Centered "+ Tambah Akun" Pill */}
+        <Pressable onPress={openCreateForm} style={styles.addAccountPill}>
+          <Plus size={16} color="#0B1527" strokeWidth={2.5} />
+          <Text style={styles.addAccountText}>Tambah Akun</Text>
+        </Pressable>
 
         {/* Empty State */}
         {allAccounts.length === 0 ? (
@@ -593,134 +616,160 @@ export default function ManagedAccountScreen() {
             </View>
             <Text style={styles.emptyTitle}>Belum ada akun</Text>
             <Text style={styles.emptySub}>
-              Tambahkan rekening, kartu, atau e-wallet supaya pembayaran bisa dicatat dari sumber yang benar.
+              Tambahkan rekening, kartu, atau e-wallet keluarga untuk mencatat mutasi pengeluaran.
             </Text>
-            <Pressable onPress={openCreateForm} style={styles.emptyAddBtn}>
-              <Plus size={16} color={Colors.white} />
-              <Text style={styles.emptyAddText}>Tambah Akun</Text>
-            </Pressable>
           </View>
         ) : (
-          <>
-            {/* Active Accounts Group */}
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>
-                AKUN AKTIF ({activeAccounts.length})
-              </Text>
-            </View>
+          <View style={styles.accountListCard}>
+            {activeAccounts.map((acc, index) => {
+              const brand = getAccountBrand(acc);
+              const BrandGlyph = brand.glyph;
+              const subline = getAccountTypeSubline(acc);
+              const balance = snapshotsByAccount[acc.id] ?? 0;
+              const isLast = index === activeAccounts.length - 1;
 
-            <View style={styles.accountList}>
-              {activeAccounts.map((acc) => {
-                const iconName = resolveAccountIcon(acc.type, acc.icon);
-                const sub = accountSubline(acc);
+              return (
+                <Pressable
+                  key={acc.id}
+                  onPress={() => openEditForm(acc)}
+                  onLongPress={() => setMenuTarget(acc)}
+                  style={[styles.accountRow, !isLast && styles.accountRowBordered]}
+                >
+                  {/* Colored Squircle Brand Icon */}
+                  <View style={[styles.brandSquircle, { backgroundColor: brand.bg }]}>
+                    <BrandGlyph size={20} color="#FFFFFF" />
+                  </View>
+
+                  {/* Account Name & Type/Masked */}
+                  <View style={styles.accountInfo}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.accountName} numberOfLines={1}>
+                        {acc.name}
+                      </Text>
+                      {acc.id === primaryAccountId && (
+                        <Badge label="Utama" tone="paid" />
+                      )}
+                    </View>
+                    <Text style={styles.accountSub}>{subline}</Text>
+                  </View>
+
+                  {/* Right-aligned Balance */}
+                  <Text style={styles.accountBalance}>
+                    {formatRupiah(balance)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Archived Accounts Group */}
+        {archivedAccounts.length > 0 && (
+          <View style={styles.archivedSection}>
+            <Text style={styles.archivedTitle}>
+              DIARSIPKAN ({archivedAccounts.length})
+            </Text>
+
+            <View style={styles.accountListCard}>
+              {archivedAccounts.map((acc, index) => {
+                const brand = getAccountBrand(acc);
+                const BrandGlyph = brand.glyph;
+                const subline = getAccountTypeSubline(acc);
+                const isLast = index === archivedAccounts.length - 1;
 
                 return (
-                  <Pressable
+                  <View
                     key={acc.id}
-                    onPress={() => openEditForm(acc)}
-                    style={styles.accountCard}
+                    style={[
+                      styles.accountRow,
+                      styles.accountRowArchived,
+                      !isLast && styles.accountRowBordered,
+                    ]}
                   >
-                    <View style={styles.accountIconBox}>
-                      {renderAccountIconGlyph(iconName, 18, Colors.brandPrimary)}
+                    <View style={[styles.brandSquircle, { backgroundColor: '#94A3B8' }]}>
+                      <BrandGlyph size={20} color="#FFFFFF" />
                     </View>
 
-                    <View style={styles.accountCardMiddle}>
-                      <View style={styles.nameRow}>
-                        <Text style={styles.accountName} numberOfLines={1}>
+                    <View style={styles.accountInfo}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.accountName, { color: Colors.textSecondary }]} numberOfLines={1}>
                           {acc.name}
                         </Text>
-                        {acc.account_holder_name ? (
-                          <Text style={styles.holderTag} numberOfLines={1}>
-                            · {acc.account_holder_name}
-                          </Text>
-                        ) : null}
-                        {acc.type === 'BANK' && acc.id === primaryAccountId && <Badge label="Utama siklus" tone="paid" />}
+                        <Badge label="Arsip" tone="default" />
                       </View>
-                      <Text style={styles.accountSubline}>{sub}</Text>
+                      <Text style={styles.accountSub}>{subline}</Text>
                     </View>
 
                     <Pressable
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setMenuTarget(acc);
-                      }}
-                      style={styles.moreBtn}
-                      hitSlop={8}
+                      onPress={() => executeReactivate(acc)}
+                      style={styles.reactivateBtn}
                     >
-                      <EllipsisVertical size={16} color={Colors.textSecondary} />
+                      <RotateCcw size={14} color={Colors.paidText} />
+                      <Text style={styles.reactivateText}>Aktifkan</Text>
                     </Pressable>
-                  </Pressable>
+                  </View>
                 );
               })}
             </View>
-
-            {/* Archived Accounts Group */}
-            {archivedAccounts.length > 0 && (
-              <View style={styles.archivedSection}>
-                <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitleMuted}>
-                    DIARSIPKAN ({archivedAccounts.length})
-                  </Text>
-                </View>
-
-                <View style={styles.accountList}>
-                  {archivedAccounts.map((acc) => {
-                    const iconName = resolveAccountIcon(acc.type, acc.icon);
-                    const sub = accountSubline(acc);
-
-                    return (
-                      <View key={acc.id} style={[styles.accountCard, styles.accountCardArchived]}>
-                        <View style={[styles.accountIconBox, styles.accountIconBoxArchived]}>
-                          {renderAccountIconGlyph(iconName, 18, Colors.textMuted)}
-                        </View>
-
-                        <View style={styles.accountCardMiddle}>
-                          <View style={styles.nameRow}>
-                            <Text
-                              style={[styles.accountName, styles.accountNameArchived]}
-                              numberOfLines={1}
-                            >
-                              {acc.name}
-                            </Text>
-                            <Badge label="— Diarsipkan" tone="default" />
-                          </View>
-                          <Text style={styles.accountSublineMuted}>{sub}</Text>
-                        </View>
-
-                        <Pressable
-                          onPress={() => executeReactivate(acc)}
-                          style={styles.reactivateInlineBtn}
-                        >
-                          <RotateCcw size={14} color={Colors.paidText} />
-                          <Text style={styles.reactivateInlineText}>Aktifkan</Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })}
-                </View>
-
-                <View style={styles.archivedNotice}>
-                  <Text style={styles.archivedNoticeText}>
-                    Akun diarsipkan tidak muncul di pilihan &quot;Bayar dari&quot;, Alokasi, atau Template Rutin.
-                  </Text>
-                </View>
-              </View>
-            )}
-          </>
+          </View>
         )}
       </ScrollView>
 
-      {/* Action Sheet Menu for card row */}
+      {/* Row Action Menu Modal */}
       {renderRowActionMenu()}
 
-      {/* FRAME J3: BOTTOM SHEET KONFIRMASI ARSIP */}
+      {/* Top Header More Menu Modal */}
+      {renderTopMenu()}
+
+      {/* Frame J3 Archive Bottom Sheet */}
       {renderArchiveBottomSheet()}
     </SafeAreaView>
   );
 
-  // ==========================================
-  // HELPER: J1 ROW ACTION MENU (MODAL)
-  // ==========================================
+  function renderTopMenu() {
+    return (
+      <Modal
+        visible={topMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTopMenuVisible(false)}
+      >
+        <Pressable style={styles.modalScrim} onPress={() => setTopMenuVisible(false)}>
+          <View style={styles.actionSheetContent}>
+            <View style={styles.actionSheetHeader}>
+              <Text style={styles.actionSheetTitle}>Opsi Akun</Text>
+              <Pressable onPress={() => setTopMenuVisible(false)}>
+                <X size={18} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                setTopMenuVisible(false);
+                router.push('/account-snapshots');
+              }}
+              style={styles.actionSheetRow}
+            >
+              <Wallet size={18} color="#0B1527" />
+              <Text style={styles.actionSheetRowText}>Snapshot Saldo Kas</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                setTopMenuVisible(false);
+                router.push('/account-summary');
+              }}
+              style={styles.actionSheetRow}
+            >
+              <Landmark size={18} color="#0B1527" />
+              <Text style={styles.actionSheetRowText}>Ringkasan Zero-Based Kas</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+    );
+  }
+
   function renderRowActionMenu() {
     if (!menuTarget) return null;
     const isArchived = menuTarget.is_active === false;
@@ -738,7 +787,7 @@ export default function ManagedAccountScreen() {
               <Text style={styles.actionSheetTitle} numberOfLines={1}>
                 {menuTarget.name}
               </Text>
-              <Pressable onPress={() => setMenuTarget(null)} style={styles.closeBtn}>
+              <Pressable onPress={() => setMenuTarget(null)}>
                 <X size={18} color={Colors.textSecondary} />
               </Pressable>
             </View>
@@ -766,7 +815,9 @@ export default function ManagedAccountScreen() {
                 style={styles.actionSheetRow}
               >
                 <Check size={18} color={Colors.brandPrimary} />
-                <Text style={[styles.actionSheetRowText, { color: Colors.brandPrimary }]}>Set primary</Text>
+                <Text style={[styles.actionSheetRowText, { color: Colors.brandPrimary }]}>
+                  Jadikan Rekening Utama
+                </Text>
               </Pressable>
             )}
 
@@ -805,14 +856,9 @@ export default function ManagedAccountScreen() {
     );
   }
 
-  // ==========================================
-  // FRAME J3: BOTTOM SHEET KONFIRMASI ARSIP
-  // ==========================================
   function renderArchiveBottomSheet() {
     if (!archiveTarget) return null;
-
-    const iconName = resolveAccountIcon(archiveTarget.type, archiveTarget.icon);
-    const sub = accountSubline(archiveTarget);
+    const sub = getAccountTypeSubline(archiveTarget);
 
     return (
       <Modal
@@ -822,40 +868,29 @@ export default function ManagedAccountScreen() {
         onRequestClose={() => setArchiveTarget(null)}
       >
         <View style={styles.sheetOverlay}>
-          <Pressable
-            style={styles.sheetBackdrop}
-            onPress={() => setArchiveTarget(null)}
-          />
-
+          <Pressable style={styles.sheetBackdrop} onPress={() => setArchiveTarget(null)} />
           <View style={styles.sheetCard}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Arsipkan akun ini?</Text>
-              <Pressable onPress={() => setArchiveTarget(null)} style={styles.closeBtn}>
+              <Pressable onPress={() => setArchiveTarget(null)}>
                 <X size={20} color={Colors.textSecondary} />
               </Pressable>
             </View>
 
             <Text style={styles.sheetDescription}>
-              &quot;{archiveTarget.name}&quot; tidak akan muncul lagi di pilihan &quot;Bayar dari&quot;,
-              Alokasi, dan Template Rutin. Transaksi lama yang memakainya tetap utuh dan
-              tetap menampilkan nama akun ini.
+              &quot;{archiveTarget.name}&quot; tidak akan muncul lagi di pilihan transaksi baru. Mutasi lama yang memakainya tetap aman.
             </Text>
 
-            {/* Target Account Preview Card */}
             <View style={styles.sheetPreviewCard}>
-              <View style={styles.accountIconBox}>
-                {renderAccountIconGlyph(iconName, 18, Colors.brandPrimary)}
+              <View style={[styles.brandSquircle, { backgroundColor: '#94A3B8' }]}>
+                <Wallet size={18} color="#FFFFFF" />
               </View>
               <View style={{ flex: 1, gap: 2 }}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.accountName}>{archiveTarget.name}</Text>
-                  <Badge label="— Akan diarsipkan" tone="alert" />
-                </View>
-                <Text style={styles.accountSubline}>{sub}</Text>
+                <Text style={styles.accountName}>{archiveTarget.name}</Text>
+                <Text style={styles.accountSub}>{sub}</Text>
               </View>
             </View>
 
-            {/* Action Row */}
             <View style={styles.sheetActionRow}>
               <View style={{ flex: 1 }}>
                 <SecondaryButton
@@ -880,152 +915,105 @@ export default function ManagedAccountScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.canvas,
+    backgroundColor: '#FFFFFF',
   },
   container: {
-    padding: 16,
-    paddingBottom: 48,
-    gap: 16,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  backBtn: {
+  navBtn: {
     width: 36,
     height: 36,
-    borderRadius: Radius.sm,
-    backgroundColor: Colors.surface,
+    borderRadius: Radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
   },
-  crumb: {
-    fontSize: FontSize.body,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  header: {
-    gap: 4,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  eyebrow: {
-    fontSize: FontSize.caption,
-    letterSpacing: 0.8,
-    color: Colors.textMuted,
+  headerTitle: {
+    fontSize: 18,
     fontWeight: '700',
+    color: '#0B1527',
+    textAlign: 'center',
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  supporting: {
-    fontSize: FontSize.body,
-    color: Colors.textSecondary,
-    lineHeight: 18,
-  },
-  addBtn: {
+  addAccountPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    backgroundColor: Colors.brandPrimary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: Radius.pill,
-    alignSelf: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignSelf: 'center',
+    marginBottom: 20,
   },
-  addBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.white,
+  addAccountText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0B1527',
   },
 
-  // List section styles
-  sectionHeaderRow: {
-    marginTop: 8,
+  accountListCard: {
+    backgroundColor: '#FFFFFF',
   },
-  sectionTitle: {
-    fontSize: FontSize.caption,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-    letterSpacing: 0.5,
-  },
-  sectionTitleMuted: {
-    fontSize: FontSize.caption,
-    fontWeight: '700',
-    color: Colors.textMuted,
-    letterSpacing: 0.5,
-  },
-  accountList: {
-    gap: 8,
-  },
-  accountCard: {
+  accountRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    padding: 12,
-    gap: 12,
+    paddingVertical: 14,
+    gap: 14,
   },
-  accountCardArchived: {
-    backgroundColor: Colors.canvas,
-    borderColor: Colors.borderSubtle,
-    opacity: 0.85,
+  accountRowBordered: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
-  accountIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: Colors.subtle,
+  accountRowArchived: {
+    opacity: 0.65,
+  },
+  brandSquircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  accountIconBoxArchived: {
-    backgroundColor: Colors.borderSubtle,
-  },
-  accountCardMiddle: {
+  accountInfo: {
     flex: 1,
-    gap: 3,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    gap: 2,
   },
   accountName: {
-    fontSize: FontSize.cardTitle,
-    fontWeight: '600',
-    color: Colors.textPrimary,
+    fontSize: 15.5,
+    fontWeight: '700',
+    color: '#0B1527',
   },
-  accountNameArchived: {
-    color: Colors.textSecondary,
+  accountSub: {
+    fontSize: 13,
+    color: '#64748B',
   },
-  holderTag: {
-    fontSize: FontSize.caption,
-    color: Colors.textMuted,
+  accountBalance: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0B1527',
   },
-  accountSubline: {
-    fontSize: FontSize.body,
-    color: Colors.textSecondary,
+
+  archivedSection: {
+    marginTop: 24,
+    gap: 10,
   },
-  accountSublineMuted: {
-    fontSize: FontSize.body,
-    color: Colors.textMuted,
+  archivedTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+    letterSpacing: 0.5,
   },
-  moreBtn: {
-    padding: 6,
-  },
-  reactivateInlineBtn: {
+  reactivateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1033,93 +1021,55 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: Radius.pill,
     backgroundColor: Colors.paidBg,
-    borderWidth: 1,
-    borderColor: Colors.paidText + '33',
   },
-  reactivateInlineText: {
+  reactivateText: {
     fontSize: 12,
     fontWeight: '600',
     color: Colors.paidText,
   },
-  archivedSection: {
-    marginTop: 16,
-    gap: 8,
-  },
-  archivedNotice: {
-    backgroundColor: Colors.subtle,
-    borderRadius: Radius.sm,
-    padding: 10,
-  },
-  archivedNoticeText: {
-    fontSize: FontSize.caption,
-    color: Colors.textMuted,
-    lineHeight: 16,
-  },
 
-  // Empty state
   emptyCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    textAlign: 'center',
     gap: 8,
-    marginTop: 16,
+    marginTop: 20,
   },
   emptyIconBox: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.subtle,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#EEF2FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
-    color: Colors.textPrimary,
+    color: '#0B1527',
   },
   emptySub: {
-    fontSize: FontSize.body,
-    color: Colors.textSecondary,
+    fontSize: 13,
+    color: '#64748B',
     textAlign: 'center',
     lineHeight: 18,
-    marginBottom: 8,
-  },
-  emptyAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.brandPrimary,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: Radius.pill,
-  },
-  emptyAddText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.white,
   },
 
   // Form styles
   formCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     gap: 16,
+    marginTop: 8,
   },
   fieldGroup: {
     gap: 6,
   },
   label: {
-    fontSize: FontSize.caption,
+    fontSize: 12,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: '#64748B',
     letterSpacing: 0.5,
   },
   labelRow: {
@@ -1128,58 +1078,57 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   resetLink: {
-    fontSize: FontSize.caption,
+    fontSize: 12,
     fontWeight: '600',
-    color: Colors.textSecondary,
-    textDecorationLine: 'underline',
+    color: Colors.brandPrimary,
   },
   input: {
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    borderRadius: Radius.md,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
     paddingHorizontal: 12,
     height: 44,
-    fontSize: FontSize.body,
-    color: Colors.textPrimary,
-    backgroundColor: Colors.canvas,
+    fontSize: 14,
+    color: '#0B1527',
+    backgroundColor: '#F8FAFC',
   },
   inputWithIcon: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    borderRadius: Radius.md,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
     paddingHorizontal: 12,
     height: 44,
-    backgroundColor: Colors.canvas,
+    backgroundColor: '#F8FAFC',
   },
   inputWithAction: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    borderRadius: Radius.md,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
     paddingLeft: 12,
     paddingRight: 6,
     height: 44,
-    backgroundColor: Colors.canvas,
+    backgroundColor: '#F8FAFC',
   },
   inputFlex: {
     flex: 1,
     height: 44,
-    fontSize: FontSize.body,
-    color: Colors.textPrimary,
+    fontSize: 14,
+    color: '#0B1527',
   },
   copyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.surface,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
+    borderColor: '#E2E8F0',
     paddingHorizontal: 8,
     paddingVertical: 5,
-    borderRadius: Radius.sm,
+    borderRadius: 6,
   },
   copyBtnText: {
     fontSize: 12,
@@ -1193,17 +1142,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   previewText: {
-    fontSize: FontSize.caption,
+    fontSize: 12,
     fontWeight: '600',
     color: Colors.paidText,
   },
-  helperText: {
-    fontSize: FontSize.caption,
-    color: Colors.textMuted,
-    lineHeight: 15,
-  },
 
-  // Type Grid
   typeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1211,15 +1154,15 @@ const styles = StyleSheet.create({
   },
   typeCard: {
     width: '48.5%',
-    backgroundColor: Colors.canvas,
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
-    borderRadius: Radius.md,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
     padding: 12,
     gap: 8,
   },
   typeCardSelected: {
-    backgroundColor: Colors.surface,
+    backgroundColor: '#FFFFFF',
     borderColor: Colors.brandPrimary,
     borderWidth: 1.5,
   },
@@ -1231,25 +1174,24 @@ const styles = StyleSheet.create({
   typeCardIconBox: {
     width: 32,
     height: 32,
-    borderRadius: Radius.sm,
-    backgroundColor: Colors.subtle,
+    borderRadius: 8,
+    backgroundColor: '#EEF2FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   typeCardIconBoxSelected: {
-    backgroundColor: Colors.subtle,
+    backgroundColor: '#EEF2FF',
   },
   typeCardLabel: {
     fontSize: 13,
     fontWeight: '500',
-    color: Colors.textSecondary,
+    color: '#64748B',
   },
   typeCardLabelSelected: {
     fontWeight: '700',
-    color: Colors.textPrimary,
+    color: '#0B1527',
   },
 
-  // Icon choices row
   iconRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1260,15 +1202,15 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.canvas,
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
+    borderColor: '#E2E8F0',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   iconChoiceSelected: {
-    backgroundColor: Colors.surface,
+    backgroundColor: '#FFFFFF',
     borderColor: Colors.brandPrimary,
     borderWidth: 2,
   },
@@ -1284,17 +1226,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // Error box
   errBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     backgroundColor: Colors.pendingBg,
-    borderRadius: Radius.sm,
+    borderRadius: 8,
     padding: 10,
   },
   errText: {
-    fontSize: FontSize.caption,
+    fontSize: 12,
     color: Colors.pendingText,
     flex: 1,
   },
@@ -1304,15 +1245,13 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 8,
   },
-
-  // Destructive section
   destructiveSection: {
     gap: 12,
     marginTop: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: Colors.borderSubtle,
+    backgroundColor: '#F1F5F9',
   },
   archiveBtn: {
     flexDirection: 'row',
@@ -1320,7 +1259,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     height: 44,
-    borderRadius: Radius.md,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.alertText,
     backgroundColor: Colors.alertBg,
@@ -1336,7 +1275,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     height: 44,
-    borderRadius: Radius.md,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.pendingBorder,
     backgroundColor: Colors.pendingBg,
@@ -1346,23 +1285,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.pendingText,
   },
-  destructiveHelper: {
-    fontSize: FontSize.caption,
-    color: Colors.textMuted,
-    lineHeight: 16,
-    textAlign: 'center',
-  },
 
-  // Action Sheet (Modal)
   modalScrim: {
     flex: 1,
-    backgroundColor: Colors.overlayScrim,
+    backgroundColor: 'rgba(11, 21, 39, 0.45)',
     justifyContent: 'flex-end',
   },
   actionSheetContent: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     gap: 12,
   },
@@ -1372,15 +1304,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.borderSubtle,
+    borderBottomColor: '#F1F5F9',
   },
   actionSheetTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  closeBtn: {
-    padding: 4,
+    color: '#0B1527',
   },
   actionSheetRow: {
     flexDirection: 'row',
@@ -1389,24 +1318,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   actionSheetRowText: {
-    fontSize: 15,
+    fontSize: 14.5,
     fontWeight: '600',
-    color: Colors.textPrimary,
+    color: '#0B1527',
   },
 
-  // Bottom Sheet (J3)
   sheetOverlay: {
     flex: 1,
-    backgroundColor: Colors.overlayScrim,
+    backgroundColor: 'rgba(11, 21, 39, 0.45)',
     justifyContent: 'flex-end',
   },
   sheetBackdrop: {
     flex: 1,
   },
   sheetCard: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     gap: 16,
   },
@@ -1416,23 +1344,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sheetTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    color: Colors.textPrimary,
+    color: '#0B1527',
   },
   sheetDescription: {
-    fontSize: FontSize.body,
-    color: Colors.textSecondary,
-    lineHeight: 20,
+    fontSize: 13.5,
+    color: '#64748B',
+    lineHeight: 19,
   },
   sheetPreviewCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: Colors.canvas,
-    borderRadius: Radius.md,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: Colors.borderSubtle,
+    borderColor: '#E2E8F0',
     padding: 12,
   },
   sheetActionRow: {

@@ -1,42 +1,45 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Plus from 'lucide-react-native/icons/plus';
-import Pencil from 'lucide-react-native/icons/pencil';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Trash2 from 'lucide-react-native/icons/trash';
-import Check from 'lucide-react-native/icons/check';
-import { Colors, FontSize, Radius } from '../constants/theme';
+import X from 'lucide-react-native/icons/x';
+import Utensils from 'lucide-react-native/icons/utensils';
+import Home from 'lucide-react-native/icons/house';
+import Car from 'lucide-react-native/icons/car';
+import Zap from 'lucide-react-native/icons/zap';
+import GraduationCap from 'lucide-react-native/icons/graduation-cap';
+import Heart from 'lucide-react-native/icons/heart';
+import Sparkles from 'lucide-react-native/icons/sparkles';
+import ShoppingBag from 'lucide-react-native/icons/shopping-bag';
+import CircleDollarSign from 'lucide-react-native/icons/circle-dollar-sign';
+import TrendingUp from 'lucide-react-native/icons/trending-up';
+import Layers from 'lucide-react-native/icons/layers';
+
+import { Colors, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
+  useActiveCycle,
   useCategories,
   useCreateCategory,
   useDeleteCategory,
+  useTransactions,
   useUpdateCategory,
 } from '../lib/queries';
-import type { Category, CategorySystemRole } from '../lib/queries';
-import { categoryIconName } from '../lib/category-icon';
+import type { Category } from '../lib/queries';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
-import { BrandIcon } from '../components/ui/BrandIcon';
-
-/**
- * Screen "Kelola Kategori".
- *
- * System categories are split out of the user's list and shown first, because
- * they are not really the family's data — they are the app's vocabulary, and
- * burying them among custom rows invites an attempt to delete one. They can be
- * renamed but not removed; migration 006 enforces that with a trigger, and this
- * screen only mirrors the rule so the failure is a disabled control instead of
- * a database error.
- */
-
-const SYSTEM_ROLE_HINT: Record<CategorySystemRole, string> = {
-  DEBT_PAYMENT: 'Kewajiban · Tidak dapat dihapus',
-  FINANCING_INFLOW: 'Financing inflow · Tidak dapat dihapus',
-  UNTRACKED: 'Rekonsiliasi · Tidak dapat dihapus',
-};
 
 const TYPE_LABELS: Record<'EXPENSE' | 'INCOME' | 'INVESTMENT', string> = {
   EXPENSE: 'Pengeluaran',
@@ -44,60 +47,73 @@ const TYPE_LABELS: Record<'EXPENSE' | 'INCOME' | 'INVESTMENT', string> = {
   INVESTMENT: 'Investasi',
 };
 
-/**
- * Screen 2B's "Pilih ikon" grid.
- *
- * The design's own grid shows eight tiles, but four of them (Keluarga, Sekolah,
- * Transport, Dana Aman) are stand-ins drawn with Lucide glyphs — the asset
- * library's "02 — CATEGORY ICONS" section is the real set, and it has these 13.
- * Offering the library rather than the mockup's sample is what makes the picker
- * able to reach every icon the ledger can show.
- *
- * The label is what the family reads; the icon name is what migration 009
- * stores. They are listed together so a rename of one cannot silently desync
- * from the other.
- */
-const ICON_CHOICES: { icon: string; label: string }[] = [
-  { icon: 'category-pemasukan', label: 'Pemasukan' },
-  { icon: 'category-belanja', label: 'Belanja' },
-  { icon: 'category-makan-minum', label: 'Makan & Minum' },
-  { icon: 'category-rumah', label: 'Rumah' },
-  { icon: 'category-tagihan', label: 'Tagihan' },
-  { icon: 'category-pendidikan', label: 'Pendidikan' },
-  { icon: 'category-kesehatan', label: 'Kesehatan' },
-  { icon: 'category-transportasi', label: 'Transportasi' },
-  { icon: 'category-tabungan', label: 'Tabungan' },
-  { icon: 'category-hutang', label: 'Hutang' },
-  { icon: 'category-hiburan', label: 'Hiburan' },
-  { icon: 'category-travel', label: 'Travel' },
-  { icon: 'category-lainnya', label: 'Lainnya' },
-];
-
 interface Draft {
   id: string | null;
   name: string;
   budgetText: string;
   type: 'EXPENSE' | 'INCOME' | 'INVESTMENT';
   isSystem: boolean;
-  /**
-   * The picker's choice, or null for "no explicit choice".
-   *
-   * Kept separate from the icon actually displayed: the grid highlights
-   * `icon ?? derived`, so a category with no pick still shows which icon it is
-   * using, and tapping that same tile is what turns the suggestion into a
-   * stored choice. Collapsing the two would make it impossible to tell a
-   * deliberate pick from a name-derived default.
-   */
   icon: string | null;
 }
 
 const EMPTY_DRAFT: Draft = {
-  id: null, name: '', budgetText: '', type: 'EXPENSE', isSystem: false, icon: null,
+  id: null,
+  name: '',
+  budgetText: '',
+  type: 'EXPENSE',
+  isSystem: false,
+  icon: null,
 };
 
 function parseAmount(t: string): number {
   return parseInt(t.replace(/[^0-9]/g, '') || '0', 10);
 }
+
+function getCategoryVisual(name: string, type?: string) {
+  const n = (name || '').toLowerCase();
+  if (n.includes('makan') || n.includes('kuliner') || n.includes('food') || n.includes('minum')) {
+    return { bg: '#FEE2E2', color: '#EF4444', glyph: Utensils };
+  }
+  if (n.includes('rumah') || n.includes('kos') || n.includes('home')) {
+    return { bg: '#DCFCE7', color: '#10B981', glyph: Home };
+  }
+  if (n.includes('trans') || n.includes('bensin') || n.includes('ojol') || n.includes('parkir') || n.includes('mobil')) {
+    return { bg: '#FFEDD5', color: '#F97316', glyph: Car };
+  }
+  if (n.includes('util') || n.includes('listrik') || n.includes('air') || n.includes('wifi') || n.includes('tagihan') || n.includes('pulsa')) {
+    return { bg: '#E0F2FE', color: '#0284C7', glyph: Zap };
+  }
+  if (n.includes('didik') || n.includes('sekolah') || n.includes('kursus') || n.includes('buku') || n.includes('kuliah')) {
+    return { bg: '#EDE9FE', color: '#8B5CF6', glyph: GraduationCap };
+  }
+  if (n.includes('sehat') || n.includes('obat') || n.includes('dokter') || n.includes('medis') || n.includes('klinik')) {
+    return { bg: '#FCE7F3', color: '#EC4899', glyph: Heart };
+  }
+  if (n.includes('hibur') || n.includes('game') || n.includes('nonton') || n.includes('hobi') || n.includes('liburan')) {
+    return { bg: '#FEF3C7', color: '#F59E0B', glyph: Sparkles };
+  }
+  if (n.includes('belanja') || n.includes('grocer') || n.includes('pasar') || n.includes('mall')) {
+    return { bg: '#E0E7FF', color: '#4F46E5', glyph: ShoppingBag };
+  }
+  if (n.includes('kewajiban') || n.includes('hutang') || n.includes('cicil') || type === 'DEBT_PAYMENT') {
+    return { bg: '#FEE2E2', color: '#DC2626', glyph: CircleDollarSign };
+  }
+  if (n.includes('invest') || n.includes('saham') || n.includes('reksa') || type === 'INVESTMENT') {
+    return { bg: '#D1FAE5', color: '#059669', glyph: TrendingUp };
+  }
+  return { bg: '#F1F5F9', color: '#475569', glyph: Layers };
+}
+
+const PRESET_ICONS = [
+  { label: 'Makanan', visual: { bg: '#FEE2E2', color: '#EF4444', glyph: Utensils } },
+  { label: 'Rumah', visual: { bg: '#DCFCE7', color: '#10B981', glyph: Home } },
+  { label: 'Transport', visual: { bg: '#FFEDD5', color: '#F97316', glyph: Car } },
+  { label: 'Utilitas', visual: { bg: '#E0F2FE', color: '#0284C7', glyph: Zap } },
+  { label: 'Pendidikan', visual: { bg: '#EDE9FE', color: '#8B5CF6', glyph: GraduationCap } },
+  { label: 'Kesehatan', visual: { bg: '#FCE7F3', color: '#EC4899', glyph: Heart } },
+  { label: 'Hiburan', visual: { bg: '#FEF3C7', color: '#F59E0B', glyph: Sparkles } },
+  { label: 'Belanja', visual: { bg: '#E0E7FF', color: '#4F46E5', glyph: ShoppingBag } },
+];
 
 export default function ManageCategoriesScreen() {
   const router = useRouter();
@@ -105,6 +121,9 @@ export default function ManageCategoriesScreen() {
   const householdId = household?.id;
 
   const catsQ = useCategories(householdId);
+  const activeCycleQ = useActiveCycle(householdId);
+  const txnsQ = useTransactions(householdId, activeCycleQ.data?.id);
+
   const createCategory = useCreateCategory();
   const updateCategory = useUpdateCategory();
   const deleteCategory = useDeleteCategory();
@@ -114,30 +133,60 @@ export default function ManageCategoriesScreen() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const all = useMemo(() => catsQ.data ?? [], [catsQ.data]);
-  const systemCats = all.filter((c) => c.is_system);
-  const customCats = all.filter((c) => !c.is_system);
+
+  // Transaction count per category
+  const txCountByCat = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of txnsQ.data ?? []) {
+      if (t.category_id) {
+        map[t.category_id] = (map[t.category_id] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [txnsQ.data]);
 
   const saving = createCategory.isPending || updateCategory.isPending;
+
+  function openCreate() {
+    setDraft({ ...EMPTY_DRAFT });
+    setErr(null);
+    setConfirmDelete(null);
+  }
+
+  function openEdit(c: Category) {
+    setDraft({
+      id: c.id,
+      name: c.name,
+      budgetText: c.monthly_budget > 0 ? String(c.monthly_budget) : '',
+      type: (c.type as Draft['type']) || 'EXPENSE',
+      isSystem: !!c.is_system,
+      icon: c.icon ?? null,
+    });
+    setErr(null);
+    setConfirmDelete(null);
+  }
 
   async function save() {
     setErr(null);
     if (!householdId || !draft) return;
+    if (!draft.name.trim() || draft.name.trim().length < 2) {
+      setErr('Nama kategori minimal 2 huruf.');
+      return;
+    }
+
     try {
       if (draft.id) {
         await updateCategory.mutateAsync({
           id: draft.id,
-          name: draft.name,
+          name: draft.name.trim(),
           monthlyBudget: parseAmount(draft.budgetText),
           type: draft.type,
-          // Sent even when unchanged, and sent as an explicit null when the
-          // family cleared the pick: leaving it out would make "no choice"
-          // indistinguishable from "not editing the choice".
           icon: draft.icon,
         });
       } else {
         await createCategory.mutateAsync({
           householdId,
-          name: draft.name,
+          name: draft.name.trim(),
           monthlyBudget: parseAmount(draft.budgetText),
           type: draft.type,
           icon: draft.icon,
@@ -154,353 +203,504 @@ export default function ManageCategoriesScreen() {
     setConfirmDelete(null);
     try {
       await deleteCategory.mutateAsync({ id: c.id, isSystem: c.is_system });
+      setDraft(null);
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menghapus kategori.');
     }
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Top Header Bar */}
         <View style={styles.topBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <ArrowLeft size={18} color={Colors.textPrimary} />
+          <Pressable onPress={() => router.back()} style={styles.navBtn}>
+            <ChevronLeft size={22} color="#0B1527" />
           </Pressable>
-          <Text style={styles.crumb}>My Profile / Kelola Kategori</Text>
-        </View>
-
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.eyebrow}>MY PROFILE · PREFERENSI</Text>
-            <Text style={styles.title}>Kelola Kategori</Text>
-          </View>
-          <Pressable
-            onPress={() => { setDraft(draft ? null : { ...EMPTY_DRAFT }); setErr(null); }}
-            style={styles.addBtn}
-          >
-            <Plus size={14} color={Colors.white} />
-            <Text style={styles.addText}>{draft ? 'Tutup' : 'Tambah'}</Text>
+          <Text style={styles.headerTitle}>Kategori</Text>
+          <Pressable onPress={openCreate} style={styles.navBtn}>
+            <Plus size={20} color="#0B1527" />
           </Pressable>
         </View>
-        <Text style={styles.supporting}>
-          Atur kategori yang digunakan saat mencatat transaksi.
-        </Text>
 
-        {draft && (
-          <View style={styles.form}>
-            <Text style={styles.formTitle}>
-              {draft.id ? `Ubah ${draft.name}` : 'Kategori Baru'}
-            </Text>
+        {/* Centered "+ Tambah Kategori" Pill */}
+        <Pressable onPress={openCreate} style={styles.addCategoryPill}>
+          <Plus size={16} color="#0B1527" strokeWidth={2.5} />
+          <Text style={styles.addCategoryText}>Tambah Kategori</Text>
+        </Pressable>
 
-            <Text style={styles.label}>NAMA KATEGORI</Text>
-            <TextInput
-              value={draft.name}
-              onChangeText={(v) => setDraft({ ...draft, name: v })}
-              placeholder="Hobi"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-            />
+        {/* Categories List */}
+        <View style={styles.listContainer}>
+          {all.map((c, index) => {
+            const visual = getCategoryVisual(c.name, c.type);
+            const VisualGlyph = visual.glyph;
+            const count = txCountByCat[c.id] ?? 0;
+            const isLast = index === all.length - 1;
 
-            {!draft.isSystem && (
-              <>
-                <Text style={styles.label}>JENIS</Text>
-                <View style={styles.chips}>
-                  {(['EXPENSE', 'INCOME', 'INVESTMENT'] as const).map((t) => (
-                    <Pressable
-                      key={t}
-                      onPress={() => setDraft({ ...draft, type: t })}
-                      style={[styles.chip, draft.type === t && styles.chipOn]}
-                    >
-                      <Text style={[styles.chipText, draft.type === t && styles.chipTextOn]}>
-                        {TYPE_LABELS[t]}
-                      </Text>
-                    </Pressable>
-                  ))}
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => openEdit(c)}
+                style={[styles.categoryRow, !isLast && styles.categoryRowBordered]}
+              >
+                {/* Pastel Squircle Category Icon */}
+                <View style={[styles.categorySquircle, { backgroundColor: visual.bg }]}>
+                  <VisualGlyph size={22} color={visual.color} />
                 </View>
-              </>
-            )}
 
-            <Text style={styles.label}>PAGU BULANAN</Text>
-            <TextInput
-              value={draft.budgetText}
-              onChangeText={(v) => setDraft({ ...draft, budgetText: v })}
-              placeholder="500000"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
-            <Text style={styles.hint}>
-              {parseAmount(draft.budgetText) > 0
-                ? formatRupiah(parseAmount(draft.budgetText))
-                : 'Biarkan 0 kalau kategori ini tidak dipagui.'}
-            </Text>
-
-            <Text style={styles.label}>PILIH IKON</Text>
-            {/* Screen 2B's grid. The selected tile is `draft.icon` when the
-                family has picked one, and the name-derived icon otherwise — so
-                a new category starts with the icon it would get anyway already
-                highlighted, and the family only has to tap when they disagree. */}
-            <View style={styles.iconGrid}>
-              {ICON_CHOICES.map((choice) => {
-                const shown = draft.icon ?? categoryIconName({
-                  name: draft.name,
-                  type: draft.type,
-                });
-                const active = shown === choice.icon;
-                return (
-                  <Pressable
-                    key={choice.icon}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Ikon ${choice.label}`}
-                    accessibilityState={{ selected: active }}
-                    onPress={() => setDraft({ ...draft, icon: choice.icon })}
-                    style={styles.iconTile}
-                  >
-                    <View style={[styles.iconTileBox, active && styles.iconTileBoxOn]}>
-                      <BrandIcon name={choice.icon} size={22} label="" />
-                      {active && (
-                        <View style={styles.iconTileCheck}>
-                          <Check size={10} color={Colors.white} strokeWidth={3} />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={[styles.iconTileLabel, active && styles.iconTileLabelOn]} numberOfLines={1}>
-                      {choice.label}
+                {/* Category Info */}
+                <View style={styles.categoryInfo}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.categoryName} numberOfLines={1}>
+                      {c.name}
                     </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.hint}>
-              {draft.icon
-                ? 'Ikon ini disimpan untuk kategori tersebut dan tetap dipakai walau namanya diubah.'
-                : 'Belum dipilih — ikon di atas diturunkan dari nama. Ketuk salah satu untuk mengunci pilihan.'}
-            </Text>
-
-            <PrimaryButton
-              label={saving ? 'Menyimpan…' : draft.id ? 'Simpan Perubahan' : 'Simpan Kategori'}
-              onPress={save}
-            />
-            <SecondaryButton label="Batal" onPress={() => { setDraft(null); setErr(null); }} />
-          </View>
-        )}
-
-        <Text style={styles.section}>KATEGORI YANG DIGUNAKAN</Text>
-
-        <View style={styles.list}>
-          {systemCats.map((c, i) => (
-            <View key={c.id} style={[styles.row, i > 0 && styles.rowBordered]}>
-              <View style={[styles.iconBox, c.system_role === 'FINANCING_INFLOW' && styles.iconBoxFinancing]}>
-                <BrandIcon
-                  name={categoryIconName({
-                    name: c.name,
-                    type: c.type,
-                    systemRole: c.system_role,
-                    icon: c.icon,
-                  })}
-                  size={22}
-                  label=""
-                />
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name}>{c.name}</Text>
-                  <View style={[styles.systemBadge, c.system_role === 'FINANCING_INFLOW' && styles.systemBadgeFinancing]}>
-                    <Text
-                      style={[
-                        styles.systemBadgeText,
-                        c.system_role === 'FINANCING_INFLOW' && styles.systemBadgeTextFinancing,
-                      ]}
-                    >
-                      Sistem
-                    </Text>
+                    {c.is_system && (
+                      <View style={styles.systemTag}>
+                        <Text style={styles.systemTagText}>Sistem</Text>
+                      </View>
+                    )}
                   </View>
+                  <Text style={styles.categoryCount}>
+                    {count} transaksi
+                  </Text>
                 </View>
-                <Text
-                  style={[
-                    styles.type,
-                    c.system_role === 'FINANCING_INFLOW' && { color: Colors.financingText },
-                  ]}
-                >
-                  {c.system_role ? SYSTEM_ROLE_HINT[c.system_role] : 'Sistem · Tidak dapat dihapus'}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  setDraft({
-                    id: c.id, name: c.name, budgetText: String(c.monthly_budget),
-                    type: c.type as Draft['type'], isSystem: true,
-                    icon: c.icon ?? null,
-                  });
-                  setErr(null);
-                }}
-                hitSlop={10}
-              >
-                <Pencil size={16} color={Colors.textMuted} />
-              </Pressable>
-            </View>
-          ))}
 
-          {customCats.map((c, i) => (
-            <View key={c.id} style={[styles.row, (i > 0 || systemCats.length > 0) && styles.rowBordered]}>
-              <View style={styles.iconBox}>
-                <BrandIcon
-                  name={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
-                  size={22}
-                  label=""
-                />
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.name}>{c.name}</Text>
-                <Text style={styles.type}>
-                  {TYPE_LABELS[c.type as Draft['type']] ?? c.type}
-                  {c.monthly_budget > 0 ? ` · pagu ${formatRupiah(c.monthly_budget)}` : ' · tanpa pagu'}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  setDraft({
-                    id: c.id, name: c.name, budgetText: String(c.monthly_budget),
-                    type: c.type as Draft['type'], isSystem: false,
-                    icon: c.icon ?? null,
-                  });
-                  setErr(null);
-                }}
-                hitSlop={10}
-                style={styles.rowAction}
-              >
-                <Pencil size={16} color={Colors.textMuted} />
+                {/* Right Chevron */}
+                <ChevronRight size={18} color="#94A3B8" />
               </Pressable>
-              {confirmDelete === c.id ? (
-                <Pressable onPress={() => remove(c)} hitSlop={10} style={styles.rowAction}>
-                  <Text style={styles.confirmText}>Yakin?</Text>
-                </Pressable>
-              ) : (
-                <Pressable onPress={() => setConfirmDelete(c.id)} hitSlop={10} style={styles.rowAction}>
-                  <Trash2 size={16} color={Colors.textMuted} />
-                </Pressable>
-              )}
-            </View>
-          ))}
+            );
+          })}
         </View>
 
-        {!catsQ.isLoading && customCats.length === 0 && (
-          <View style={styles.emptyBox}>
-            <BrandIcon name="empty-data-tidak-ditemukan" size={72} label="" />
-            <Text style={styles.emptyTitle}>Belum ada kategori tambahan</Text>
-            <Text style={styles.emptySub}>
-              Tambahkan pos khusus seperti Hobi, Liburan, atau Renovasi.
-            </Text>
-            <Pressable onPress={() => setDraft({ ...EMPTY_DRAFT })} style={styles.emptyCta}>
-              <Text style={styles.emptyCtaText}>Buat kategori pertama</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {catsQ.isLoading && <Text style={styles.muted}>Memuat kategori…</Text>}
-
-        {err && (
-          <View style={styles.errBox}>
-            <Text style={styles.errText}>{err}</Text>
-          </View>
+        {catsQ.isLoading && (
+          <Text style={styles.loadingText}>Memuat kategori…</Text>
         )}
       </ScrollView>
+
+      {/* Add / Edit Category Modal Sheet */}
+      <Modal
+        visible={!!draft}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDraft(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setDraft(null)}>
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {draft?.id ? 'Ubah Kategori' : 'Tambah Kategori'}
+              </Text>
+              <Pressable onPress={() => setDraft(null)}>
+                <X size={20} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            {draft && (
+              <View style={{ gap: 14 }}>
+                {/* Field: Nama Kategori */}
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.inputLabel}>NAMA KATEGORI *</Text>
+                  <TextInput
+                    value={draft.name}
+                    onChangeText={(v) => setDraft({ ...draft, name: v })}
+                    placeholder="Contoh: Makanan, Transportasi, Hiburan"
+                    placeholderTextColor={Colors.textMuted}
+                    style={styles.input}
+                    autoFocus={!draft.id}
+                  />
+                </View>
+
+                {/* Field: Jenis Kategori */}
+                {!draft.isSystem && (
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.inputLabel}>JENIS</Text>
+                    <View style={styles.typeRow}>
+                      {(['EXPENSE', 'INCOME', 'INVESTMENT'] as const).map((t) => {
+                        const selected = draft.type === t;
+                        return (
+                          <Pressable
+                            key={t}
+                            onPress={() => setDraft({ ...draft, type: t })}
+                            style={[styles.typeChip, selected && styles.typeChipSelected]}
+                          >
+                            <Text
+                              style={[
+                                styles.typeChipText,
+                                selected && styles.typeChipTextSelected,
+                              ]}
+                            >
+                              {TYPE_LABELS[t]}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+
+                {/* Field: Pagu Bulanan */}
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.inputLabel}>PAGU BULANAN (OPSIONAL)</Text>
+                  <TextInput
+                    value={draft.budgetText}
+                    onChangeText={(v) => setDraft({ ...draft, budgetText: v })}
+                    placeholder="Contoh: 1500000"
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.input}
+                  />
+                  <Text style={styles.inputHelper}>
+                    {parseAmount(draft.budgetText) > 0
+                      ? `Pagu: ${formatRupiah(parseAmount(draft.budgetText))}`
+                      : 'Kosongkan jika kategori ini tidak memiliki batasan pagu bulanan.'}
+                  </Text>
+                </View>
+
+                {/* Preset Icon Preview */}
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.inputLabel}>IKON KATEGORI</Text>
+                  <View style={styles.iconChoiceRow}>
+                    {PRESET_ICONS.map((p) => {
+                      const IconGlyph = p.visual.glyph;
+                      const isCurrent = (draft.name || '').toLowerCase().includes(p.label.toLowerCase());
+                      return (
+                        <Pressable
+                          key={p.label}
+                          onPress={() => {
+                            if (!draft.name) {
+                              setDraft({ ...draft, name: p.label });
+                            }
+                          }}
+                          style={[
+                            styles.presetIconTile,
+                            isCurrent && styles.presetIconTileActive,
+                          ]}
+                        >
+                          <View style={[styles.presetIconBox, { backgroundColor: p.visual.bg }]}>
+                            <IconGlyph size={18} color={p.visual.color} />
+                          </View>
+                          <Text style={styles.presetIconLabel}>{p.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {err && (
+                  <View style={styles.errBox}>
+                    <Text style={styles.errText}>{err}</Text>
+                  </View>
+                )}
+
+                {/* Action Buttons */}
+                <View style={styles.actionRow}>
+                  <View style={{ flex: 1 }}>
+                    <SecondaryButton
+                      label="Batal"
+                      onPress={() => setDraft(null)}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <PrimaryButton
+                      label={saving ? 'Menyimpan…' : 'Simpan'}
+                      onPress={save}
+                    />
+                  </View>
+                </View>
+
+                {/* Destructive Action */}
+                {draft.id && !draft.isSystem && (
+                  <View style={{ marginTop: 4 }}>
+                    {confirmDelete === draft.id ? (
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <SecondaryButton
+                            label="Batal Hapus"
+                            onPress={() => setConfirmDelete(null)}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Pressable
+                            style={styles.confirmDeleteBtn}
+                            onPress={() => {
+                              const target = all.find((c) => c.id === draft.id);
+                              if (target) remove(target);
+                            }}
+                          >
+                            <Text style={styles.confirmDeleteText}>Yakin Hapus</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <Pressable
+                        onPress={() => setConfirmDelete(draft.id)}
+                        style={styles.deleteBtn}
+                      >
+                        <Trash2 size={16} color={Colors.pendingText} />
+                        <Text style={styles.deleteBtnText}>Hapus Kategori</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.canvas },
-  container: { padding: 16, gap: 12, paddingBottom: 32 },
-  topBar: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  backBtn: {
-    width: 32, height: 32, borderRadius: Radius.md, backgroundColor: Colors.surface,
-    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  safe: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
-  crumb: { color: Colors.textSecondary, fontSize: FontSize.caption },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  eyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
-  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700' },
-  addBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: Colors.brandPrimary,
-    borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 9,
+  container: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
   },
-  addText: { color: Colors.white, fontSize: 11.5, fontWeight: '600' },
-  supporting: { color: Colors.textSecondary, fontSize: 13 },
-  form: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14, gap: 8,
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  formTitle: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700' },
-  label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1, marginTop: 4 },
+  navBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0B1527',
+    textAlign: 'center',
+  },
+  addCategoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  addCategoryText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+
+  listContainer: {
+    backgroundColor: '#FFFFFF',
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: 14,
+  },
+  categoryRowBordered: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  categorySquircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  categoryName: {
+    fontSize: 15.5,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+  categoryCount: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
+  systemTag: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  systemTagText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+
+  loadingText: {
+    textAlign: 'center',
+    color: '#94A3B8',
+    marginTop: 20,
+    fontSize: 13,
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 21, 39, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 36,
+    gap: 16,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 4,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+
+  fieldGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
   input: {
-    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
-    paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary,
-    backgroundColor: Colors.canvas,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+    fontSize: 14,
+    color: '#0B1527',
+    backgroundColor: '#F8FAFC',
   },
-  hint: { color: Colors.textSecondary, fontSize: FontSize.caption, fontVariant: ['tabular-nums'] },
-  chips: { flexDirection: 'row', gap: 8 },
-  chip: {
-    backgroundColor: Colors.subtle, borderRadius: Radius.pill,
-    paddingHorizontal: 14, paddingVertical: 8,
+  inputHelper: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 16,
   },
-  chipOn: { backgroundColor: Colors.brandPrimary },
-  chipText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  chipTextOn: { color: Colors.white },
-  section: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 4 },
-  list: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, overflow: 'hidden',
+
+  typeRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
-  rowBordered: { borderTopWidth: 1, borderTopColor: Colors.borderSubtle },
-  iconBox: {
-    width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.subtle,
-    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  typeChip: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
   },
-  iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  iconTile: { alignItems: 'center', gap: 5, width: 62 },
-  iconTileBox: {
-    width: 48, height: 48, borderRadius: Radius.md, backgroundColor: Colors.subtle,
-    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  typeChipSelected: {
+    backgroundColor: '#EEF2FF',
+    borderColor: Colors.brandPrimary,
   },
-  // The selected tile takes the brand border, matching Screen 2B's
-  // "Icon Box Rumah Selected" rather than a background fill: the icon art is
-  // dark on a light plate, so inverting the plate would hide the drawing.
-  iconTileBoxOn: { borderColor: Colors.brandPrimary, borderWidth: 1.5 },
-  iconTileCheck: {
-    position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9,
-    backgroundColor: Colors.paidText, borderWidth: 1.5, borderColor: Colors.surface,
-    alignItems: 'center', justifyContent: 'center',
+  typeChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
   },
-  iconTileLabel: { color: Colors.textMuted, fontSize: 10.5, fontWeight: '500', textAlign: 'center' },
-  iconTileLabelOn: { color: Colors.textPrimary, fontWeight: '700' },
-  iconBoxFinancing: { backgroundColor: Colors.financingBg, borderColor: Colors.financingBorder },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { color: Colors.textPrimary, fontSize: 13.5, fontWeight: '600' },
-  type: { color: Colors.textMuted, fontSize: FontSize.caption },
-  systemBadge: {
-    backgroundColor: Colors.subtle, borderWidth: 1, borderColor: Colors.borderSubtle,
-    borderRadius: Radius.pill, paddingHorizontal: 6, paddingVertical: 2,
+  typeChipTextSelected: {
+    color: Colors.brandPrimary,
   },
-  systemBadgeFinancing: { backgroundColor: Colors.financingBg, borderColor: Colors.financingBorder },
-  systemBadgeText: { color: Colors.textSecondary, fontSize: 9.5, fontWeight: '700' },
-  systemBadgeTextFinancing: { color: Colors.financingText },
-  rowAction: { padding: 4 },
-  confirmText: { color: Colors.pendingText, fontSize: FontSize.caption, fontWeight: '700' },
-  emptyBox: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 16, gap: 6, alignItems: 'center',
+
+  iconChoiceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
   },
-  emptyTitle: { color: Colors.textSecondary, fontSize: 12.5, fontWeight: '600' },
-  emptySub: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center' },
-  emptyCta: {
-    marginTop: 4, backgroundColor: Colors.subtle, borderWidth: 1,
-    borderColor: Colors.borderStrong, borderRadius: Radius.md,
-    paddingHorizontal: 14, paddingVertical: 9,
+  presetIconTile: {
+    alignItems: 'center',
+    gap: 4,
+    width: '22%',
+    paddingVertical: 4,
   },
-  emptyCtaText: { color: Colors.textPrimary, fontSize: 11.5, fontWeight: '600' },
-  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
-  errText: { color: Colors.pendingText, fontSize: FontSize.body },
-  muted: { color: Colors.textMuted, fontSize: FontSize.body },
+  presetIconTileActive: {
+    opacity: 1,
+  },
+  presetIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  presetIconLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+
+  errBox: {
+    backgroundColor: Colors.pendingBg,
+    borderRadius: 8,
+    padding: 10,
+  },
+  errText: {
+    fontSize: 12,
+    color: Colors.pendingText,
+  },
+
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.pendingBorder,
+    backgroundColor: Colors.pendingBg,
+  },
+  deleteBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.pendingText,
+  },
+  confirmDeleteBtn: {
+    height: 48,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.alertBg,
+    borderWidth: 1,
+    borderColor: Colors.pendingBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeleteText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.alertText,
+  },
 });

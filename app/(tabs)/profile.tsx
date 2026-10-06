@@ -1,75 +1,63 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Bell from 'lucide-react-native/icons/bell';
 import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
-import Landmark from 'lucide-react-native/icons/landmark';
+import CreditCard from 'lucide-react-native/icons/credit-card';
+import FileText from 'lucide-react-native/icons/file-text';
+import HelpCircle from 'lucide-react-native/icons/circle-question-mark';
+import Info from 'lucide-react-native/icons/info';
+import LayoutGrid from 'lucide-react-native/icons/layout-grid';
+import Link2 from 'lucide-react-native/icons/link-2';
 import LogOut from 'lucide-react-native/icons/log-out';
-import Palette from 'lucide-react-native/icons/palette';
-import Repeat from 'lucide-react-native/icons/repeat';
-import ShieldCheck from 'lucide-react-native/icons/shield-check';
-import Sparkles from 'lucide-react-native/icons/sparkles';
-import Users from 'lucide-react-native/icons/users';
-import Wallet from 'lucide-react-native/icons/wallet';
+import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
+import PieChart from 'lucide-react-native/icons/chart-pie';
+import Settings from 'lucide-react-native/icons/settings';
 import TrendingUp from 'lucide-react-native/icons/trending-up';
-import { Colors, FontSize, Radius } from '../../constants/theme';
+import User from 'lucide-react-native/icons/user';
+import Users from 'lucide-react-native/icons/users';
+import X from 'lucide-react-native/icons/x';
+import { Colors, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
-import { useActiveCycle, useUpdateMyMemberProfile } from '../../lib/queries';
-import {
-  memberDisplayName,
-  memberInitials,
-  paydayLabel,
-  roleLabel,
-} from '../../lib/profile';
+import { useHouseholdMembers, useUpdateMyMemberProfile } from '../../lib/queries';
+import { memberDisplayName, memberInitials, roleLabel } from '../../lib/profile';
 import { Badge } from '../../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
-
-/**
- * Screen "My Profile".
- *
- * The identity block edits the caller's own display name — the only part of
- * this screen the user owns. Household facts (name, payday, members) live one
- * tap away in Ruang Keluarga, because changing the family's name from a screen
- * headed "My Profile" would be a surprise.
- *
- * Rows for features that do not exist yet are rendered as plainly unavailable
- * rather than as chevrons that lead nowhere: this is a money app, and a menu
- * that lies about what it opens is worse than a short menu.
- */
-
-interface MenuRow {
-  key: string;
-  icon: React.ComponentType<{ size?: number; color?: string }>;
-  title: string;
-  sub?: string;
-  tone: 'paid' | 'alert' | 'default';
-  onPress?: () => void;
-}
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { household, membership, session, signOut, refresh } = useAuth();
   const householdId = household?.id;
 
-  const cycleQ = useActiveCycle(householdId);
+  const membersQ = useHouseholdMembers(householdId);
   const updateMe = useUpdateMyMemberProfile();
 
-  const [editing, setEditing] = useState(false);
+  const [moreVisible, setMoreVisible] = useState(false);
+  const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [activeModal, setActiveModal] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // The row is driven by `membership` from AuthProvider, which holds the
-  // caller's own row — the same source the roster RPC reads, so the name here
-  // and the name in Ruang Keluarga can never disagree.
   const me = {
     displayName: membership?.display_name ?? null,
     role: membership?.role ?? 'PARTNER',
   };
 
+  const members = membersQ.data?.members ?? [];
+  const memberCount = members.length || (membership ? 1 : 0);
   const initials = memberInitials(me.displayName ?? me.role);
   const notifyOn = membership?.notify_partner_expense ?? true;
-  const realtimeOn = !!householdId;
 
   async function saveName() {
     setErr(null);
@@ -80,7 +68,8 @@ export default function ProfileScreen() {
     try {
       await updateMe.mutateAsync({ householdId, displayName: nameDraft });
       await refresh();
-      setEditing(false);
+      setEditingName(false);
+      setMoreVisible(false);
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan nama.');
     }
@@ -97,345 +86,586 @@ export default function ProfileScreen() {
     }
   }
 
-  const financeRows: MenuRow[] = [
-    {
-      key: 'insight',
-      icon: Landmark,
-      title: 'Insight & Aset 2026',
-      sub: 'Analisis tren bulanan, cashflow, aset likuid & kewajiban',
-      tone: 'paid',
-      onPress: () => router.push('/asset-insight'),
-    },
-    {
-      key: 'transfer',
-      icon: Wallet,
-      title: 'Relokasi Antar Akun',
-      sub: 'Pindahkan uang antar akun tanpa mengubah income atau pengeluaran',
-      tone: 'default',
-      onPress: () => router.push('/transfer'),
-    },
-    {
-      key: 'assets',
-      icon: TrendingUp,
-      title: 'Repository Aset & Investasi',
-      sub: 'Catat top up, pencairan, dan stated valuation tanpa akun investasi',
-      tone: 'default',
-      onPress: () => router.push('/assets'),
-    },
-    {
-      key: 'audit',
-      icon: Calendar,
-      title: 'Riwayat Audit Non-Siklus',
-      sub: 'Lihat transaksi historis yang tidak membebani siklus aktif',
-      tone: 'default',
-      onPress: () => router.push('/audit-history'),
-    },
-    {
-      key: 'account-summary',
-      icon: Wallet,
-      title: 'Zero-Based Per Akun',
-      sub: 'Lihat dana masuk, keluar, dan relokasi setiap akun',
-      tone: 'default',
-      onPress: () => router.push('/account-summary'),
-    },
-    {
-      key: 'account-snapshots',
-      icon: Wallet,
-      title: 'Snapshot Rekening Kas',
-      sub: 'Catat saldo akhir yang dinyatakan untuk siklus aktif',
-      tone: 'default',
-      onPress: () => router.push('/account-snapshots'),
-    },
-    {
-      key: 'categories',
-      icon: Sparkles,
-      title: 'Kelola Kategori',
-      sub: 'Atur kategori pengeluaran dan ikon',
-      tone: 'alert',
-      onPress: () => router.push('/manage-categories'),
-    },
-    {
-      // Screen 9 was registered in the router with nothing linking to it, so
-      // this is one of its two doors (Buka Siklus has the other, where a
-      // family actually notices a routine is missing).
-      key: 'templates',
-      icon: Repeat,
-      title: 'Template Rutin',
-      sub: 'Pos pengeluaran & pemasukan yang di-clone tiap siklus',
-      tone: 'default',
-      onPress: () => router.push('/templates'),
-    },
-  ];
-
-  const householdRows: MenuRow[] = [
-    {
-      key: 'household',
-      icon: Users,
-      title: 'Ruang Keluarga',
-      sub: household
-        ? `${household.name} · ${household.payday_day ? paydayLabel(household.payday_day, 'meta') : 'payday belum diatur'}`
-        : 'Belum terhubung',
-      tone: 'default',
-      onPress: () => router.push('/household'),
-    },
-    {
-      key: 'invite',
-      icon: Users,
-      title: 'Undang Pasangan',
-      sub: 'Bagikan kode atau QR untuk bergabung',
-      tone: 'default',
-      onPress: () => router.push({ pathname: '/household', params: { focus: 'invite' } }),
-    },
-  ];
-
-  const accountRows: (MenuRow & { soon?: boolean })[] = [
-    {
-      key: 'managed-account',
-      icon: Wallet,
-      title: 'Kelola Akun',
-      sub: 'Atur rekening, kartu, dan e-wallet keluarga',
-      tone: 'default',
-      onPress: () => router.push('/manage-accounts'),
-      soon: false,
-    },
-    { key: 'appearance', icon: Palette, title: 'Preferensi tampilan', tone: 'default', soon: true },
-    { key: 'security', icon: ShieldCheck, title: 'Keamanan & privasi', tone: 'default', soon: true },
-  ];
-
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Screen Header */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>AKUN &amp; RUANG KELUARGA</Text>
-          <Text style={styles.title}>My Profile</Text>
-          <Text style={styles.supporting}>
-            Kelola akun, kategori, dan insight keuangan keluarga.
-          </Text>
+          <Text style={styles.title}>Lainnya</Text>
+          <Pressable
+            hitSlop={8}
+            onPress={() => setMoreVisible(true)}
+            style={styles.moreBtn}
+          >
+            <MoreVertical size={20} color={Colors.textPrimary} />
+          </Pressable>
         </View>
 
+        {/* Household Card */}
         <Pressable
-          onPress={() => {
-            setNameDraft(me.displayName ?? '');
-            setEditing((v) => !v);
-            setErr(null);
-          }}
-          style={styles.identity}
+          style={styles.householdCard}
+          onPress={() => router.push('/household')}
         >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
+          <View style={styles.avatarSquircle}>
+            <Users size={22} color="#4338CA" />
           </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name} numberOfLines={1}>
-                {memberDisplayName(me.displayName, me.role)}
-              </Text>
-              <Badge label={roleLabel(me.role)} tone="paid" />
-            </View>
-            <Text style={styles.householdName} numberOfLines={1}>
-              {household?.name ?? 'Belum ada ruang keluarga'}
+          <View style={styles.householdInfo}>
+            <Text style={styles.householdTitle} numberOfLines={1}>
+              {household?.name ?? 'Keluarga Kita'}
+            </Text>
+            <Text style={styles.householdSubtitle}>
+              {memberCount} anggota
             </Text>
           </View>
-          <ChevronRight size={16} color={Colors.textMuted} />
+          <ChevronRight size={18} color="#94A3B8" />
         </Pressable>
 
-        {editing && (
-          <View style={styles.form}>
-            <Text style={styles.label}>NAMA SAYA</Text>
-            <TextInput
-              value={nameDraft}
-              onChangeText={setNameDraft}
-              placeholder="mis. Andra Pratama"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-            />
-            <Text style={styles.hint}>
-              Nama ini yang muncul di Ruang Keluarga — pasangan melihat nama yang kamu tulis
-              sendiri, bukan alamat email.
-            </Text>
-            <PrimaryButton
-              label={updateMe.isPending ? 'Menyimpan…' : 'Simpan Nama'}
-              onPress={saveName}
-            />
-            <SecondaryButton label="Batal" onPress={() => { setEditing(false); setErr(null); }} />
-          </View>
-        )}
-
-        <View style={styles.summary}>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.summaryLabel}>SIKLUS AKTIF</Text>
-            <Text style={styles.summaryValue}>
-              {cycleQ.data?.name ?? 'Belum ada siklus'}
-            </Text>
-          </View>
-          <View style={styles.summaryRight}>
-            <Calendar size={14} color={Colors.textMuted} />
-            <Text style={styles.summaryMeta}>
-              {paydayLabel(household?.payday_day, 'row')}
-            </Text>
-          </View>
+        {/* Keuangan Section */}
+        <Text style={styles.sectionTitle}>Keuangan</Text>
+        <View style={styles.groupedCard}>
+          <MenuRow
+            icon={CreditCard}
+            title="Akun"
+            onPress={() => router.push('/manage-accounts')}
+          />
+          <MenuRow
+            icon={LayoutGrid}
+            title="Kategori"
+            onPress={() => router.push('/manage-categories')}
+          />
+          <MenuRow
+            icon={FileText}
+            title="Template Transaksi"
+            onPress={() => router.push('/templates')}
+          />
+          <MenuRow
+            icon={TrendingUp}
+            title="Aset"
+            isLast
+            onPress={() => router.push('/assets')}
+          />
         </View>
 
-        <Text style={styles.section}>KEUANGAN</Text>
-        <View style={styles.group}>
-          {financeRows.map((r, i) => (
-            <MenuRowView key={r.key} row={r} first={i === 0} />
-          ))}
+        {/* Analisis Section */}
+        <Text style={styles.sectionTitle}>Analisis</Text>
+        <View style={styles.groupedCard}>
+          <MenuRow
+            icon={PieChart}
+            title="Insight"
+            onPress={() => router.push('/asset-insight')}
+          />
+          <MenuRow
+            icon={Calendar}
+            title="Riwayat Siklus"
+            isLast
+            onPress={() => router.push('/cycle-history')}
+          />
         </View>
 
-        <Text style={styles.section}>RUANG KELUARGA</Text>
-        <View style={styles.group}>
-          {householdRows.map((r, i) => (
-            <MenuRowView key={r.key} row={r} first={i === 0} />
-          ))}
-          <View style={[styles.row, styles.rowBordered]}>
-            <View style={styles.iconBox}>
-              <Users size={16} color={Colors.textSecondary} />
-            </View>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.rowTitle}>Notifikasi &amp; Sinkronisasi</Text>
-              <Text style={styles.rowSub}>
-                {realtimeOn ? 'Real-time aktif' : 'Real-time nonaktif'} ·{' '}
-                {notifyOn ? 'notifikasi pengeluaran pasangan aktif' : 'notifikasi dimatikan'}
-              </Text>
-            </View>
-            <Switch
-              value={notifyOn}
-              onValueChange={toggleNotify}
-              disabled={!householdId}
-              trackColor={{ false: Colors.borderStrong, true: Colors.paidText }}
-            />
-          </View>
+        {/* Pengaturan Section */}
+        <Text style={styles.sectionTitle}>Pengaturan</Text>
+        <View style={styles.groupedCard}>
+          <MenuRow
+            icon={Bell}
+            title="Notifikasi"
+            onPress={() => setActiveModal('notification')}
+          />
+          <MenuRow
+            icon={Link2}
+            title="Integrasi"
+            onPress={() => setActiveModal('integration')}
+          />
+          <MenuRow
+            icon={Settings}
+            title="Pengaturan Aplikasi"
+            onPress={() => setMoreVisible(true)}
+          />
+          <MenuRow
+            icon={HelpCircle}
+            title="Bantuan"
+            onPress={() => setActiveModal('help')}
+          />
+          <MenuRow
+            icon={Info}
+            title="Tentang Kitasaku"
+            isLast
+            onPress={() => setActiveModal('about')}
+          />
         </View>
-
-        <Text style={styles.section}>AKUN</Text>
-        <View style={styles.group}>
-          {accountRows.map((r, i) => (
-            <MenuRowView key={r.key} row={r} first={i === 0} soon={r.soon} />
-          ))}
-        </View>
-
-        <Pressable onPress={() => void signOut()} style={styles.signOut}>
-          <LogOut size={16} color={Colors.pendingText} />
-          <Text style={styles.signOutText}>Keluar dari akun</Text>
-        </Pressable>
-
-        {session?.user?.email && (
-          <Text style={styles.footer}>{session.user.email}</Text>
-        )}
-
-        {err && (
-          <View style={styles.errBox}>
-            <Text style={styles.errText}>{err}</Text>
-          </View>
-        )}
       </ScrollView>
+
+      {/* Settings / More Modal */}
+      <Modal
+        visible={moreVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMoreVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => {
+            setMoreVisible(false);
+            setEditingName(false);
+          }}
+        >
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Pengaturan Akun</Text>
+              <Pressable
+                hitSlop={8}
+                onPress={() => {
+                  setMoreVisible(false);
+                  setEditingName(false);
+                }}
+              >
+                <X size={20} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            {/* Profile identity info */}
+            <View style={styles.profileBadgeCard}>
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>{initials}</Text>
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.profileName} numberOfLines={1}>
+                    {memberDisplayName(me.displayName, me.role)}
+                  </Text>
+                  <Badge label={roleLabel(me.role)} tone="paid" />
+                </View>
+                {session?.user?.email && (
+                  <Text style={styles.profileEmail} numberOfLines={1}>
+                    {session.user.email}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {editingName ? (
+              <View style={styles.editNameBox}>
+                <Text style={styles.inputLabel}>NAMA TAMPILAN</Text>
+                <TextInput
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  placeholder="Nama panggilan Anda"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.input}
+                  autoFocus
+                />
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <PrimaryButton
+                      label={updateMe.isPending ? 'Menyimpan…' : 'Simpan'}
+                      onPress={saveName}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <SecondaryButton
+                      label="Batal"
+                      onPress={() => setEditingName(false)}
+                    />
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <Pressable
+                style={styles.actionRow}
+                onPress={() => {
+                  setNameDraft(me.displayName ?? '');
+                  setEditingName(true);
+                }}
+              >
+                <User size={18} color={Colors.textPrimary} />
+                <Text style={styles.actionRowText}>Ubah Nama Tampilan</Text>
+                <ChevronRight size={16} color={Colors.textMuted} />
+              </Pressable>
+            )}
+
+            <View style={styles.actionDivider} />
+
+            {/* Notification Row */}
+            <View style={styles.actionRow}>
+              <Bell size={18} color={Colors.textPrimary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.actionRowText}>Notifikasi Pengeluaran</Text>
+                <Text style={styles.actionRowSub}>Saat pasangan mencatat pengeluaran</Text>
+              </View>
+              <Switch
+                value={notifyOn}
+                onValueChange={toggleNotify}
+                disabled={!householdId}
+                trackColor={{ false: Colors.borderStrong, true: Colors.paidText }}
+              />
+            </View>
+
+            <View style={styles.actionDivider} />
+
+            {/* Sign Out Row */}
+            <Pressable
+              style={[styles.actionRow, { marginTop: 4 }]}
+              onPress={() => {
+                setMoreVisible(false);
+                void signOut();
+              }}
+            >
+              <LogOut size={18} color={Colors.pendingText} />
+              <Text style={[styles.actionRowText, { color: Colors.pendingText }]}>
+                Keluar dari Akun
+              </Text>
+            </Pressable>
+
+            {err && (
+              <View style={styles.errBox}>
+                <Text style={styles.errText}>{err}</Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Info / Sub-modal */}
+      <Modal
+        visible={!!activeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveModal(null)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setActiveModal(null)}
+        >
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {activeModal === 'notification'
+                  ? 'Notifikasi'
+                  : activeModal === 'integration'
+                  ? 'Integrasi'
+                  : activeModal === 'help'
+                  ? 'Pusat Bantuan'
+                  : 'Tentang Kitasaku'}
+              </Text>
+              <Pressable hitSlop={8} onPress={() => setActiveModal(null)}>
+                <X size={20} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            {activeModal === 'notification' && (
+              <View style={{ gap: 14 }}>
+                <View style={styles.infoRow}>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.infoLabel}>Notifikasi Transaksi Pasangan</Text>
+                    <Text style={styles.infoSub}>
+                      Kirim pemberitahuan saat ada pengeluaran baru di ruang keluarga
+                    </Text>
+                  </View>
+                  <Switch
+                    value={notifyOn}
+                    onValueChange={toggleNotify}
+                    disabled={!householdId}
+                    trackColor={{ false: Colors.borderStrong, true: Colors.paidText }}
+                  />
+                </View>
+              </View>
+            )}
+
+            {activeModal === 'integration' && (
+              <View style={{ gap: 8 }}>
+                <Text style={styles.infoText}>
+                  Kitasaku terintegrasi secara instan dengan Supabase Cloud untuk sinkronisasi real-time antar perangkat pasangan.
+                </Text>
+                <Text style={[styles.infoText, { color: Colors.textMuted }]}>
+                  Integrasi bank otomatis & ekspor spreadsheet Google Sheets akan hadir di pembaruan berikutnya.
+                </Text>
+              </View>
+            )}
+
+            {activeModal === 'help' && (
+              <View style={{ gap: 8 }}>
+                <Text style={styles.infoText}>
+                  Ada pertanyaan seputar alokasi budget, pencatatan tanggungan, atau rekonsiliasi akun?
+                </Text>
+                <Text style={[styles.infoText, { color: Colors.brandPrimary, fontWeight: '600' }]}>
+                  Hubungi tim bantuan di support@kitasaku.id
+                </Text>
+              </View>
+            )}
+
+            {activeModal === 'about' && (
+              <View style={{ gap: 8 }}>
+                <Text style={styles.infoText}>
+                  Kitasaku v1.0.0 — Aplikasi Pengeluaran & Anggaran Keluarga.
+                </Text>
+                <Text style={[styles.infoText, { color: Colors.textMuted }]}>
+                  Dibuat untuk memudahkan transparansi dan keteraturan finansial rumah tangga.
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-/**
- * A menu row. `soon` renders the row without a chevron and without a press
- * handler — the design's list shape is preserved, but nothing claims to open.
- */
-function MenuRowView({ row, first, soon }: { row: MenuRow; first: boolean; soon?: boolean }) {
-  const Icon = row.icon;
-  const disabled = soon || !row.onPress;
-  const boxStyle =
-    row.tone === 'paid' ? styles.iconBoxPaid : row.tone === 'alert' ? styles.iconBoxAlert : styles.iconBox;
-  const iconColor =
-    row.tone === 'paid' ? Colors.paidText : row.tone === 'alert' ? Colors.alertText : Colors.textSecondary;
-
+function MenuRow({
+  icon: Icon,
+  title,
+  onPress,
+  isLast = false,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  title: string;
+  onPress?: () => void;
+  isLast?: boolean;
+}) {
   return (
     <Pressable
-      onPress={disabled ? undefined : row.onPress}
-      disabled={disabled}
-      style={[styles.row, !first && styles.rowBordered, soon && styles.rowSoon]}
+      style={[styles.menuRow, !isLast && styles.menuRowBordered]}
+      onPress={onPress}
     >
-      <View style={boxStyle}>
-        <Icon size={16} color={iconColor} />
+      <View style={styles.menuIconContainer}>
+        <Icon size={18} color="#0B1527" strokeWidth={1.8} />
       </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={styles.rowTitle}>{row.title}</Text>
-        {row.sub && <Text style={styles.rowSub}>{row.sub}</Text>}
-      </View>
-      {soon ? <Badge label="Segera" tone="default" /> : <ChevronRight size={16} color={Colors.textMuted} />}
+      <Text style={styles.menuTitle}>{title}</Text>
+      <ChevronRight size={16} color="#94A3B8" />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.canvas },
-  container: { padding: 16, gap: 12, paddingBottom: 32 },
-  header: { gap: 2 },
-  eyebrow: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
-  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '700' },
-  supporting: { color: Colors.textSecondary, fontSize: FontSize.body, marginTop: 2 },
+  safe: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  container: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  title: {
+    color: '#0B1527',
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  moreBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  householdCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+    gap: 14,
+    marginBottom: 10,
+  },
+  avatarSquircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  householdInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  householdTitle: {
+    color: '#0B1527',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  householdSubtitle: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  sectionTitle: {
+    color: '#0B1527',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 18,
+    marginBottom: 10,
+  },
+  groupedCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  menuRowBordered: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  menuIconContainer: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuTitle: {
+    flex: 1,
+    color: '#0B1527',
+    fontSize: 14.5,
+    fontWeight: '600',
+  },
 
-  identity: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(11, 21, 39, 0.45)',
+    justifyContent: 'flex-end',
   },
-  avatar: {
-    width: 48, height: 48, borderRadius: Radius.pill, backgroundColor: Colors.brandPrimary,
-    alignItems: 'center', justifyContent: 'center',
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 36,
+    gap: 14,
   },
-  avatarText: { color: Colors.white, fontSize: 18, fontWeight: '700' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '700', flexShrink: 1 },
-  householdName: { color: Colors.textSecondary, fontSize: FontSize.body },
-
-  form: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14, gap: 8,
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
-  label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0B1527',
+  },
+  profileBadgeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  profileAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.brandPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  profileName: {
+    color: '#0B1527',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  profileEmail: {
+    color: '#64748B',
+    fontSize: 12,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  actionRowText: {
+    flex: 1,
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#0B1527',
+  },
+  actionRowSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  actionDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+  },
+  editNameBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
   input: {
-    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
-    paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary,
-    backgroundColor: Colors.canvas,
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: '#0B1527',
+    backgroundColor: '#FFFFFF',
   },
-  hint: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 16 },
-
-  summary: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, padding: 14,
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
   },
-  summaryLabel: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 0.8 },
-  summaryValue: { color: Colors.textPrimary, fontSize: FontSize.cardTitle, fontWeight: '600' },
-  summaryRight: { alignItems: 'flex-end', gap: 2, flexShrink: 1 },
-  summaryMeta: { color: Colors.textSecondary, fontSize: FontSize.caption, textAlign: 'right' },
-
-  section: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginTop: 4 },
-  group: {
-    backgroundColor: Colors.surface, borderRadius: Radius.md, borderWidth: 1,
-    borderColor: Colors.borderSubtle, overflow: 'hidden',
+  infoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0B1527',
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
-  rowBordered: { borderTopWidth: 1, borderTopColor: Colors.borderSubtle },
-  rowSoon: { opacity: 0.55 },
-  iconBox: {
-    width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.subtle,
-    borderWidth: 1, borderColor: Colors.borderSubtle, alignItems: 'center', justifyContent: 'center',
+  infoSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
   },
-  iconBoxPaid: {
-    width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.paidBg,
-    borderWidth: 1, borderColor: Colors.paidBg, alignItems: 'center', justifyContent: 'center',
+  infoText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#334155',
   },
-  iconBoxAlert: {
-    width: 36, height: 36, borderRadius: Radius.md, backgroundColor: Colors.alertBg,
-    borderWidth: 1, borderColor: Colors.alertBg, alignItems: 'center', justifyContent: 'center',
+  errBox: {
+    backgroundColor: Colors.pendingBg,
+    borderRadius: 10,
+    padding: 10,
   },
-  rowTitle: { color: Colors.textPrimary, fontSize: 13.5, fontWeight: '600' },
-  rowSub: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 15 },
-
-  signOut: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: Colors.pendingBg, borderRadius: Radius.md, paddingVertical: 14, marginTop: 4,
+  errText: {
+    color: Colors.pendingText,
+    fontSize: 13,
   },
-  signOutText: { color: Colors.pendingText, fontSize: 13.5, fontWeight: '700' },
-  footer: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center' },
-  errBox: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12 },
-  errText: { color: Colors.pendingText, fontSize: FontSize.body },
 });
