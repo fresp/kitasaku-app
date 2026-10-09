@@ -32,6 +32,7 @@ import {
   useCancelCycle,
   useCancelledCycles,
   useHouseholdCycles,
+  useNonCycleTransactionLedger,
   useTransactionLedger,
 } from '../../lib/queries';
 import type { LedgerRow } from '../../lib/queries';
@@ -96,6 +97,15 @@ export default function HistoryScreen() {
   const cycleId = selectedCycle?.id;
   const accsQ = useAccounts(householdId);
   const ledgerQ = useTransactionLedger(householdId, cycleId, 'actual');
+  // Credit-card / cash rows carry no cycle_id (migration 028). They belong in
+  // this month's ledger so the history reads complete, bounded to the selected
+  // cycle's window — but never in a cancelled cycle's read-only archive, which
+  // only documents that cycle's own plans.
+  const outsideQ = useNonCycleTransactionLedger(
+    householdId,
+    selectedCycle ? { from: selectedCycle.start_date, to: selectedCycle.end_date } : null,
+    'actual'
+  );
 
   const [q, setQ] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -137,7 +147,11 @@ export default function HistoryScreen() {
     );
   };
 
-  const allRows: LedgerRow[] = useMemo(() => ledgerQ.data ?? [], [ledgerQ.data]);
+  const cycleRows: LedgerRow[] = useMemo(() => ledgerQ.data ?? [], [ledgerQ.data]);
+  const allRows: LedgerRow[] = useMemo(
+    () => (viewingCancelled ? cycleRows : [...cycleRows, ...(outsideQ.data ?? [])]),
+    [cycleRows, outsideQ.data, viewingCancelled]
+  );
 
   const narrowed = useMemo(() => {
     return allRows.filter((r) => {
@@ -161,9 +175,11 @@ export default function HistoryScreen() {
     [narrowed, status]
   );
 
+  // Cycle rows only: an outside row is always already executed, and the banner
+  // it feeds leads to the cycle's execution checklist.
   const pendingCount = useMemo(
-    () => allRows.filter((r) => r.status === 'PENDING').length,
-    [allRows]
+    () => cycleRows.filter((r) => r.status === 'PENDING').length,
+    [cycleRows]
   );
 
   const page = filtered.slice(0, visible);
@@ -219,6 +235,7 @@ export default function HistoryScreen() {
               void cyclesQ.refetch();
               void cancelledCyclesQ.refetch();
               void ledgerQ.refetch();
+              void outsideQ.refetch();
             }}
           />
         }
@@ -455,7 +472,7 @@ export default function HistoryScreen() {
                   row={r}
                   isLast={i === g.rows.length - 1}
                   onPress={
-                    viewingCancelled
+                    viewingCancelled || r.outsideCycle
                       ? undefined
                       : () =>
                           router.push({
@@ -660,6 +677,11 @@ function LedgerCard({
           {row.categories?.name ?? FLOW_LABELS[row.flowType]} ·{' '}
           {row.accounts?.name ?? 'Tanpa akun'}
         </Text>
+        {row.outsideCycle && (
+          <Text style={styles.txnOutside} numberOfLines={1}>
+            Di luar siklus · tidak dihitung
+          </Text>
+        )}
       </View>
 
       <View style={styles.txnRight}>
@@ -991,6 +1013,11 @@ const styles = StyleSheet.create({
   txnMeta: {
     fontSize: 12,
     color: '#64748B',
+  },
+  txnOutside: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textMuted,
   },
   txnRight: {
     alignItems: 'flex-end',

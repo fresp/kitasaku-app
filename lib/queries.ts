@@ -347,17 +347,28 @@ export function useTransactions(householdId: string | undefined, cycleId: string
   });
 }
 
-/** Explicit audit stream for transactions that are not assigned to a cycle. */
-export function useNonCycleTransactions(householdId: string | undefined) {
+/**
+ * Explicit audit stream for transactions that are not assigned to a cycle.
+ * Pass a date window to read only the rows a given cycle's ledger should show
+ * alongside its own; omit it for the full stream.
+ */
+export function useNonCycleTransactions(
+  householdId: string | undefined,
+  range?: { from: string; to: string } | null,
+) {
   return useQuery({
-    queryKey: ['audit-txns', householdId],
+    queryKey: ['audit-txns', householdId, range?.from ?? null, range?.to ?? null],
     enabled: !!householdId,
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
-      const { data, error } = await sb.from('transactions')
+      let query = sb.from('transactions')
         .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!)
-        .is('cycle_id', null)
+        .is('cycle_id', null);
+      if (range) {
+        query = query.gte('release_date', range.from).lte('release_date', range.to);
+      }
+      const { data, error } = await query
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw error;
       return (data ?? []) as Txn[];
@@ -1672,6 +1683,12 @@ export interface LedgerRow extends Txn {
    * "Rp 4.800.000 · Belum dieksekusi" rather than "Rp 0".
    */
   displayAmount: number;
+  /**
+   * True for a row recorded outside any cycle (credit card / cash, migration
+   * 028). The ledger shows it so the month reads complete, but it is never part
+   * of the cycle's source funds, allocations, reconciliation or insight.
+   */
+  outsideCycle?: boolean;
 }
 
 
@@ -1902,6 +1919,27 @@ export function useTransactionLedger(
     flowType: t.flow_type ?? defaultFlowType(t.direction, t.obligation_id),
     amount: resolveModeAmount(t, mode),
     displayAmount: ledgerDisplayAmount(t),
+  }));
+  return { ...q, data };
+}
+
+/**
+ * The non-cycle stream in ledger shape, so a cycle's Riwayat can show what was
+ * paid by credit card or cash in the same period. Marked `outsideCycle` — these
+ * rows are display only and never feed a cycle figure.
+ */
+export function useNonCycleTransactionLedger(
+  householdId: string | undefined,
+  range: { from: string; to: string } | null,
+  mode: SummaryMode = 'actual'
+) {
+  const q = useNonCycleTransactions(householdId, range);
+  const data: LedgerRow[] | undefined = q.data?.map((t) => ({
+    ...t,
+    flowType: t.flow_type ?? defaultFlowType(t.direction, t.obligation_id),
+    amount: resolveModeAmount(t, mode),
+    displayAmount: ledgerDisplayAmount(t),
+    outsideCycle: true,
   }));
   return { ...q, data };
 }

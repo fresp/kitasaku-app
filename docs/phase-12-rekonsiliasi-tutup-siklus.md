@@ -165,6 +165,12 @@ sekarang dijaga di DB, bukan hanya di layar:
   rencana lewat `replaces_transaction_id`. Pembayaran tanggungan tidak boleh lewat jalur
   ini; tetap `DEBT_PAYMENT` dari rekening bank/e-wallet.
 - Template lama yang memakai CC tidak ikut ke siklus baru sampai akunnya diganti.
+- Tampilan: baris di luar siklus **ikut muncul** di tab Riwayat siklus yang
+  rentang tanggalnya memuat `release_date` baris itu, ditandai "Di luar siklus ·
+  tidak dihitung" dan read-only. Ini murni display — baris tersebut tidak pernah
+  masuk `useTransactions`/`cycle_allocations`, jadi rekonsiliasi, zero-based, dan
+  insight per siklus tetap tidak melihatnya. Arsip siklus batal dikecualikan:
+  isinya hanya rencana milik siklus itu sendiri.
 - Rencana PENDING lama yang masih memakai CC/tunai **tidak bisa dieksekusi**
   sebagai pergerakan kas. `execute_planned_transaction` menimpa `account_id`
   dengan akun yang dipilih, jadi tanpa guard baris CC akan diam-diam dibukukan
