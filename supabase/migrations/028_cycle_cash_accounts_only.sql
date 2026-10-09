@@ -16,7 +16,9 @@
 alter table public.cycle_allocations
   add column if not exists transaction_id uuid references public.transactions(id) on delete set null;
 
--- Backfill: pair rows that share an identical key. Within a group of identical keys any
+-- Backfill: pair rows that share an identical key. Cancelled cycles are skipped —
+-- guard_cancelled_cycle_child (027) refuses any write to their archive, and a terminal
+-- archive has nothing to release later anyway. Within a group of identical keys any
 -- pairing is equivalent (same cycle, type, obligation, category, account, amount), so groups
 -- are paired by row order when both sides have the same count. Other rows stay unlinked and
 -- are listed by the verification queries at the end of this file.
@@ -29,6 +31,8 @@ with txn_keys as (
     count(*) over w_all as n
   from public.transactions t
   where t.cycle_id is not null
+    and exists (select 1 from public.cycles c
+                 where c.id = t.cycle_id and c.cancelled_at is null)
     and t.direction = 'EXPENSE'
     and t.flow_type in ('EXPENSE', 'DEBT_PAYMENT')
     and not exists (select 1 from public.cycle_allocations a where a.transaction_id = t.id)
@@ -47,6 +51,8 @@ alloc_keys as (
     count(*) over w_all as n
   from public.cycle_allocations a
   where a.transaction_id is null
+    and exists (select 1 from public.cycles c
+                 where c.id = a.cycle_id and c.cancelled_at is null)
     and a.allocation_type in ('EXPENSE', 'DEBT_PAYMENT')
   window w_all as (
     partition by a.household_id, a.cycle_id, a.allocation_type,
