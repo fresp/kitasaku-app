@@ -21,6 +21,7 @@ import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { longDateFullLabel } from '../lib/obligation';
+import { isZeroBasedCashAccount } from '../lib/account';
 import {
   useAccounts,
   useActiveCycle,
@@ -83,7 +84,8 @@ export default function TransactionEditScreen() {
   const categories = (catsQ.data ?? []).filter(
     (c) => c.type === (txn?.direction === 'INCOME' ? 'INCOME' : 'EXPENSE')
   );
-  const accounts = accsQ.data ?? [];
+  // Rows here belong to the active cycle, so only BANK / E_WALLET apply (migration 028).
+  const accounts = (accsQ.data ?? []).filter(isZeroBasedCashAccount);
   const loading = ledgerQ.isLoading || cycleQ.isLoading;
   const failed = ledgerQ.isError || cycleQ.isError;
 

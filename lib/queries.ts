@@ -9,7 +9,7 @@ import type { RepaymentMode } from './obligation';
 import type { InstallmentMode } from './installments';
 import type { Beneficiary } from './beneficiary';
 import { cleanAccountNumber } from './beneficiary';
-import { assertEligibleCashAccountForHousehold } from './cash-account';
+import { assertEligibleCashAccountForHousehold, findNonCycleAccounts } from './cash-account';
 import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
 import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
 export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
@@ -120,7 +120,7 @@ export interface Account {
   icon?: string | null;
 }
 export type TransactionStatus = 'PENDING' | 'PAID' | 'CANCELLED';
-export type CancellationReason = 'WRONG_INPUT' | 'DUPLICATE' | 'NOT_HAPPENED' | 'OTHER';
+export type CancellationReason = 'WRONG_INPUT' | 'DUPLICATE' | 'NOT_HAPPENED' | 'OTHER' | 'PAID_OUTSIDE_CYCLE';
 
 export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
   { value: 'WRONG_INPUT', label: 'Salah input' },
@@ -521,6 +521,55 @@ export function useMarkAsPaid() {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['tmpl'] });
       qc.invalidateQueries({ queryKey: ['installments'] });
+    },
+  });
+}
+
+/**
+ * Settles a PENDING cycle plan that was paid with a credit card or cash. Those
+ * accounts are audit-only (migration 028): the RPC cancels the plan and its
+ * allocation, and records a PAID row with cycle_id NULL, in one transaction.
+ */
+export function useSettlePendingOutsideCycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      txn: Txn;
+      accountId: string;
+      actualAmount: number;
+      isFinal: boolean;
+      releaseDate: string;
+    }) => {
+      if (!canMarkAsPaid(args.txn)) {
+        throw new Error('Transaksi ini sudah diproses.');
+      }
+      if (args.txn.obligation_id) {
+        throw new Error('Pembayaran tanggungan harus memakai rekening bank atau e-wallet.');
+      }
+      if (!(args.actualAmount > 0)) {
+        throw new Error('Nominal pembayaran harus lebih dari Rp 0.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
+        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
+      }
+      if (args.releaseDate > todayISO()) {
+        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
+      }
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('settle_pending_outside_cycle', {
+        p_household_id: args.txn.household_id,
+        p_transaction_id: args.txn.id,
+        p_account_id: args.accountId,
+        p_actual_amount: args.actualAmount,
+        p_release_date: args.releaseDate,
+        p_is_final: args.isFinal,
+      });
+      if (error) throw error;
+      return data as string;
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['tmpl'] });
     },
   });
 }
@@ -1045,7 +1094,7 @@ export function useAllocateObligation() {
         throw new Error('Nominal alokasi melebihi sisa tanggungan.');
       }
       const title = obligation.title;
-      const { error } = await sb.from('transactions').insert({
+      const { data: planned, error } = await sb.from('transactions').insert({
         household_id: args.householdId, cycle_id: args.cycleId,
         obligation_id: args.obligationId, name: title,
         direction: 'EXPENSE', flow_type: 'DEBT_PAYMENT',
@@ -1053,7 +1102,7 @@ export function useAllocateObligation() {
         status: 'PENDING', release_date: null,
         category_id: args.categoryId, account_id: args.accountId,
         created_by: user?.id ?? null,
-      });
+      }).select('id').single();
       if (error) throw error;
 
       const { error: aErr } = await sb.from('cycle_allocations').insert({
@@ -1061,6 +1110,7 @@ export function useAllocateObligation() {
         allocation_type: 'DEBT_PAYMENT', amount: args.amount,
         obligation_id: args.obligationId, account_id: args.accountId,
         category_id: args.categoryId, created_by: user?.id ?? null,
+        transaction_id: (planned as { id: string }).id,
       });
       if (aErr) throw aErr;
     },
@@ -1397,6 +1447,22 @@ export function useCreateCycle() {
       if (!(activeBankAccounts ?? []).some((account) => account.id === incomeAccountId)) {
         throw new Error('Akun pemasukan harus rekening BANK aktif.');
       }
+      // Checked before the first write: this mutation is several round trips, and
+      // the DB guard (migration 028) rejecting a credit-card row halfway would
+      // leave a new active cycle with only part of its plan.
+      const plannedAccountIds = [...args.items, ...args.obligations].map((row) => row.accountId);
+      if (plannedAccountIds.some(Boolean)) {
+        const { data: plannedAccounts, error: plannedAccountsError } = await sb.from('accounts')
+          .select('id, name, type').eq('household_id', args.householdId)
+          .in('id', plannedAccountIds.filter((id): id is string => !!id));
+        if (plannedAccountsError) throw plannedAccountsError;
+        const blocked = findNonCycleAccounts(plannedAccountIds, (plannedAccounts ?? []) as Account[]);
+        if (blocked.length > 0) {
+          throw new Error(
+            `Akun ${blocked.map((a) => a.name).join(', ')} hanya bisa dipakai di luar siklus. Ganti akun di template rutin atau lepas pos tersebut.`
+          );
+        }
+      }
       const { error: deactivateError } = await sb.from('cycles').update({ is_active: false })
         .eq('household_id', args.householdId).eq('is_active', true).is('cancelled_at', null);
       if (deactivateError) throw deactivateError;
@@ -1444,9 +1510,18 @@ export function useCreateCycle() {
           created_by: user?.id ?? null,
         });
       }
+      // Each commitment's allocation points at its planned row, so cancelling or
+      // settling that row later releases exactly this allocation.
+      const plannedIdByTemplate = new Map<string, string>();
+      const plannedIdByObligation = new Map<string, string>();
       if (rows.length > 0) {
-        const { error: tErr } = await sb.from('transactions').insert(rows);
+        const { data: inserted, error: tErr } = await sb.from('transactions').insert(rows)
+          .select('id, recurring_template_id, obligation_id');
         if (tErr) throw tErr;
+        for (const row of (inserted ?? []) as { id: string; recurring_template_id: string | null; obligation_id: string | null }[]) {
+          if (row.recurring_template_id) plannedIdByTemplate.set(row.recurring_template_id, row.id);
+          if (row.obligation_id) plannedIdByObligation.set(row.obligation_id, row.id);
+        }
       }
 
       // The commitment side. Income is a *source*, never an allocation, so it
@@ -1459,6 +1534,7 @@ export function useCreateCycle() {
           allocation_type: 'EXPENSE', amount: it.amount,
           category_id: it.categoryId, account_id: it.accountId,
           obligation_id: null, created_by: user?.id ?? null,
+          transaction_id: plannedIdByTemplate.get(it.templateId) ?? null,
         });
       }
       for (const ob of args.obligations) {
@@ -1468,6 +1544,7 @@ export function useCreateCycle() {
           allocation_type: 'DEBT_PAYMENT', amount: ob.amount,
           obligation_id: ob.obligationId, account_id: ob.accountId,
           category_id: ob.categoryId, created_by: user?.id ?? null,
+          transaction_id: plannedIdByObligation.get(ob.obligationId) ?? null,
         });
       }
       if (allocations.length > 0) {

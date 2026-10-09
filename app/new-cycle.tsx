@@ -10,6 +10,7 @@ import { cycleWindowFrom } from '../lib/profile';
 import { useAccounts, useActiveCycle, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
 import { cyclePrimaryAccountId, defaultAccountId } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
+import { findNonCycleAccounts } from '../lib/cash-account';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
@@ -80,7 +81,17 @@ export default function NewCycleScreen() {
   const amountFor = (id: string, fallback: number) =>
     amounts[id] !== undefined ? parseAmount(amounts[id]) : fallback;
 
-  const selected = activeTemplates.filter((t) => isChecked(t.id));
+  // Templates saved on a credit card / cash account before migration 028 cannot
+  // join a cycle; they stay unselected until the template is moved to a bank.
+  const outsideAccountNameByTemplate = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of activeTemplates) {
+      const [account] = findNonCycleAccounts([t.account_id], accsQ.data ?? []);
+      if (account) map.set(t.id, account.name);
+    }
+    return map;
+  }, [activeTemplates, accsQ.data]);
+  const selected = activeTemplates.filter((t) => !outsideAccountNameByTemplate.has(t.id) && isChecked(t.id));
 
   // A routine position is either a commitment (EXPENSE → an allocation) or a
   // source (INCOME → part of the money this cycle can spend). Summing them into
@@ -289,10 +300,12 @@ export default function NewCycleScreen() {
           </View>
         )}
         {activeTemplates.map((t) => {
-          const on = isChecked(t.id);
+          const outsideAccountName = outsideAccountNameByTemplate.get(t.id);
+          const on = !outsideAccountName && isChecked(t.id);
           return (
             <View key={t.id} style={styles.tplRow}>
               <Pressable
+                disabled={!!outsideAccountName}
                 onPress={() => setChecked((p) => ({ ...(p ?? {}), [t.id]: !on }))}
                 style={[styles.check, on && styles.checkOn]}
               >
@@ -303,6 +316,11 @@ export default function NewCycleScreen() {
                 <Text style={styles.muted}>
                   {(t as any).categories?.name ?? ''} • {(t as any).accounts?.name ?? ''}
                 </Text>
+                {outsideAccountName && (
+                  <Text style={styles.outsideHint}>
+                    {outsideAccountName} hanya untuk catatan di luar siklus. Ganti akun template ke rekening bank atau e-wallet agar ikut siklus.
+                  </Text>
+                )}
                 <TextInput
                   value={amounts[t.id] ?? String(t.default_amount)}
                   onChangeText={(v) => setAmounts((p) => ({ ...p, [t.id]: v }))}
@@ -456,6 +474,7 @@ const styles = StyleSheet.create({
   checkText: { fontWeight: '700' },
   checkTextOn: { color: Colors.white },
   tplName: { color: Colors.textPrimary, fontWeight: '600', fontSize: 15 },
+  outsideHint: { color: Colors.alertText, fontSize: FontSize.body },
   amtInput: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.sm, paddingHorizontal: 10, height: 40, marginTop: 6, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.surface },
   strategiesTitle: { color: Colors.textMuted, fontSize: FontSize.microLabel, fontWeight: '700', letterSpacing: 1, marginTop: 8 },
   strategy: { color: Colors.borderStrong, fontSize: FontSize.caption, lineHeight: 18 },

@@ -20,6 +20,7 @@ import {
 } from '../lib/queries';
 import type { Template } from '../lib/queries';
 import { templateDueLabel } from '../lib/zero-based';
+import { isZeroBasedCashAccount } from '../lib/account';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 
@@ -77,7 +78,10 @@ export default function TemplatesScreen() {
     .reduce((s, t) => s + t.default_amount, 0);
 
   const categories = catsQ.data ?? [];
-  const accounts = accsQ.data ?? [];
+  const allAccounts = accsQ.data ?? [];
+  // Templates are always cloned into a cycle, so only BANK / E_WALLET apply
+  // (migration 028). A legacy template on another account is flagged below.
+  const accounts = allAccounts.filter(isZeroBasedCashAccount);
   const saving = createTemplate.isPending || updateTemplate.isPending;
 
   async function save() {
@@ -225,6 +229,14 @@ export default function TemplatesScreen() {
             </View>
 
             <Text style={styles.label}>AKUN</Text>
+            {(() => {
+              const legacy = allAccounts.find((a) => a.id === draft.accountId && !isZeroBasedCashAccount(a));
+              return legacy ? (
+                <Text style={styles.hint}>
+                  {legacy.name} hanya untuk catatan di luar siklus. Pilih rekening bank atau e-wallet agar template ini ikut ke siklus.
+                </Text>
+              ) : null;
+            })()}
             <View style={styles.chips}>
               {accounts.map((a) => (
                 <Chip

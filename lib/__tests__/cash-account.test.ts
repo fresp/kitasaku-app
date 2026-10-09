@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertEligibleCashAccountForHousehold, isEligibleCashAccountForHousehold } from '../cash-account';
+import { assertEligibleCashAccountForHousehold, findNonCycleAccounts, isEligibleCashAccountForHousehold } from '../cash-account';
 
 const householdId = 'household-a';
 const bank = { household_id: householdId, type: 'BANK', is_active: true };
@@ -21,5 +21,26 @@ describe('cash account validation', () => {
   it('throws a clear error for an account that cannot carry cash allocation', () => {
     expect(() => assertEligibleCashAccountForHousehold(null, householdId))
       .toThrow('Pilih rekening bank atau e-wallet aktif milik household ini.');
+  });
+});
+
+describe('findNonCycleAccounts', () => {
+  const accounts = [
+    { id: 'bank', type: 'BANK' },
+    { id: 'wallet', type: 'E_WALLET' },
+    { id: 'cc', type: 'CREDIT_CARD' },
+    { id: 'cash', type: 'CASH' },
+  ];
+
+  it('reports credit card and cash accounts used by cycle rows', () => {
+    expect(findNonCycleAccounts(['bank', 'cc', 'cash'], accounts).map((a) => a.id)).toEqual(['cc', 'cash']);
+  });
+
+  it('accepts bank, e-wallet, a missing account, and an unknown id', () => {
+    expect(findNonCycleAccounts(['bank', 'wallet', null, undefined, 'unknown'], accounts)).toEqual([]);
+  });
+
+  it('reports a repeated account once', () => {
+    expect(findNonCycleAccounts(['cc', 'cc'], accounts)).toHaveLength(1);
   });
 });

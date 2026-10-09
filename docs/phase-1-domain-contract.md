@@ -105,6 +105,17 @@ rows but no allocations. The `create_financing_with_obligation` / `allocate_debt
 exist to avoid exactly that shape; folding cycle creation into a `create_cycle_with_plan` RPC is
 the follow-up tracked in the release audit.
 
+### 8.1 Allocation ↔ planned row (migration 028)
+
+`cycle_allocations.transaction_id` menunjuk baris PENDING yang melahirkan komitmen itu
+(`useCreateCycle`, `useAllocateObligation`). Membatalkan atau men-settle rencana di luar
+siklus melepas **tepat** alokasi tersebut melalui `release_pending_transaction`
+(internal, tidak bisa dipanggil client). Sebelum 028, `cancel_pending_transaction` hanya
+menemukan alokasi baris tanggungan, sehingga rencana `EXPENSE` yang dibatalkan
+meninggalkan alokasi aktif dan `unallocated` tercatat terlalu kecil. Baris lama tanpa
+link dicocokkan ke komitmen identik (kategori + akun + nominal, atau tanggungan +
+nominal); komitmen identik saling dapat dipertukarkan.
+
 ## 9. Open TODOs (decisions deferred, not silent assumptions)
 
 - ~~When an `EXPENSE` txn with `obligation_id` may count as `DEBT_PAYMENT`~~ → **resolved in Phase 2A**:

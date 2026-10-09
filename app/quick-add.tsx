@@ -17,7 +17,7 @@ import Info from 'lucide-react-native/icons/info';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
-import { defaultAccountId } from '../lib/account';
+import { defaultAccountId, isZeroBasedCashAccount } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
   useAccounts,
@@ -117,7 +117,16 @@ export default function QuickAddScreen() {
       : visibleCategories[0]?.id ?? null;
 
   const selectedCategory = visibleCategories.find((c) => c.id === selectedCategoryId);
-  const selectedAccountId = accountId ?? defaultAccountId(accounts);
+  const pickedAccountId = accountId ?? defaultAccountId(accounts);
+  const pickedAccount = accounts.find((a) => a.id === pickedAccountId);
+  // Cycle rows only use BANK / E_WALLET (migration 028). Outside audit mode a
+  // credit card or cash pick falls back to the default bank account.
+  const selectedAccountId =
+    !isAuditEntry && pickedAccount && !isZeroBasedCashAccount(pickedAccount)
+      ? defaultAccountId(accounts)
+      : pickedAccountId;
+  // Audit entries are expenses only, so income never offers non-cash accounts.
+  const pickerAccounts = kind === 'in' ? accounts.filter(isZeroBasedCashAccount) : accounts;
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const formattedReleaseDate = longDateFullLabel(releaseDate);
 
@@ -505,6 +514,11 @@ export default function QuickAddScreen() {
                   </Text>
                   <ChevronDown size={18} color={Colors.textMuted} />
                 </Pressable>
+                {isAuditEntry && selectedAccount && !isZeroBasedCashAccount(selectedAccount) && (
+                  <Text style={styles.warning}>
+                    {selectedAccount.name} dicatat sebagai riwayat di luar siklus, tidak dihitung di siklus.
+                  </Text>
+                )}
               </View>
 
               {/* Field: Status Pelunasan */}
@@ -658,12 +672,16 @@ export default function QuickAddScreen() {
             </View>
             <ScrollView style={{ maxHeight: 300 }}>
               <View style={styles.accountList}>
-                {accounts.map((a) => {
+                {pickerAccounts.map((a) => {
                   const isSelected = a.id === selectedAccountId;
                   return (
                     <Pressable
                       key={a.id}
                       onPress={() => {
+                        if (!isZeroBasedCashAccount(a) && !auditMode) {
+                          setAuditMode(true);
+                          setRecurring(false);
+                        }
                         setAccountId(a.id);
                         setAccountPickerOpen(false);
                       }}

@@ -7,7 +7,8 @@ import Share2 from 'lucide-react-native/icons/share-2';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { useActiveCycle, useMarkAsPaid, useTransactionLedger } from '../lib/queries';
+import { useAccounts, useActiveCycle, useMarkAsPaid, useTransactionLedger } from '../lib/queries';
+import { findNonCycleAccounts } from '../lib/cash-account';
 import type { LedgerRow } from '../lib/queries';
 import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
@@ -33,6 +34,7 @@ export default function BulkExecuteScreen() {
   const householdId = household?.id;
   const cycleQ = useActiveCycle(householdId);
   const ledgerQ = useTransactionLedger(householdId, cycleQ.data?.id, 'actual');
+  const accsQ = useAccounts(householdId);
   const markPaid = useMarkAsPaid();
   const pending = useMemo(() => (ledgerQ.data ?? []).filter((r) => r.status === 'PENDING'), [ledgerQ.data]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -53,6 +55,13 @@ export default function BulkExecuteScreen() {
   async function execute() {
     if (selectedRows.length === 0) return;
     setErr(null);
+    // Rows are executed one by one; a credit-card plan would fail midway and
+    // leave the batch half done. Those plans are settled individually instead.
+    const outside = selectedRows.filter((row) => findNonCycleAccounts([row.account_id], accsQ.data ?? []).length > 0);
+    if (outside.length > 0) {
+      setErr(`${outside.map((row) => row.name).join(', ')} memakai kartu kredit/tunai. Buka satu per satu untuk mencatatnya di luar siklus.`);
+      return;
+    }
     try {
       for (const row of selectedRows) {
         await markPaid.mutateAsync({

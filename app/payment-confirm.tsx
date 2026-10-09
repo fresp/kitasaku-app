@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { CANCELLATION_REASONS, useAccounts, useActiveCycle, useCancelPendingTransaction, useMarkAsPaid, useTransactions } from '../lib/queries';
+import { CANCELLATION_REASONS, useAccounts, useActiveCycle, useCancelPendingTransaction, useMarkAsPaid, useSettlePendingOutsideCycle, useTransactions } from '../lib/queries';
 import { accountSubline, isZeroBasedCashAccount } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
@@ -29,6 +29,7 @@ export default function PaymentConfirmScreen() {
   const txnsQ = useTransactions(householdId, cycleQ.data?.id);
   const accsQ = useAccounts(householdId);
   const markPaid = useMarkAsPaid();
+  const settleOutside = useSettlePendingOutsideCycle();
   const cancelTxn = useCancelPendingTransaction();
 
   const liveTxn = useMemo(
@@ -56,6 +57,17 @@ export default function PaymentConfirmScreen() {
   const accountOptions = (accsQ.data ?? []).filter((account) =>
     account.is_active !== false && isZeroBasedCashAccount(account)
   );
+  // Credit card / cash accounts are audit-only (migration 028). A plan made on
+  // one can only be settled outside the cycle, never booked against bank cash.
+  const outsideOptions = (accsQ.data ?? []).filter((account) =>
+    account.is_active !== false && !isZeroBasedCashAccount(account)
+  );
+  const plannedOutside = outsideOptions.some((account) => account.id === liveTxn?.account_id);
+  const canSettleOutside = !!liveTxn && liveTxn.direction === 'EXPENSE'
+    && liveTxn.flow_type === 'EXPENSE' && !liveTxn.obligation_id && outsideOptions.length > 0;
+  const [outsideMode, setOutsideMode] = useState<boolean | null>(null);
+  const isOutside = canSettleOutside && (outsideMode ?? plannedOutside);
+  const [outsideAccountId, setOutsideAccountId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isFinal, setIsFinal] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -78,8 +90,11 @@ export default function PaymentConfirmScreen() {
   const selectedAccountId = accountId ?? (accountOptions.some((account) => account.id === liveTxn?.account_id)
     ? liveTxn?.account_id ?? null
     : null);
+  const selectedOutsideId = outsideAccountId ?? (plannedOutside ? liveTxn?.account_id ?? null : null);
+  const shownOptions = isOutside ? outsideOptions : accountOptions;
+  const shownAccountId = isOutside ? selectedOutsideId : selectedAccountId;
   const selectedAccountName =
-    accountOptions.find((a) => a.id === selectedAccountId)?.name ?? accountName;
+    shownOptions.find((a) => a.id === shownAccountId)?.name ?? (isOutside || !plannedOutside ? accountName : 'Pilih rekening');
   const isIncome = liveTxn?.direction === 'INCOME';
   const differs = actualAmount !== planned;
 
@@ -90,7 +105,29 @@ export default function PaymentConfirmScreen() {
       return;
     }
     if (actualAmount <= 0) { setErr('Nominal pembayaran harus lebih dari Rp 0.'); return; }
+    if (!shownAccountId) {
+      setErr(isOutside ? 'Pilih kartu kredit atau akun tunai.' : 'Pilih rekening bank atau e-wallet.');
+      return;
+    }
+    // The DB refuses this too (migration 028 section 5): executing a plan that
+    // sits on a credit card would rewrite it to a bank account and make the
+    // cycle reconcile short. Say what to do instead of surfacing the RPC error.
+    if (plannedOutside && !isOutside) {
+      setErr(`Rencana ini memakai ${accountName}. Catat di luar siklus, atau ubah akun rencana ke rekening bank/e-wallet lewat Ubah.`);
+      return;
+    }
     try {
+      if (isOutside) {
+        await settleOutside.mutateAsync({
+          txn: liveTxn,
+          actualAmount,
+          accountId: shownAccountId,
+          isFinal,
+          releaseDate,
+        });
+        router.back();
+        return;
+      }
       await markPaid.mutateAsync({
         txn: liveTxn,
         actualAmount,
@@ -286,16 +323,16 @@ export default function PaymentConfirmScreen() {
 
         <Text style={styles.sectionLabel}>{isIncome ? 'Masuk ke akun' : 'Bayar dari'}</Text>
         <View style={styles.pills}>
-          {accountOptions.length === 0 ? (
+          {shownOptions.length === 0 ? (
             <Badge label={selectedAccountName} />
           ) : (
-            accountOptions.map((a) => {
-              const active = a.id === selectedAccountId;
+            shownOptions.map((a) => {
+              const active = a.id === shownAccountId;
               const sub = accountSubline(a);
               return (
                 <Pressable
                   key={a.id}
-                  onPress={() => setAccountId(a.id)}
+                  onPress={() => (isOutside ? setOutsideAccountId(a.id) : setAccountId(a.id))}
                   style={[styles.pill, active && styles.pillActive]}
                 >
                   <Text style={[styles.pillText, active && styles.pillTextActive]}>
@@ -309,6 +346,26 @@ export default function PaymentConfirmScreen() {
             })
           )}
         </View>
+
+        {canSettleOutside && (
+          <View style={styles.toggleCard}>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Dibayar pakai kartu kredit / tunai</Text>
+              <Switch
+                value={isOutside}
+                onValueChange={(next) => { setErr(null); setOutsideMode(next); }}
+                trackColor={{ true: Colors.paidText, false: Colors.borderStrong }}
+              />
+            </View>
+            <Text style={styles.toggleExplainer}>
+              {isOutside
+                ? 'Dicatat sebagai riwayat di luar siklus. Rencana ini ditutup dan alokasinya dilepas, jadi tidak mengurangi saldo siklus.'
+                : plannedOutside
+                  ? `Rencana ini memakai ${accountName}, jadi tidak bisa dibayar dari rekening siklus. Biarkan aktif, atau ubah akun rencana ke rekening bank/e-wallet lewat Ubah.`
+                  : 'Aktifkan kalau ternyata dibayar pakai kartu kredit atau tunai.'}
+            </Text>
+          </View>
+        )}
 
         {!!liveTxn?.recurring_template_id && (
           <View style={styles.toggleCard}>
@@ -335,7 +392,9 @@ export default function PaymentConfirmScreen() {
         <View style={styles.ctaRow}>
           <View style={{ flex: 2 }}>
             <PrimaryButton
-              label={markPaid.isPending ? 'Menyimpan…' : isIncome ? 'Konfirmasi & Terima' : 'Konfirmasi & Bayar'}
+              label={markPaid.isPending || settleOutside.isPending
+                ? 'Menyimpan…'
+                : isIncome ? 'Konfirmasi & Terima' : isOutside ? 'Catat di Luar Siklus' : 'Konfirmasi & Bayar'}
               onPress={confirm}
             />
           </View>

@@ -149,6 +149,29 @@ ada dan sudah menangani `due_date`, cicilan, dan `remaining_amount`. Tidak ada
 model baru yang dibutuhkan; yang perlu hanya memastikan tagihan CC masuk sebagai
 obligasi, bukan sebagai `EXPENSE` biasa.
 
+### Invariant (migration 028): baris siklus hanya akun kas
+
+Keputusan 2026-10-09: transaksi dengan akun selain `BANK`/`E_WALLET` (kartu kredit,
+tunai) **tetap dicatat sebagai riwayat, tetapi tidak masuk hitungan siklus**. Aturan ini
+sekarang dijaga di DB, bukan hanya di layar:
+
+- `transactions` dengan `cycle_id` terisi dan semua `recurring_templates` hanya boleh
+  memakai akun `BANK`/`E_WALLET` (atau belum ada akun). Trigger
+  `guard_cycle_transaction_account` dan `guard_template_account` menolak insert dan
+  perubahan `cycle_id`/`account_id` yang melanggar; edit lain pada baris lama tetap jalan.
+- Rencana PENDING yang ternyata dibayar pakai CC/tunai ditutup lewat RPC
+  `settle_pending_outside_cycle`: baris rencana dibatalkan (`PAID_OUTSIDE_CYCLE`) beserta
+  alokasinya, lalu satu baris PAID baru dengan `cycle_id = NULL` dicatat dan menunjuk ke
+  rencana lewat `replaces_transaction_id`. Pembayaran tanggungan tidak boleh lewat jalur
+  ini; tetap `DEBT_PAYMENT` dari rekening bank/e-wallet.
+- Template lama yang memakai CC tidak ikut ke siklus baru sampai akunnya diganti.
+- Rencana PENDING lama yang masih memakai CC/tunai **tidak bisa dieksekusi**
+  sebagai pergerakan kas. `execute_planned_transaction` menimpa `account_id`
+  dengan akun yang dipilih, jadi tanpa guard baris CC akan diam-diam dibukukan
+  sebagai uang keluar dari bank dan rekonsiliasi siklus meleset sebesar nominal
+  itu. Pilihannya dua: catat di luar siklus, atau ubah akun rencananya ke
+  rekening bank/e-wallet dulu kalau memang salah rencana.
+
 ### Yang bisa mematahkan rumus ini
 
 Transaksi ber-`account_id` NULL. Baris seperti itu adalah uang yang berpindah
