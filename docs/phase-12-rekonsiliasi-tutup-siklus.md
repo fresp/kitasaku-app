@@ -149,34 +149,46 @@ ada dan sudah menangani `due_date`, cicilan, dan `remaining_amount`. Tidak ada
 model baru yang dibutuhkan; yang perlu hanya memastikan tagihan CC masuk sebagai
 obligasi, bukan sebagai `EXPENSE` biasa.
 
-### Invariant (migration 028): baris siklus hanya akun kas
+### Cakupan akun (migration 028 → 029)
 
-Keputusan 2026-10-09: transaksi dengan akun selain `BANK`/`E_WALLET` (kartu kredit,
-tunai) **tetap dicatat sebagai riwayat, tetapi tidak masuk hitungan siklus**. Aturan ini
-sekarang dijaga di DB, bukan hanya di layar:
+Keputusan 2026-10-09, direvisi di hari yang sama. Versi 028 melarang akun selain
+`BANK`/`E_WALLET` muncul di baris bersiklus dan memaksa pembayaran kartu
+kredit/tunai lewat jalur terpisah (`settle_pending_outside_cycle`, dengan toggle
+di layar konfirmasi). Itu dicabut oleh 029: journey-nya jadi dua jalur untuk satu
+tindakan yang sama, padahal pemisahan yang sebenarnya dibutuhkan ada di sisi baca,
+bukan sisi tulis.
 
-- `transactions` dengan `cycle_id` terisi dan semua `recurring_templates` hanya boleh
-  memakai akun `BANK`/`E_WALLET` (atau belum ada akun). Trigger
-  `guard_cycle_transaction_account` dan `guard_template_account` menolak insert dan
-  perubahan `cycle_id`/`account_id` yang melanggar; edit lain pada baris lama tetap jalan.
-- Rencana PENDING yang ternyata dibayar pakai CC/tunai ditutup lewat RPC
-  `settle_pending_outside_cycle`: baris rencana dibatalkan (`PAID_OUTSIDE_CYCLE`) beserta
-  alokasinya, lalu satu baris PAID baru dengan `cycle_id = NULL` dicatat dan menunjuk ke
-  rencana lewat `replaces_transaction_id`. Pembayaran tanggungan tidak boleh lewat jalur
-  ini; tetap `DEBT_PAYMENT` dari rekening bank/e-wallet.
-- Template lama yang memakai CC tidak ikut ke siklus baru sampai akunnya diganti.
-- Tampilan: baris di luar siklus **ikut muncul** di tab Riwayat siklus yang
-  rentang tanggalnya memuat `release_date` baris itu, ditandai "Di luar siklus ·
-  tidak dihitung" dan read-only. Ini murni display — baris tersebut tidak pernah
-  masuk `useTransactions`/`cycle_allocations`, jadi rekonsiliasi, zero-based, dan
-  insight per siklus tetap tidak melihatnya. Arsip siklus batal dikecualikan:
-  isinya hanya rencana milik siklus itu sendiri.
-- Rencana PENDING lama yang masih memakai CC/tunai **tidak bisa dieksekusi**
-  sebagai pergerakan kas. `execute_planned_transaction` menimpa `account_id`
-  dengan akun yang dipilih, jadi tanpa guard baris CC akan diam-diam dibukukan
-  sebagai uang keluar dari bank dan rekonsiliasi siklus meleset sebesar nominal
-  itu. Pilihannya dua: catat di luar siklus, atau ubah akun rencananya ke
-  rekening bank/e-wallet dulu kalau memang salah rencana.
+Aturan yang berlaku sekarang:
+
+- **Satu siklus menelusuri semua transaksi, dari akun apa pun.** Transaksi dengan
+  kartu kredit atau tunai tetap memegang `cycle_id` dan muncul di ledger siklus
+  seperti baris lain. Nggak ada toggle, nggak ada jalur kedua.
+- **Acuan rekonsiliasi adalah akun UTAMA siklus** (`cycles.primary_account_id`,
+  selalu `BANK`). `close_cycle_reconciliation` dan `reconciliationPreview`
+  dievaluasi per akun, jadi baris kartu kredit nggak akan pernah menyentuh angka
+  rekon — by construction, bukan karena difilter.
+- **Zero-based dihitung per akun** dan hanya tersedia untuk `BANK`/`E_WALLET`
+  (`useZeroBasedSummaryForAccount`). Agregat sumber dana dan alokasi se-siklus
+  memfilter tipe akun di `lib/zero-based-accounting.ts`.
+- **Insight tahunan memfilter tipe akun** lewat `countsTowardInsight`
+  (`lib/insight.ts`). Tanpa ini belanja kartu kredit kehitung dua kali: sekali
+  sebagai pengeluaran, sekali lagi waktu tagihan CC dibayar sebagai
+  `DEBT_PAYMENT` dari rekening bank. Baris tanpa akun tergabung tetap dihitung,
+  supaya aturan ini nggak diam-diam mengecilkan angka lama.
+- Monitoring per akun untuk satu siklus tetap ada lewat snapshot akun dan ringkasan
+  per akun.
+
+Konsekuensinya: invariant ini **nggak dijaga DB**. Setiap agregasi baru yang
+menjumlahkan uang se-siklus wajib ikut memfilter tipe akun, atau angkanya salah
+tanpa ada yang menolak. Empat jalur yang ada sekarang sudah memfilter atau aman
+karena per-akun; tambahkan test waktu menambah jalur kelima.
+
+Yang tetap dipertahankan dari 028: `cycle_allocations.transaction_id` dan
+`release_pending_transaction` (lihat `docs/phase-1-domain-contract.md` §8.1).
+Itu bugfix terpisah — sebelumnya membatalkan rencana `EXPENSE` meninggalkan
+alokasi aktif dan bikin `unallocated` tercatat terlalu kecil. Kolom
+`transactions.replaces_transaction_id` juga tetap ada karena baris yang terlanjur
+di-settle lewat jalur 028 masih menunjuk ke rencana aslinya.
 
 ### Yang bisa mematahkan rumus ini
 

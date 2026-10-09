@@ -10,6 +10,7 @@ import {
   barPct,
   buildTrendInsights,
   buildYearBuckets,
+  countsTowardInsight,
   cycleMonth,
   cyclesInYear,
   isAssetAllocationType,
@@ -826,5 +827,54 @@ describe('liability type filtering (phase 5c)', () => {
   it('139: a type with no payments holds a flat balance', () => {
     const none = liabilitySeries(buckets, 0, new Set(['does-not-exist']));
     expect(none.every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('countsTowardInsight', () => {
+  it('counts bank and e-wallet rows', () => {
+    expect(countsTowardInsight({ accounts: { type: 'BANK' } })).toBe(true);
+    expect(countsTowardInsight({ accounts: [{ type: 'E_WALLET' }] })).toBe(true);
+  });
+
+  it('skips credit card and cash rows, which the cycle only traces', () => {
+    expect(countsTowardInsight({ accounts: { type: 'CREDIT_CARD' } })).toBe(false);
+    expect(countsTowardInsight({ accounts: [{ type: 'CASH' }] })).toBe(false);
+  });
+
+  it('keeps a row whose account is unknown, so nothing that used to count is dropped', () => {
+    expect(countsTowardInsight({})).toBe(true);
+    expect(countsTowardInsight({ accounts: null })).toBe(true);
+    expect(countsTowardInsight({ accounts: [] })).toBe(true);
+    expect(countsTowardInsight({ accounts: { type: null } })).toBe(true);
+  });
+});
+
+describe('buildYearBuckets account scope', () => {
+  const cycles = [{ id: 'c1', name: 'Okt', start_date: '2026-09-25', end_date: '2026-10-24' }];
+  const base = {
+    cycle_id: 'c1',
+    direction: 'EXPENSE' as const,
+    flow_type: 'EXPENSE' as const,
+    planned_amount: 100_000,
+    actual_amount: 100_000,
+    status: 'PAID' as const,
+  };
+
+  it('leaves a credit-card expense out of the month totals', () => {
+    const withCard = buildYearBuckets({
+      cycles,
+      txns: [base, { ...base, accounts: { type: 'CREDIT_CARD' } }],
+      allocations: [],
+      year: 2026,
+    });
+    const bankOnly = buildYearBuckets({
+      cycles,
+      txns: [base],
+      allocations: [],
+      year: 2026,
+    });
+    const month = (b: ReturnType<typeof buildYearBuckets>) =>
+      b.find((x) => x.cycleIds.includes('c1'))!;
+    expect(month(withCard).actualExpense).toBe(month(bankOnly).actualExpense);
   });
 });

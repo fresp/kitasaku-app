@@ -61,8 +61,26 @@ export interface InsightCycle {
   end_date: string;
 }
 
+/** Shape of the joined account row, which PostgREST returns as object or array. */
+export type InsightJoinedAccount = { type?: string | null } | { type?: string | null }[] | null;
+
+/**
+ * A cycle traces transactions from every account (migration 029), but the money
+ * figures only count the cash accounts a cycle is evaluated against: a credit
+ * card row would otherwise be counted here and again when its bill is paid as a
+ * DEBT_PAYMENT from the bank. An account that is not joined at all (older rows,
+ * rows with no account_id) is left in, so this narrows nothing that used to count.
+ */
+export function countsTowardInsight(row: { accounts?: InsightJoinedAccount }): boolean {
+  const joined = Array.isArray(row.accounts) ? row.accounts[0] : row.accounts;
+  const type = joined?.type;
+  if (!type) return true;
+  return type === 'BANK' || type === 'E_WALLET';
+}
+
 export interface InsightTxn {
   cycle_id: string | null;
+  accounts?: InsightJoinedAccount;
   direction: 'INCOME' | 'EXPENSE';
   flow_type?: FlowType | null;
   obligation_id?: string | null;
@@ -74,6 +92,7 @@ export interface InsightTxn {
 
 export interface InsightAllocation {
   cycle_id: string | null;
+  accounts?: InsightJoinedAccount;
   allocation_type: AllocationType;
   amount: number;
   category_id?: string | null;
@@ -244,6 +263,7 @@ export function buildYearBuckets(args: {
   for (const t of args.txns) {
     if (t.status === 'CANCELLED') continue;
     if (!t.cycle_id) continue;
+    if (!countsTowardInsight(t)) continue;
     const month = monthByCycle.get(t.cycle_id);
     if (month === undefined) continue;
     const b = buckets[month - 1];
@@ -294,6 +314,7 @@ export function buildYearBuckets(args: {
   for (const a of args.allocations) {
     if (a.cancelled_at) continue;
     if (!a.cycle_id) continue;
+    if (!countsTowardInsight(a)) continue;
     const month = monthByCycle.get(a.cycle_id);
     if (month === undefined) continue;
     const b = buckets[month - 1];

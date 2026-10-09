@@ -26,17 +26,3 @@ export function assertEligibleCashAccountForHousehold(
     throw new Error('Pilih rekening bank atau e-wallet aktif milik household ini.');
   }
 }
-
-/**
- * Cycle-bound rows (planned transactions, recurring templates) may only use
- * BANK / E_WALLET. Returns the accounts among `accountIds` that break that
- * rule; an empty id or one not in `accounts` is not reported here (the DB
- * guard in migration 028 stays the authority).
- */
-export function findNonCycleAccounts<T extends { id: string; type: string }>(
-  accountIds: (string | null | undefined)[],
-  accounts: T[],
-): T[] {
-  const ids = new Set(accountIds.filter((id): id is string => !!id));
-  return accounts.filter((account) => ids.has(account.id) && !isZeroBasedCashAccount(account));
-}

@@ -9,7 +9,7 @@ import type { RepaymentMode } from './obligation';
 import type { InstallmentMode } from './installments';
 import type { Beneficiary } from './beneficiary';
 import { cleanAccountNumber } from './beneficiary';
-import { assertEligibleCashAccountForHousehold, findNonCycleAccounts } from './cash-account';
+import { assertEligibleCashAccountForHousehold } from './cash-account';
 import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
 import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
 export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
@@ -120,7 +120,7 @@ export interface Account {
   icon?: string | null;
 }
 export type TransactionStatus = 'PENDING' | 'PAID' | 'CANCELLED';
-export type CancellationReason = 'WRONG_INPUT' | 'DUPLICATE' | 'NOT_HAPPENED' | 'OTHER' | 'PAID_OUTSIDE_CYCLE';
+export type CancellationReason = 'WRONG_INPUT' | 'DUPLICATE' | 'NOT_HAPPENED' | 'OTHER';
 
 export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
   { value: 'WRONG_INPUT', label: 'Salah input' },
@@ -142,7 +142,7 @@ export interface Txn {
   recipient: string | null; is_final_payment: boolean; created_at: string;
   // joined
   categories?: { name: string; icon?: string | null } | null;
-  accounts?: { name: string } | null;
+  accounts?: { name: string; type?: string | null } | null;
 }
 export interface Obligation {
   id: string; household_id: string; title: string; type: string; recipient: string | null;
@@ -347,28 +347,17 @@ export function useTransactions(householdId: string | undefined, cycleId: string
   });
 }
 
-/**
- * Explicit audit stream for transactions that are not assigned to a cycle.
- * Pass a date window to read only the rows a given cycle's ledger should show
- * alongside its own; omit it for the full stream.
- */
-export function useNonCycleTransactions(
-  householdId: string | undefined,
-  range?: { from: string; to: string } | null,
-) {
+/** Explicit audit stream for transactions that are not assigned to a cycle. */
+export function useNonCycleTransactions(householdId: string | undefined) {
   return useQuery({
-    queryKey: ['audit-txns', householdId, range?.from ?? null, range?.to ?? null],
+    queryKey: ['audit-txns', householdId],
     enabled: !!householdId,
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
-      let query = sb.from('transactions')
+      const { data, error } = await sb.from('transactions')
         .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
         .eq('household_id', householdId!)
-        .is('cycle_id', null);
-      if (range) {
-        query = query.gte('release_date', range.from).lte('release_date', range.to);
-      }
-      const { data, error } = await query
+        .is('cycle_id', null)
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw error;
       return (data ?? []) as Txn[];
@@ -532,55 +521,6 @@ export function useMarkAsPaid() {
       invalidateMoneyKeys(qc);
       qc.invalidateQueries({ queryKey: ['tmpl'] });
       qc.invalidateQueries({ queryKey: ['installments'] });
-    },
-  });
-}
-
-/**
- * Settles a PENDING cycle plan that was paid with a credit card or cash. Those
- * accounts are audit-only (migration 028): the RPC cancels the plan and its
- * allocation, and records a PAID row with cycle_id NULL, in one transaction.
- */
-export function useSettlePendingOutsideCycle() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      txn: Txn;
-      accountId: string;
-      actualAmount: number;
-      isFinal: boolean;
-      releaseDate: string;
-    }) => {
-      if (!canMarkAsPaid(args.txn)) {
-        throw new Error('Transaksi ini sudah diproses.');
-      }
-      if (args.txn.obligation_id) {
-        throw new Error('Pembayaran tanggungan harus memakai rekening bank atau e-wallet.');
-      }
-      if (!(args.actualAmount > 0)) {
-        throw new Error('Nominal pembayaran harus lebih dari Rp 0.');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.releaseDate)) {
-        throw new Error('Tanggal transaksi harus menggunakan format YYYY-MM-DD.');
-      }
-      if (args.releaseDate > todayISO()) {
-        throw new Error('Tanggal transaksi tidak boleh di masa depan.');
-      }
-      const sb = requireSupabase();
-      const { data, error } = await sb.rpc('settle_pending_outside_cycle', {
-        p_household_id: args.txn.household_id,
-        p_transaction_id: args.txn.id,
-        p_account_id: args.accountId,
-        p_actual_amount: args.actualAmount,
-        p_release_date: args.releaseDate,
-        p_is_final: args.isFinal,
-      });
-      if (error) throw error;
-      return data as string;
-    },
-    onSuccess: () => {
-      invalidateMoneyKeys(qc);
-      qc.invalidateQueries({ queryKey: ['tmpl'] });
     },
   });
 }
@@ -1458,22 +1398,6 @@ export function useCreateCycle() {
       if (!(activeBankAccounts ?? []).some((account) => account.id === incomeAccountId)) {
         throw new Error('Akun pemasukan harus rekening BANK aktif.');
       }
-      // Checked before the first write: this mutation is several round trips, and
-      // the DB guard (migration 028) rejecting a credit-card row halfway would
-      // leave a new active cycle with only part of its plan.
-      const plannedAccountIds = [...args.items, ...args.obligations].map((row) => row.accountId);
-      if (plannedAccountIds.some(Boolean)) {
-        const { data: plannedAccounts, error: plannedAccountsError } = await sb.from('accounts')
-          .select('id, name, type').eq('household_id', args.householdId)
-          .in('id', plannedAccountIds.filter((id): id is string => !!id));
-        if (plannedAccountsError) throw plannedAccountsError;
-        const blocked = findNonCycleAccounts(plannedAccountIds, (plannedAccounts ?? []) as Account[]);
-        if (blocked.length > 0) {
-          throw new Error(
-            `Akun ${blocked.map((a) => a.name).join(', ')} hanya bisa dipakai di luar siklus. Ganti akun di template rutin atau lepas pos tersebut.`
-          );
-        }
-      }
       const { error: deactivateError } = await sb.from('cycles').update({ is_active: false })
         .eq('household_id', args.householdId).eq('is_active', true).is('cancelled_at', null);
       if (deactivateError) throw deactivateError;
@@ -1683,12 +1607,6 @@ export interface LedgerRow extends Txn {
    * "Rp 4.800.000 · Belum dieksekusi" rather than "Rp 0".
    */
   displayAmount: number;
-  /**
-   * True for a row recorded outside any cycle (credit card / cash, migration
-   * 028). The ledger shows it so the month reads complete, but it is never part
-   * of the cycle's source funds, allocations, reconciliation or insight.
-   */
-  outsideCycle?: boolean;
 }
 
 
@@ -1839,12 +1757,14 @@ export function useYearInsight(householdId: string | undefined, year: number) {
       const cycleIds = cycles.map((c) => c.id);
       const [txnRes, allocRes] = await Promise.all([
         sb.from('transactions')
-          .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
+          // account type: insight counts only the cash accounts a cycle is
+          // evaluated against (lib/insight.ts countsTowardInsight).
+          .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name, type)')
           .eq('household_id', householdId!)
           .in('cycle_id', cycleIds)
           .limit(2000),
         sb.from('cycle_allocations')
-          .select('*, categories(name, icon), obligations(title), accounts(name)')
+          .select('*, categories(name, icon), obligations(title), accounts(name, type)')
           .eq('household_id', householdId!)
           .in('cycle_id', cycleIds)
           .limit(2000),
@@ -1919,27 +1839,6 @@ export function useTransactionLedger(
     flowType: t.flow_type ?? defaultFlowType(t.direction, t.obligation_id),
     amount: resolveModeAmount(t, mode),
     displayAmount: ledgerDisplayAmount(t),
-  }));
-  return { ...q, data };
-}
-
-/**
- * The non-cycle stream in ledger shape, so a cycle's Riwayat can show what was
- * paid by credit card or cash in the same period. Marked `outsideCycle` — these
- * rows are display only and never feed a cycle figure.
- */
-export function useNonCycleTransactionLedger(
-  householdId: string | undefined,
-  range: { from: string; to: string } | null,
-  mode: SummaryMode = 'actual'
-) {
-  const q = useNonCycleTransactions(householdId, range);
-  const data: LedgerRow[] | undefined = q.data?.map((t) => ({
-    ...t,
-    flowType: t.flow_type ?? defaultFlowType(t.direction, t.obligation_id),
-    amount: resolveModeAmount(t, mode),
-    displayAmount: ledgerDisplayAmount(t),
-    outsideCycle: true,
   }));
   return { ...q, data };
 }
