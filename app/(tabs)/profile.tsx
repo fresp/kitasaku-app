@@ -445,7 +445,9 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 40,
+    // Clears the floating tab bar, which is absolutely positioned over the
+    // scroll view. Home, Transaksi and Tanggungan already reserve 110.
+    paddingBottom: 110,
   },
   header: {
     flexDirection: 'row',
