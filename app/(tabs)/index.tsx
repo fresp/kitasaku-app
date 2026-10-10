@@ -131,8 +131,18 @@ export default function HomeScreen() {
     setAccountPickerOpen(false);
   };
 
+  // Six, not three: with Aksi cepat and the stacked banners gone the screen ends
+  // halfway down, and the space is better spent on the ledger than on nothing.
   const homeRows = useMemo<HomeRow[]>(
-    () => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 3),
+    () => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 6),
+    [txns]
+  );
+  // Searched over every transaction, not over the handful Home prints: the rows
+  // are ordered by creation, so a plan written when the cycle opened falls
+  // outside them and the line read "Periksa daftar transaksi" with a real name
+  // available.
+  const nextUnpaidName = useMemo(
+    () => txns.find((t) => t.status === 'PENDING' && t.direction === 'EXPENSE')?.name ?? null,
     [txns]
   );
 
@@ -381,9 +391,7 @@ export default function HomeScreen() {
                       {unpaidCount} tagihan belum dibayar · {formatRupiah(unpaidAmount)}
                     </Text>
                     <Text style={styles.attentionSub} numberOfLines={1}>
-                      Terdekat ·{' '}
-                      {homeRows.find((row) => row.status === 'PENDING' && row.direction === 'EXPENSE')
-                        ?.name ?? 'Periksa daftar transaksi'}
+                      Terdekat · {nextUnpaidName ?? 'Periksa daftar transaksi'}
                     </Text>
                   </View>
                   <ChevronRight size={18} color={Colors.warning} />
