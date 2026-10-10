@@ -1390,11 +1390,16 @@ export function useCreateCycle() {
     mutationFn: async (args: {
       householdId: string; name: string; start: string; end: string;
       primaryAccountId: string | null;
+      /** Balance of the primary account on day one, as stated now (migration 031). */
+      openingStated?: number | null;
       incomeAmount: number; incomeAccountId: string | null; incomeCategoryId: string | null;
       items: { templateId: string; name: string; amount: number; categoryId: string | null; accountId: string | null; direction: 'INCOME' | 'EXPENSE' }[];
       /** Open obligations carried into this cycle, at their remaining amount. */
       obligations: { obligationId: string; title: string; amount: number; categoryId: string | null; accountId: string | null }[];
     }) => {
+      if (args.openingStated != null && !(args.openingStated >= 0)) {
+        throw new Error('Saldo awal tidak boleh negatif.');
+      }
       const sb = requireSupabase();
       const { data: { user } } = await sb.auth.getUser();
       const { data: activeBankAccounts, error: bankAccountsError } = await sb.from('accounts')

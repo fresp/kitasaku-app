@@ -74,6 +74,10 @@ export default function NewCycleScreen() {
   // default because a carried-over debt is not optional spending — leaving one
   // out is what creates a silent funding gap.
   const [obligChecked, setObligChecked] = useState<Record<string, boolean> | null>(null);
+  // Asked here because this is the one moment the household is already dealing
+  // with the cycle. Left empty it derives from the previous cycle's closing, as
+  // it always did — which is nothing at all for the first cycle.
+  const [openingText, setOpeningText] = useState('');
 
   const isChecked = (id: string, fallback = true) =>
     checked ? (checked[id] ?? fallback) : fallback;
@@ -166,6 +170,7 @@ export default function NewCycleScreen() {
         name: cycleName.trim() || 'Siklus Baru',
         start, end,
         primaryAccountId: activePrimaryId,
+        openingStated: openingText.trim() ? parseAmount(openingText) : null,
         incomeAmount: income,
         incomeAccountId,
         incomeCategoryId: (catsQ.data ?? []).find((c) => c.type === 'INCOME')?.id ?? null,
@@ -246,6 +251,28 @@ export default function NewCycleScreen() {
             ? `Tanggal mengikuti hari gajian keluarga (tgl ${household.payday_day}). Ubah kalau siklus ini beda.`
             : 'Belum ada hari gajian di Ruang Keluarga, jadi tanggal di bawah cuma perkiraan sebulan dari hari ini — atur tanggal gajian supaya terisi sendiri.'}
         </Text>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>AKUN PRIMER SIKLUS</Text>
+          <Text style={styles.primaryAccount}>
+            {accsQ.data?.find((a) => a.id === activePrimaryId)?.name ?? 'Belum ada rekening bank'}
+            {activePrimaryId ? ' · BANK' : ''}
+          </Text>
+          <Text style={styles.label}>SALDO REKENING HARI INI</Text>
+          <TextInput
+            value={openingText}
+            onChangeText={setOpeningText}
+            keyboardType="number-pad"
+            placeholder="Boleh dikosongkan"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.input}
+          />
+          <Text style={styles.muted}>
+            {openingText.trim()
+              ? `${formatRupiah(parseAmount(openingText))} jadi titik awal siklus ini.`
+              : 'Tanpa ini Home hanya bisa menampilkan pergerakan akun, bukan saldo.'}
+          </Text>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.label}>PEMASUKAN GAJIAN PERTAMA</Text>
@@ -449,6 +476,7 @@ const styles = StyleSheet.create({
   dateRow: { flexDirection: 'row', gap: 10 },
   card: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 6 },
   incomeInput: { fontSize: 22, fontWeight: '700', color: Colors.textPrimary, fontVariant: ['tabular-nums'] },
+  primaryAccount: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
   muted: { color: Colors.textMuted, fontSize: FontSize.body },
   tplRow: { flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, padding: 12, alignItems: 'flex-start' },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1, borderColor: Colors.borderStrong, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
