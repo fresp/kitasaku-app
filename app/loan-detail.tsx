@@ -88,6 +88,9 @@ export default function LoanDetailScreen() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelNote, setCancelNote] = useState('');
   const [payOpen, setPayOpen] = useState(false);
+  // Which amount the confirm card will send. Reset whenever the card opens, so
+  // a payoff chosen once is never the silent default next time.
+  const [payFull, setPayFull] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<InstallmentMode>('FIXED_INSTALLMENT');
   const [schedulePrincipalText, setSchedulePrincipalText] = useState('');
@@ -217,6 +220,12 @@ export default function LoanDetailScreen() {
     nextInst?.planned_amount ?? obligation.planned_installment_amount ?? obligation.remaining_amount;
 
   const ob = obligation;
+  const openInstallmentCount = installments.filter(
+    (i) => i.status !== 'SETTLED' && i.status !== 'CANCELLED'
+  ).length;
+  const payAmount = payFull
+    ? obligation.remaining_amount
+    : Math.min(nextOpenAmount, obligation.remaining_amount);
 
   async function payNow() {
     setErr(null);
@@ -224,7 +233,9 @@ export default function LoanDetailScreen() {
       setErr('Buka siklus aktif dulu sebelum membayar.');
       return;
     }
-    const amount = Math.min(nextOpenAmount, ob.remaining_amount);
+    const amount = payFull
+      ? ob.remaining_amount
+      : Math.min(nextOpenAmount, ob.remaining_amount);
     if (!(amount > 0)) {
       setErr('Tidak ada sisa yang perlu dibayar.');
       return;
@@ -238,6 +249,7 @@ export default function LoanDetailScreen() {
         accountId: accsQ.data?.[0]?.id ?? null,
       });
       setPayOpen(false);
+      setPayFull(false);
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal mencatat pembayaran.');
     }
@@ -483,19 +495,70 @@ export default function LoanDetailScreen() {
             {payOpen ? (
               <View style={styles.payConfirmCard}>
                 <Text style={styles.payConfirmTitle}>Konfirmasi Pembayaran</Text>
-                <Text style={styles.payConfirmAmount}>
-                  {formatRupiah(Math.min(nextOpenAmount, obligation.remaining_amount))}
-                </Text>
-                <Text style={styles.payConfirmHint}>
-                  {nextInst
-                    ? `Sesuai tagihan cicilan per ${longDateFullLabel(nextInst.due_date) ?? 'siklus ini'}.`
-                    : 'Nominal akan dicatat sebagai pelunasan tanggungan.'}
-                </Text>
+
+                {/* The payoff is offered only when it is actually a different
+                    amount — with one instalment left the two options would read
+                    as a choice and be the same money. */}
+                {openInstallmentCount > 1 ? (
+                  <>
+                    <Pressable
+                      onPress={() => setPayFull(false)}
+                      style={[styles.payOption, !payFull && styles.payOptionActive]}
+                    >
+                      <View style={[styles.payRadio, !payFull && styles.payRadioActive]}>
+                        {!payFull && <View style={styles.payRadioDot} />}
+                      </View>
+                      <View style={styles.payOptionCopy}>
+                        <Text style={styles.payOptionTitle}>Cicilan berikutnya</Text>
+                        <Text style={styles.payOptionSub}>
+                          {nextInst
+                            ? `Jatuh tempo ${longDateFullLabel(nextInst.due_date) ?? 'siklus ini'}`
+                            : 'Sesuai tagihan siklus ini'}
+                        </Text>
+                      </View>
+                      <Text style={styles.payOptionAmount}>
+                        {formatRupiah(Math.min(nextOpenAmount, obligation.remaining_amount))}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => setPayFull(true)}
+                      style={[styles.payOption, payFull && styles.payOptionActive]}
+                    >
+                      <View style={[styles.payRadio, payFull && styles.payRadioActive]}>
+                        {payFull && <View style={styles.payRadioDot} />}
+                      </View>
+                      <View style={styles.payOptionCopy}>
+                        <Text style={styles.payOptionTitle}>Lunasi sisa</Text>
+                        <Text style={styles.payOptionSub}>
+                          Menutup {openInstallmentCount} cicilan sekaligus
+                        </Text>
+                      </View>
+                      <Text style={styles.payOptionAmount}>
+                        {formatRupiah(obligation.remaining_amount)}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.payConfirmAmount}>
+                      {formatRupiah(Math.min(nextOpenAmount, obligation.remaining_amount))}
+                    </Text>
+                    <Text style={styles.payConfirmHint}>
+                      {nextInst
+                        ? `Sesuai tagihan cicilan per ${longDateFullLabel(nextInst.due_date) ?? 'siklus ini'}.`
+                        : 'Nominal akan dicatat sebagai pelunasan tanggungan.'}
+                    </Text>
+                  </>
+                )}
+
                 <PrimaryButton
-                  label={pay.isPending ? 'Menyimpan…' : 'Konfirmasi Sekarang'}
+                  label={pay.isPending
+                    ? 'Menyimpan…'
+                    : `Konfirmasi ${formatRupiah(payAmount)}`}
                   onPress={payNow}
                 />
-                <SecondaryButton label="Batal" onPress={() => setPayOpen(false)} />
+                <TextButton label="Batal" onPress={() => { setPayOpen(false); setPayFull(false); }} />
               </View>
             ) : (
               <Pressable onPress={() => setPayOpen(true)} style={styles.markPaidBtn}>
@@ -1001,6 +1064,49 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  payOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 13,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    backgroundColor: Colors.surface,
+  },
+  payOptionActive: {
+    borderWidth: 1.5,
+    borderColor: Colors.brandPrimary,
+    backgroundColor: Colors.subtle,
+  },
+  payRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payRadioActive: {
+    borderColor: Colors.brandPrimary,
+    backgroundColor: Colors.brandPrimary,
+  },
+  payRadioDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: Colors.white,
+  },
+  payOptionCopy: { flex: 1, gap: 2 },
+  payOptionTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  payOptionSub: { color: Colors.textSecondary, fontSize: 11 },
+  payOptionAmount: {
+    color: Colors.textPrimary,
+    fontSize: 14.5,
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   payConfirmHint: {
