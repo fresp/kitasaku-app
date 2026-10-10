@@ -11,7 +11,7 @@ import { accountSubline, isZeroBasedCashAccount } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { BrandIcon } from '../components/ui/BrandIcon';
-import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number {
@@ -165,7 +165,7 @@ export default function PaymentConfirmScreen() {
           <Text style={styles.charCount}>{cancelNote.length}/500</Text>
           {err && <Text style={styles.errText}>{err}</Text>}
           <View style={styles.modalActions}>
-            <View style={{ flex: 1 }}><SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} /></View>
+            <View style={{ flex: 1 }}><TextButton label="Kembali" onPress={() => setCancelOpen(false)} /></View>
             <View style={{ flex: 1 }}><PrimaryButton label={cancelTxn.isPending ? 'Menyimpan…' : 'Batalkan rencana'} onPress={cancel} /></View>
           </View>
         </View>

@@ -9,7 +9,7 @@ import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useActiveCycle, useMarkAsPaid, useTransactionLedger } from '../lib/queries';
 import type { LedgerRow } from '../lib/queries';
-import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 function previewText(rows: LedgerRow[]): string {
@@ -25,6 +25,15 @@ function previewText(rows: LedgerRow[]): string {
     `Total pengeluaran: ${formatRupiah(totalOut)}`,
     `Dipilih: ${rows.length} transaksi`,
   ].join('\n');
+}
+
+function previewSummary(rows: LedgerRow[]): string {
+  const totalIn = rows.filter((r) => r.direction === 'INCOME').reduce((sum, r) => sum + r.planned_amount, 0);
+  const totalOut = rows.filter((r) => r.direction === 'EXPENSE').reduce((sum, r) => sum + r.planned_amount, 0);
+  const parts = [`${rows.length} transaksi`];
+  if (totalIn > 0) parts.push(`masuk ${formatRupiah(totalIn)}`);
+  if (totalOut > 0) parts.push(`keluar ${formatRupiah(totalOut)}`);
+  return parts.join(' · ');
 }
 
 export default function BulkExecuteScreen() {
@@ -114,12 +123,14 @@ export default function BulkExecuteScreen() {
 
         {selectedRows.length > 0 && (
           <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Preview {selectedRows.length} transaksi</Text>
-            <Text style={styles.previewBody} numberOfLines={6}>{previewText(selectedRows)}</Text>
-            <View style={styles.previewActions}>
-              <SecondaryButton label="Lihat preview" onPress={() => setShowPreview(true)} />
-              <Pressable onPress={sharePreview} style={styles.shareButton}><Share2 size={16} color={Colors.white} /><Text style={styles.shareText}>Bagikan</Text></Pressable>
+            <View style={styles.previewMain}>
+              <Text style={styles.previewTitle}>Ringkasan untuk keluarga</Text>
+              <Text style={styles.previewBody}>{previewSummary(selectedRows)}</Text>
             </View>
+            <Pressable onPress={() => setShowPreview(true)} style={styles.shareButton}>
+              <Share2 size={15} color={Colors.textPrimary} />
+              <Text style={styles.shareText}>Bagikan</Text>
+            </Pressable>
           </View>
         )}
 
@@ -128,9 +139,13 @@ export default function BulkExecuteScreen() {
             <View style={styles.modalCard}>
               <Text style={styles.previewTitle}>Preview untuk keluarga</Text>
               <Text style={styles.fullPreview}>{previewText(selectedRows)}</Text>
+              <Text style={styles.note}>Dibagikan lewat menu sistem perangkat. Dari sana pilih WhatsApp, simpan sebagai catatan, atau aplikasi lain.</Text>
               <View style={styles.previewActions}>
-                <SecondaryButton label="Tutup" onPress={() => setShowPreview(false)} />
-                <Pressable onPress={sharePreview} style={styles.shareButton}><Share2 size={16} color={Colors.white} /><Text style={styles.shareText}>Bagikan ke WhatsApp</Text></Pressable>
+                <View style={{ flex: 1 }}><SecondaryButton label="Tutup" onPress={() => setShowPreview(false)} /></View>
+                <Pressable onPress={sharePreview} style={styles.sharePrimary}>
+                  <Share2 size={16} color={Colors.white} />
+                  <Text style={styles.sharePrimaryText}>Bagikan</Text>
+                </Pressable>
               </View>
             </View>
           </View>
@@ -138,8 +153,7 @@ export default function BulkExecuteScreen() {
 
         {err && <Text style={styles.error}>{err}</Text>}
         <PrimaryButton label={markPaid.isPending ? 'Mengeksekusi…' : `Eksekusi ${selectedRows.length} transaksi`} onPress={execute} />
-        <SecondaryButton label="Kembali" onPress={() => router.back()} />
-        <Text style={styles.note}>Bagikan memakai menu sistem perangkat. Dari sana pilih WhatsApp, simpan sebagai catatan, atau aplikasi lain.</Text>
+        <TextButton label="Kembali" onPress={() => router.back()} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -166,15 +180,20 @@ const styles = StyleSheet.create({
   rowMeta: { color: Colors.textMuted, fontSize: FontSize.caption },
   amount: { color: Colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
   income: { color: Colors.paidText },
-  previewCard: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, gap: 8 },
+  previewCard: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  previewMain: { flex: 1, gap: 3 },
   previewTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.body },
   previewBody: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 17 },
   fullPreview: { color: Colors.textPrimary, fontSize: FontSize.body, lineHeight: 21 },
   previewActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  shareButton: { flex: 1, height: 48, borderRadius: Radius.md, backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 10 },
-  shareText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
+  // Secondary on the screen itself: sharing is never the reason this screen is open.
+  shareButton: { height: 44, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderStrong, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 14 },
+  shareText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 13 },
+  // Primary inside the share modal, where sharing IS the reason it is open.
+  sharePrimary: { flex: 1, height: 48, borderRadius: Radius.md, backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 10 },
+  sharePrimaryText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
   modalBackdrop: { flex: 1, backgroundColor: Colors.overlayScrimLight, justifyContent: 'center', padding: 20 },
   modalCard: { borderWidth: 1, borderColor: Colors.brandPrimary, borderRadius: Radius.md, padding: 14, gap: 10, backgroundColor: Colors.surface, maxHeight: '85%' },
   error: { color: Colors.pendingText, backgroundColor: Colors.pendingBg, padding: 10, borderRadius: Radius.md },
-  note: { color: Colors.textMuted, fontSize: FontSize.caption, textAlign: 'center', lineHeight: 17 },
+  note: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 17 },
 });

@@ -38,6 +38,29 @@ export function SecondaryButton({
   );
 }
 
+/**
+ * A way back, not an action. A bordered box gives "Kembali" the same weight as
+ * the thing the screen is actually for, so it reads as a second choice rather
+ * than an exit. Keep it as copy.
+ */
+export function TextButton({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress?: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.text, pressed && styles.pressed]}
+    >
+      <Text style={styles.textLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function PayButton({ onPress }: { onPress?: () => void }) {
   return (
     <Pressable
@@ -70,6 +93,13 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderSubtle,
   },
   secondaryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  text: {
+    // No fill, no border; 48 keeps the touch target the same as the others.
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textLabel: { color: Colors.textSecondary, fontSize: 15, fontWeight: '600' },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
   pay: {
     backgroundColor: Colors.brandPrimary,

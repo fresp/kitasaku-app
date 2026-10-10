@@ -61,7 +61,7 @@ import {
 } from '../lib/installments';
 import { categoryIconName } from '../lib/category-icon';
 import { BrandIcon } from '../components/ui/BrandIcon';
-import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
 
 type DetailTab = 'detail' | 'history';
 
@@ -201,7 +201,7 @@ export default function LoanDetailScreen() {
           <Text style={styles.missingTitle}>
             {obligQ.isLoading ? 'Memuat…' : 'Kewajiban tidak ditemukan'}
           </Text>
-          <SecondaryButton label="Kembali" onPress={() => router.back()} />
+          <TextButton label="Kembali" onPress={() => router.back()} />
         </View>
       </SafeAreaView>
     );
@@ -574,7 +574,7 @@ export default function LoanDetailScreen() {
             />
             <View style={styles.modalActions}>
               <View style={{ flex: 1 }}>
-                <SecondaryButton label="Kembali" onPress={() => setCancelOpen(false)} />
+                <TextButton label="Kembali" onPress={() => setCancelOpen(false)} />
               </View>
               <View style={{ flex: 1 }}>
                 <PrimaryButton
