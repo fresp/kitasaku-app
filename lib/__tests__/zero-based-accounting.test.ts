@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateCashAllocations, aggregateCashSourceFunds } from '../zero-based-accounting';
+import { aggregateCashAllocations, aggregateCashSourceFunds, allocationUsage, overspendTotal } from '../zero-based-accounting';
+import type { UsageTxn } from '../zero-based-accounting';
 
 const allocation = (type: string | null, amount: number, allocation_type: 'EXPENSE' | 'DEBT_PAYMENT' = 'EXPENSE') => ({
   allocation_type,
@@ -59,3 +60,50 @@ describe('liquid-account Zero-Based totals', () => {
   });
 });
 
+describe('allocationUsage', () => {
+  const paid = { id: 't1', status: 'PAID' as const, actual_amount: 659_465 };
+  const pending = { id: 't2', status: 'PENDING' as const, actual_amount: 0 };
+  const byId = new Map<string, UsageTxn>([[paid.id, paid], [pending.id, pending]]);
+
+  it('reports what moved and how far past the commitment it went', () => {
+    expect(allocationUsage({ id: 'a', amount: 500_000, transaction_id: 't1' }, byId))
+      .toEqual({ actual: 659_465, delta: 159_465 });
+  });
+
+  it('reports a negative delta when the commitment was not used up', () => {
+    expect(allocationUsage({ id: 'a', amount: 800_000, transaction_id: 't1' }, byId))
+      .toEqual({ actual: 659_465, delta: -140_535 });
+  });
+
+  it('says nothing for a plan that has not been executed', () => {
+    expect(allocationUsage({ id: 'a', amount: 500_000, transaction_id: 't2' }, byId))
+      .toEqual({ actual: null, delta: null });
+  });
+
+  it('says nothing for an unlinked or cancelled commitment', () => {
+    expect(allocationUsage({ id: 'a', amount: 500_000 }, byId)).toEqual({ actual: null, delta: null });
+    expect(allocationUsage({ id: 'a', amount: 500_000, transaction_id: 't1', cancelled_at: 'x' }, byId))
+      .toEqual({ actual: null, delta: null });
+    expect(allocationUsage({ id: 'a', amount: 500_000, transaction_id: 'gone' }, byId))
+      .toEqual({ actual: null, delta: null });
+  });
+});
+
+describe('overspendTotal', () => {
+  const byId = new Map([
+    ['over', { id: 'over', status: 'PAID' as const, actual_amount: 659_465 }],
+    ['under', { id: 'under', status: 'PAID' as const, actual_amount: 300_000 }],
+  ]);
+
+  it('sums only what went past its commitment', () => {
+    expect(overspendTotal([
+      { id: 'a', amount: 500_000, transaction_id: 'over' },
+      { id: 'b', amount: 500_000, transaction_id: 'under' },
+      { id: 'c', amount: 500_000 },
+    ], byId)).toBe(159_465);
+  });
+
+  it('is zero when nothing was exceeded', () => {
+    expect(overspendTotal([{ id: 'b', amount: 500_000, transaction_id: 'under' }], byId)).toBe(0);
+  });
+});

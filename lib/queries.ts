@@ -1599,6 +1599,8 @@ export interface CycleAllocation {
   allocation_type: AllocationType; amount: number;
   category_id: string | null; obligation_id: string | null; account_id: string | null;
   note: string | null; created_by: string | null; created_at: string;
+  /** The planned row this commitment came from (migration 028). */
+  transaction_id?: string | null;
   cancelled_at?: string | null; cancelled_by?: string | null; cancellation_reason?: string | null;
   categories?: { name: string; icon?: string | null } | null;
   obligations?: { title: string } | null;

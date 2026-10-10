@@ -55,3 +55,53 @@ export function aggregateCashAllocations(rows: AllocationAccountingRow[]) {
 export function eligibleCashAllocation(row: AllocationAccountingRow): boolean {
   return isZeroBasedCashAccount({ type: joinedAccountType(row.accounts) });
 }
+
+export interface AllocationUsageRow {
+  id: string;
+  amount: number;
+  transaction_id?: string | null;
+  cancelled_at?: string | null;
+}
+
+export interface UsageTxn {
+  id: string;
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
+  actual_amount: number;
+}
+
+export interface AllocationUsage {
+  /** What actually moved, or null when nothing has been executed yet. */
+  actual: number | null;
+  /** actual − planned. Positive means the commitment was exceeded. */
+  delta: number | null;
+}
+
+/**
+ * What a commitment actually cost, read through the planned row it is linked
+ * to (migration 028). An allocation with no link, or whose row has not been
+ * executed, reports null rather than zero: "not spent yet" and "spent nothing"
+ * are different facts, and showing the second for the first would read as an
+ * underspend that is not real.
+ */
+export function allocationUsage(
+  allocation: AllocationUsageRow,
+  txnById: Map<string, UsageTxn>,
+): AllocationUsage {
+  if (allocation.cancelled_at || !allocation.transaction_id) return { actual: null, delta: null };
+  const txn = txnById.get(allocation.transaction_id);
+  if (!txn || txn.status !== 'PAID') return { actual: null, delta: null };
+  return { actual: txn.actual_amount, delta: txn.actual_amount - allocation.amount };
+}
+
+/** Every rupiah spent past its commitment this cycle, summed. */
+export function overspendTotal(
+  allocations: AllocationUsageRow[],
+  txnById: Map<string, UsageTxn>,
+): number {
+  let total = 0;
+  for (const a of allocations) {
+    const { delta } = allocationUsage(a, txnById);
+    if (delta !== null && delta > 0) total += delta;
+  }
+  return total;
+}

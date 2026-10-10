@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
+import { allocationUsage, overspendTotal } from '../lib/zero-based-accounting';
 import { defaultAccountId, isZeroBasedCashAccount } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
@@ -14,6 +15,7 @@ import {
   useCycleAllocations,
   useDeleteAllocation,
   useObligations,
+  useTransactions,
   useZeroBasedSummary,
 } from '../lib/queries';
 import type { AllocationType, CycleAllocation } from '../lib/queries';
@@ -58,6 +60,13 @@ export default function AllocationScreen() {
   const allocsQ = useCycleAllocations(householdId, cycleId);
   const catsQ = useCategories(householdId);
   const obligQ = useObligations(householdId);
+  // The commitments are only half the picture; what actually moved is read
+  // through the planned row each allocation links to (migration 028).
+  const txnsQ = useTransactions(householdId, cycleId);
+  const txnById = useMemo(
+    () => new Map((txnsQ.data ?? []).map((t) => [t.id, t])),
+    [txnsQ.data]
+  );
   const accsQ = useAccounts(householdId);
   const createAlloc = useCreateAllocation();
   const deleteAlloc = useDeleteAllocation();
@@ -108,6 +117,11 @@ export default function AllocationScreen() {
     }));
   }, [displayedAllocations]);
 
+
+  const overspend = useMemo(
+    () => overspendTotal(displayedAllocations, txnById),
+    [displayedAllocations, txnById]
+  );
 
   async function submit() {
     setErr(null);
@@ -174,6 +188,9 @@ export default function AllocationScreen() {
             </Text>
             <View style={styles.summaryDivider} />
             <SummaryRow label="Total Alokasi" value={summary.allocations.total} accent />
+            {overspend > 0 && (
+              <SummaryRow label="Terpakai melebihi rencana" value={overspend} tone="alert" />
+            )}
             <View style={styles.summaryDivider} />
             <SummaryRow
               label="Dana belum dialokasikan"
@@ -340,23 +357,47 @@ export default function AllocationScreen() {
               <Text style={styles.groupTitle}>{ALLOCATION_LABELS[g.type]}</Text>
               <Text style={styles.groupTotal}>{formatRupiah(g.total)}</Text>
             </View>
-            {g.rows.map((r) => (
-              <View key={r.id} style={styles.row}>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={styles.rowName} numberOfLines={1}>
-                    {r.obligations?.title ?? r.categories?.name ?? ALLOCATION_LABELS[r.allocation_type]}
-                  </Text>
-                  <Text style={styles.rowMeta} numberOfLines={1}>
-                    {r.accounts?.name ?? 'Tanpa akun'}
-                    {r.note ? ` • ${r.note}` : ''}
-                  </Text>
+            {g.rows.map((r) => {
+              const usage = allocationUsage(r, txnById);
+              return (
+                <View key={r.id} style={styles.row}>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.rowName} numberOfLines={1}>
+                      {r.obligations?.title ?? r.categories?.name ?? ALLOCATION_LABELS[r.allocation_type]}
+                    </Text>
+                    {usage.actual === null ? (
+                      <Text style={styles.rowMeta} numberOfLines={1}>
+                        {r.accounts?.name ?? 'Tanpa akun'}
+                        {r.note ? ` • ${r.note}` : ''}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.rowMeta,
+                          usage.delta !== null && usage.delta > 0 && styles.rowOver,
+                          usage.delta !== null && usage.delta < 0 && styles.rowUnder,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        Terpakai {formatRupiah(usage.actual)}
+                        {usage.delta !== null && usage.delta > 0
+                          ? ` • lebih ${formatRupiah(usage.delta)}`
+                          : usage.delta !== null && usage.delta < 0
+                            ? ` • sisa ${formatRupiah(-usage.delta)}`
+                            : ' • pas rencana'}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.rowAmount}>{formatRupiah(r.amount)}</Text>
+                    <Text style={styles.rowPlanLabel}>rencana</Text>
+                  </View>
+                  <Pressable onPress={() => remove(r)} hitSlop={8}>
+                    <Text style={styles.rowDelete}>Hapus</Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.rowAmount}>{formatRupiah(r.amount)}</Text>
-                <Pressable onPress={() => remove(r)} hitSlop={8}>
-                  <Text style={styles.rowDelete}>Hapus</Text>
-                </Pressable>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ))}
       </ScrollView>
@@ -430,6 +471,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: Colors.borderSubtle },
   rowName: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600' },
   rowMeta: { color: Colors.textMuted, fontSize: FontSize.caption },
+  rowOver: { color: Colors.financingText },
+  rowUnder: { color: Colors.paidText },
+  rowPlanLabel: { color: Colors.textMuted, fontSize: 9.5, marginTop: 1 },
   rowAmount: { color: Colors.textPrimary, fontSize: FontSize.body, fontWeight: '600', fontVariant: ['tabular-nums'] },
   rowDelete: { color: Colors.pendingText, fontSize: FontSize.caption, fontWeight: '600' },
   legacyNotice: { backgroundColor: Colors.pendingBg, borderRadius: Radius.md, padding: 12, gap: 4 },
