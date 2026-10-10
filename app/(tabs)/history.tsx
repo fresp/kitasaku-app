@@ -166,13 +166,28 @@ export default function HistoryScreen() {
     [allRows]
   );
 
-  const page = filtered.slice(0, visible);
-  const remaining = filtered.length - page.length;
+  // "Belum dieksekusi" is a checklist, not a page: it always shows every pending
+  // row, so it can never disagree with the banner above it. Paging applies to the
+  // dated rows only, and those are ordered by the date they are grouped under —
+  // the query returns them by created_at, so slicing that order used to hide a
+  // plan written when the cycle opened behind rows added later.
+  const pendingRows = useMemo(
+    () => filtered.filter((r) => r.status === 'PENDING'),
+    [filtered]
+  );
+  const datedRows = useMemo(
+    () => filtered
+      .filter((r) => r.status !== 'PENDING')
+      .sort((a, b) => (a.release_date ?? '') < (b.release_date ?? '') ? 1 : -1),
+    [filtered]
+  );
+  const page = datedRows.slice(0, visible);
+  const remaining = datedRows.length - page.length;
 
   const groups = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const pending = page.filter((r) => r.status === 'PENDING');
-    const dated = page.filter((r) => r.status !== 'PENDING');
+    const pending = pendingRows;
+    const dated = page;
 
     const map = new Map<string, { key: string; label: string; rows: LedgerRow[] }>();
     for (const r of dated) {
@@ -186,7 +201,7 @@ export default function HistoryScreen() {
     return pending.length > 0
       ? [{ key: 'pending', label: 'Belum dieksekusi', rows: pending }, ...datedGroups]
       : datedGroups;
-  }, [page]);
+  }, [page, pendingRows]);
 
   const accounts = accsQ.data ?? [];
   const cyclesList = cyclesQ.data ?? [];
