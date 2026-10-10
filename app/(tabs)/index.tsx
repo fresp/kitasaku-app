@@ -29,7 +29,7 @@ import {
 } from '../../lib/queries';
 import { formatShortDate } from '../../lib/zero-based';
 import { cycleRangeLabel, memberInitials } from '../../lib/profile';
-import { formatRupiah } from '../../lib/format';
+import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
 import { QueryError } from '../../components/ui/QueryError';
@@ -388,7 +388,7 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.attentionCopy}>
                     <Text style={styles.attentionTitle}>
-                      {unpaidCount} tagihan belum dibayar · {formatRupiah(unpaidAmount)}
+                      {unpaidPlansLabel(unpaidCount, unpaidAmount)}
                     </Text>
                     <Text style={styles.attentionSub} numberOfLines={1}>
                       Terdekat · {nextUnpaidName ?? 'Periksa daftar transaksi'}

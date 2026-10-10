@@ -350,24 +350,6 @@ export function useTransactions(householdId: string | undefined, cycleId: string
   });
 }
 
-/** Explicit audit stream for transactions that are not assigned to a cycle. */
-export function useNonCycleTransactions(householdId: string | undefined) {
-  return useQuery({
-    queryKey: ['audit-txns', householdId],
-    enabled: !!householdId,
-    queryFn: async (): Promise<Txn[]> => {
-      const sb = requireSupabase();
-      const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
-        .eq('household_id', householdId!)
-        .is('cycle_id', null)
-        .order('created_at', { ascending: false }).limit(200);
-      if (error) throw error;
-      return (data ?? []) as Txn[];
-    },
-  });
-}
-
 export function useCategories(householdId: string | undefined) {
   return useQuery({
     queryKey: ['cats', householdId], enabled: !!householdId,

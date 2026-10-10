@@ -30,3 +30,13 @@ export function formatDelta(current: number, previous: number): { text: string; 
     kind: diff > 0 ? 'up' : 'down',
   };
 }
+
+/**
+ * One fact, one sentence. Home's attention list and the ledger's banner both
+ * report the plans this cycle has not executed yet; wording them separately
+ * ("tagihan belum dibayar" / "transaksi belum dieksekusi") made the same two
+ * numbers look like two different problems. Call this from both.
+ */
+export function unpaidPlansLabel(count: number, amount: number): string {
+  return `${count} tagihan belum dibayar · ${formatRupiah(amount)}`;
+}

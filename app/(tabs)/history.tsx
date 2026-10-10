@@ -20,7 +20,7 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Clock from 'lucide-react-native/icons/clock';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../../constants/theme';
-import { formatRupiah } from '../../lib/format';
+import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { selectHistoryCycle } from '../../lib/cycle-history';
 import { BrandIcon } from '../../components/ui/BrandIcon';
@@ -414,7 +414,7 @@ export default function HistoryScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.bulkBannerTitle}>
-                {pendingCount} transaksi belum dieksekusi · {formatRupiah(pendingAmount)}
+                {unpaidPlansLabel(pendingCount, pendingAmount)}
               </Text>
               <Text style={styles.bulkBannerSub}>Tap untuk checklist &amp; eksekusi</Text>
             </View>

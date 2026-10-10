@@ -116,6 +116,24 @@ meninggalkan alokasi aktif dan `unallocated` tercatat terlalu kecil. Baris lama 
 link dicocokkan ke komitmen identik (kategori + akun + nominal, atau tanggungan +
 nominal); komitmen identik saling dapat dipertukarkan.
 
+### 8.2 Satu angka dan hitungannya berasal dari baris yang sama
+
+Setiap kali sebuah hitungan ditampilkan bersebelahan dengan nominal — "2 tagihan
+belum dibayar · Rp 800.000" — keduanya **wajib** diturunkan dari himpunan baris
+yang sama, idealnya dari satu fungsi. Aturan ini ditulis karena pola bugnya
+muncul tiga kali dalam satu hari: banner ledger menghitung seluruh baris PENDING
+siklus sementara section-nya dibangun dari 30 baris pertama; `unpaidExpenseCount`
+se-siklus nyaris dipasangkan dengan `pendingExpense` per akun (karena itu
+`pendingOutflowCount` ditambahkan di `lib/cashflow.ts`); dan baris "Terdekat" di
+Home mencari di tiga baris yang dicetak, bukan di seluruh transaksi.
+
+Konsekuensinya untuk kode baru: jangan pernah memasangkan `count` dari satu
+query dengan `sum` dari query lain, dan setiap agregasi uang se-siklus yang
+ditambahkan harus ikut memfilter tipe akun seperti
+`lib/zero-based-accounting.ts` dan `countsTowardInsight` di `lib/insight.ts`.
+Frasa yang mengungkapkan fakta yang sama di lebih dari satu layar ditulis sekali
+sebagai fungsi — lihat `unpaidPlansLabel` di `lib/format.ts`.
+
 ## 9. Open TODOs (decisions deferred, not silent assumptions)
 
 - ~~When an `EXPENSE` txn with `obligation_id` may count as `DEBT_PAYMENT`~~ → **resolved in Phase 2A**:

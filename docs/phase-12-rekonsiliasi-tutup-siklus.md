@@ -190,6 +190,38 @@ alokasi aktif dan bikin `unallocated` tercatat terlalu kecil. Kolom
 `transactions.replaces_transaction_id` juga tetap ada karena baris yang terlanjur
 di-settle lewat jalur 028 masih menunjuk ke rencana aslinya.
 
+### Pelunasan tanggungan menutup jadwalnya (migration 030)
+
+`allocate_debt_payment` dulu memindahkan uang dan mengurangi `remaining_amount`
+tanpa menyentuh `obligation_installments`, sehingga tanggungan bisa berstatus
+SETTLED di atas sembilan cicilan yang masih terbuka. Sejak 030 pembayaran
+dipetakan ke jadwal — cicilan terlama dulu, SETTLED kalau tertutup penuh,
+PARTIAL kalau separuh — seperti yang sudah lama dilakukan
+`execute_planned_transaction`, dan begitu sisa utang nol semua cicilan yang
+tersisa ikut ditutup.
+
+Dua perbedaan sengaja dari jalur rencana. RPC ini **tidak menolak** nominal yang
+tidak bisa diserap habis oleh jadwal: di jalur rencana angkanya berasal dari
+jadwal sehingga ketidakcocokan adalah bug, di sini angkanya pilihan pengguna dan
+jadwal yang menutupi lebih kecil dari sisa utang (bunga di luar jadwal, jadwal
+yang dikonfigurasi belakangan) adalah alasan mencatat, bukan menolak. Dan layar
+hanya menawarkan "Lunasi sisa" ketika cicilan terbuka lebih dari satu.
+
+### Saldo awal siklus dapat dinyatakan (migration 031)
+
+Saldo awal sebuah siklus selama ini hanya diturunkan dari penutup siklus
+sebelumnya (`useHomeCashBalance`), sehingga tidak ada untuk siklus pertama dan
+baru tersedia sebulan setelah keluarga mulai memakai app. Selama belum ada, Home
+jatuh ke "Pergerakan akun" — pergerakan bersih yang terbaca seperti saldo dan
+sering negatif.
+
+`cycles.opening_stated` menyimpan saldo akun primer di hari pertama siklus, diisi
+saat siklus dibuka. **Angka turunan tetap menang** di mana keduanya ada: penutup
+siklus sebelumnya hasil rekonsiliasi, yang ini diketik dari ingatan. Sebuah
+trigger menolak perubahannya setelah siklus direkonsiliasi, karena itu berarti
+menggeser delta yang sudah dihitung. Hanya berlaku untuk akun primer; akun lain
+tetap menurunkan saldo awalnya dari siklus sebelumnya.
+
 ### Yang bisa mematahkan rumus ini
 
 Transaksi ber-`account_id` NULL. Baris seperti itu adalah uang yang berpindah
