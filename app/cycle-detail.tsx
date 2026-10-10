@@ -40,6 +40,7 @@ import type { Cycle, Txn } from '../lib/queries';
 import {
   budgetFillPct,
   budgetHealthStatus,
+  budgetPctLabel,
   formatShortDate,
 } from '../lib/zero-based';
 
@@ -229,7 +230,11 @@ export default function CycleDetailScreen() {
 
   const totalBudget = categoryBudgetRows.reduce((sum, r) => sum + r.budget, 0);
   const totalSpent = categoryBudgetRows.reduce((sum, r) => sum + r.spent, 0);
-  const overallBudgetPct = totalBudget > 0 ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
+  // Stated uncapped: clamping here made the "> 100 ? red" branches below dead
+  // code, so a cycle 51% past its plan rendered as a full green bar at 100%.
+  const overallBudgetPct = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+  // The bar is a different number from the text: a track cannot overflow.
+  const overallBarPct = Math.min(100, overallBudgetPct);
 
   // Grouped Transactions
   const groupedTransactions = useMemo(() => {
@@ -481,7 +486,7 @@ export default function CycleDetailScreen() {
                   style={[
                     styles.progressBarFill,
                     {
-                      width: `${overallBudgetPct}%`,
+                      width: `${overallBarPct}%`,
                       backgroundColor: overallBudgetPct > 100 ? '#EF4444' : '#10B981',
                     },
                   ]}
@@ -522,7 +527,7 @@ export default function CycleDetailScreen() {
                               styles.progressBarFill,
                               {
                                 width: `${Math.min(100, cat.fillPct)}%`,
-                                backgroundColor: cat.fillPct > 100 ? '#EF4444' : '#10B981',
+                                backgroundColor: cat.health.ratioPct > 100 ? '#EF4444' : '#10B981',
                               },
                             ]}
                           />
@@ -553,7 +558,7 @@ export default function CycleDetailScreen() {
                   style={[
                     styles.progressBarFill,
                     {
-                      width: `${overallBudgetPct}%`,
+                      width: `${overallBarPct}%`,
                       backgroundColor: overallBudgetPct > 100 ? '#EF4444' : '#10B981',
                     },
                   ]}
@@ -591,7 +596,7 @@ export default function CycleDetailScreen() {
                               styles.progressBarFill,
                               {
                                 width: `${Math.min(100, cat.fillPct)}%`,
-                                backgroundColor: cat.fillPct > 100 ? '#EF4444' : '#10B981',
+                                backgroundColor: cat.health.ratioPct > 100 ? '#EF4444' : '#10B981',
                               },
                             ]}
                           />
@@ -603,10 +608,10 @@ export default function CycleDetailScreen() {
                           <Text
                             style={[
                               styles.catPctBadge,
-                              { color: cat.fillPct > 100 ? '#EF4444' : '#10B981' },
+                              { color: cat.health.ratioPct > 100 ? '#EF4444' : '#10B981' },
                             ]}
                           >
-                            {Math.round(cat.fillPct)}%
+                            {budgetPctLabel(cat.health)}
                           </Text>
                         </View>
                       </View>

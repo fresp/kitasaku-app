@@ -609,6 +609,18 @@ export function budgetHealthStatus(spent: AmountInput, budget: AmountInput): Bud
   };
 }
 
+/**
+ * The percentage a health row *states*, which is not the percentage its bar
+ * draws. The bar is clamped to 100 because a bar cannot overflow its track;
+ * the text must not be, or a category at 151% of its pagu reads as exactly on
+ * plan. A category with no pagu has no ratio at all — 999% is the sentinel
+ * `budgetHealthStatus` returns, never something to print.
+ */
+export function budgetPctLabel(health: BudgetHealth): string {
+  if (health.status === 'NO_BUDGET') return 'Tanpa pagu';
+  return `${health.ratioPct}%`;
+}
+
 /** Bar fill percentage for a health row: 0 when no budget, else capped at 100. */
 export function budgetFillPct(health: BudgetHealth): number {
   if (health.status === 'NO_BUDGET') return 100;

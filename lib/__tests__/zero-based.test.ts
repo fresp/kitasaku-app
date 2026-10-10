@@ -3,6 +3,7 @@ import {
   accountZeroBased,
   budgetFillPct,
   budgetHealthStatus,
+  budgetPctLabel,
   calculateFundingGap,
   calculateSourceFunds,
   calculateUnallocatedFunds,
@@ -363,6 +364,19 @@ describe('budget health (phase 4)', () => {
     expect(budgetFillPct(budgetHealthStatus(1_000, 1_800_000))).toBe(2);
     expect(budgetFillPct(budgetHealthStatus(900_000, 1_000_000))).toBe(90);
     expect(budgetFillPct(budgetHealthStatus(500_000, 0))).toBe(100);
+  });
+
+  it('29b: the stated percent is not clamped the way the bar is', () => {
+    // The real case from siklus Sep 2026: Rp 21.803.473 spent against a
+    // Rp 14.400.000 plan rendered "100%" because the clamp sat on the number
+    // itself. The bar still stops at 100; the sentence does not.
+    const over = budgetHealthStatus(21_803_473, 14_400_000);
+    expect(budgetPctLabel(over)).toBe('151%');
+    expect(budgetFillPct(over)).toBe(100);
+    expect(budgetPctLabel(budgetHealthStatus(900_000, 1_000_000))).toBe('90%');
+    // 999 is the no-pagu sentinel, never a percentage to print.
+    expect(budgetPctLabel(budgetHealthStatus(500_000, 0))).toBe('Tanpa pagu');
+    expect(budgetPctLabel(budgetHealthStatus(0, 0))).toBe('0%');
   });
 
   it('30: null inputs never produce NaN', () => {

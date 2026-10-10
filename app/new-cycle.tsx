@@ -85,6 +85,15 @@ export default function NewCycleScreen() {
     amounts[id] !== undefined ? parseAmount(amounts[id]) : fallback;
 
   const selected = activeTemplates.filter((t) => isChecked(t.id));
+  const allTemplatesOn =
+    activeTemplates.length > 0 && selected.length === activeTemplates.length;
+  // Writes every id explicitly rather than clearing the map: `isChecked`
+  // defaults to true, so an empty map means "all on", which is the opposite of
+  // what "Kosongkan" says.
+  const toggleAllTemplates = () =>
+    setChecked(
+      Object.fromEntries(activeTemplates.map((t) => [t.id, !allTemplatesOn]))
+    );
 
   // A routine position is either a commitment (EXPENSE → an allocation) or a
   // source (INCOME → part of the money this cycle can spend). Summing them into
@@ -106,6 +115,13 @@ export default function NewCycleScreen() {
   const isObligChecked = (id: string) => (obligChecked ? (obligChecked[id] ?? true) : true);
   const selectedObligations = openObligations.filter((o) => isObligChecked(o.id));
   const totalDebtPayment = selectedObligations.reduce((s, o) => s + o.remaining_amount, 0);
+  const allObligationsOn =
+    openObligations.length > 0 &&
+    selectedObligations.length === openObligations.length;
+  const toggleAllObligations = () =>
+    setObligChecked(
+      Object.fromEntries(openObligations.map((o) => [o.id, !allObligationsOn]))
+    );
 
   // The "Pinjaman" system category (migration 006) is what classifies a
   // debt-payment row in the ledger — an obligation carries no category of its
@@ -160,7 +176,7 @@ export default function NewCycleScreen() {
       setErr(
         loadFailed
           ? 'Daftar pos rutin atau tanggungan belum bisa dibaca. Coba muat ulang dulu supaya siklus tidak terbuka tanpa isinya.'
-          : `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas aset, atau catat pinjaman baru dulu.`
+          : `Funding gap ${formatRupiah(fundingGap)} belum tertutup. Tambah pemasukan, lepas centang pos rutin atau kewajiban yang bisa ditunda, atau catat pinjaman baru dulu.`
       );
       return;
     }
@@ -289,16 +305,32 @@ export default function NewCycleScreen() {
 
         <View style={styles.labelRow}>
           <Text style={styles.label}>
-            PILIH TRANSAKSI RUTIN YANG DI-CLONE ({activeTemplates.length} POS AKTIF)
+            POS RUTIN DI-CLONE ({selected.length} DARI {activeTemplates.length} DIPILIH)
           </Text>
           {/* Screen 9 (Template Rutin) was registered in the router but nothing
               linked to it, so the screen shipped unreachable. Buka Siklus is
               where a family notices a missing or wrong routine, so the way to
               fix it belongs here rather than buried in My Profile. */}
-          <Pressable onPress={() => router.push('/templates')} hitSlop={8}>
-            <Text style={styles.labelLink}>Kelola</Text>
-          </Pressable>
+          <View style={styles.labelActions}>
+            {activeTemplates.length > 0 && (
+              <Pressable onPress={toggleAllTemplates} hitSlop={8}>
+                <Text style={styles.labelLink}>
+                  {allTemplatesOn ? 'Kosongkan' : 'Pilih semua'}
+                </Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => router.push('/templates')} hitSlop={8}>
+              <Text style={styles.labelLink}>Kelola</Text>
+            </Pressable>
+          </View>
         </View>
+        {/* The checkboxes were always here, but the header counted what exists
+            rather than what is selected, so there was nothing on screen saying
+            a routine position could be left out of this cycle. */}
+        <Text style={styles.note}>
+          Lepas centang pos yang tidak dipakai siklus ini — pos tetap aktif dan
+          kembali ditawarkan siklus berikutnya.
+        </Text>
         {tmplQ.isLoading && <Text style={styles.muted}>Memuat template…</Text>}
         {tmplQ.isError && (
           <QueryError
@@ -341,9 +373,25 @@ export default function NewCycleScreen() {
           );
         })}
 
-        <Text style={styles.label}>
-          PEMBAYARAN KEWAJIBAN SIKLUS INI ({openObligations.length} TANGGUNGAN AKTIF)
-        </Text>
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>
+            KEWAJIBAN SIKLUS INI ({selectedObligations.length} DARI{' '}
+            {openObligations.length} DIBAYAR)
+          </Text>
+          {openObligations.length > 0 && (
+            <Pressable onPress={toggleAllObligations} hitSlop={8}>
+              <Text style={styles.labelLink}>
+                {allObligationsOn ? 'Tunda semua' : 'Bayar semua'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        {openObligations.length > 0 && (
+          <Text style={styles.note}>
+            Kewajiban yang dilepas centangnya ditunda ke siklus berikutnya —
+            sisa tagihannya tidak berubah, hanya tidak dialokasikan sekarang.
+          </Text>
+        )}
         {/* Without this, a failed read of the obligations renders the same
             "tidak ada tanggungan terbuka" card as a family that genuinely owes
             nothing — and the cycle would open carrying no debt forward. */}
@@ -417,7 +465,7 @@ export default function NewCycleScreen() {
           readiness={readiness}
           note={
             fundingGap > 0
-              ? `Kebutuhan ${formatRupiah(requiredAllocation)} melebihi sumber dana ${formatRupiah(sourceFunds)}. Siklus tidak dapat dibuka selama Funding Gap belum tertutup.`
+              ? `Kebutuhan ${formatRupiah(requiredAllocation)} melebihi sumber dana ${formatRupiah(sourceFunds)}. Tutup gap dengan menambah pemasukan, melepas pos rutin yang tidak dipakai, atau menunda kewajiban ke siklus berikutnya.`
               : unallocatedLabel
           }
           strategies={
@@ -425,6 +473,8 @@ export default function NewCycleScreen() {
               <>
                 <Text style={styles.strategiesTitle}>STRATEGI TUTUP FUNDING GAP</Text>
                 <Text style={styles.strategy}>• Tambah Pendapatan</Text>
+                <Text style={styles.strategy}>• Lepas pos rutin yang tidak dipakai siklus ini</Text>
+                <Text style={styles.strategy}>• Tunda kewajiban ke siklus berikutnya</Text>
                 {/* Quick Add writes OPERATING_INCOME for every income and never
                     ASSET_RELEASE, so this line used to send the family into a
                     form that would record the wrong flow type. It is marked
@@ -471,6 +521,7 @@ const styles = StyleSheet.create({
   title: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700' },
   label: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1, marginTop: 6 },
   labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  labelActions: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   labelLink: { color: Colors.textPrimary, fontSize: FontSize.caption, fontWeight: '700', marginTop: 6 },
   input: { borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md, paddingHorizontal: 12, height: 46, fontSize: 15, color: Colors.textPrimary, backgroundColor: Colors.canvas },
   dateRow: { flexDirection: 'row', gap: 10 },
