@@ -13,12 +13,6 @@ import { useRouter } from 'expo-router';
 import Calendar from 'lucide-react-native/icons/calendar';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ArrowUp from 'lucide-react-native/icons/arrow-up';
-import ArrowDown from 'lucide-react-native/icons/arrow-down';
-import ArrowLeftRight from 'lucide-react-native/icons/arrow-left-right';
-import HandCoins from 'lucide-react-native/icons/hand-coins';
-import Minus from 'lucide-react-native/icons/minus';
-import Plus from 'lucide-react-native/icons/plus';
 import X from 'lucide-react-native/icons/x';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
@@ -144,6 +138,15 @@ export default function HomeScreen() {
 
   const cycleName = cycleQ.data?.name ?? 'Belum ada siklus aktif';
   const unpaidCount = flow.unpaidExpenseCount;
+  // Cycle-wide like unpaidCount, not per selected account: a count and a figure
+  // standing side by side must be drawn from the same rows.
+  const needsReconcile = !!(cycleQ.data?.primary_account_id && !reconciliationQ.data);
+  const unpaidAmount = useMemo(
+    () => txns
+      .filter((t) => t.status === 'PENDING' && t.direction === 'EXPENSE')
+      .reduce((sum, t) => sum + t.planned_amount, 0),
+    [txns]
+  );
   const numbersUnavailable = failed || (householdId !== undefined && (!cycleQ.data || txnsQ.isLoading || homeAccountsQ.isLoading));
   const movementUnavailable = numbersUnavailable || loadingCash || txnsQ.isError;
   const income = movementUnavailable ? null : flow.income + flow.transferIn;
@@ -306,55 +309,20 @@ export default function HomeScreen() {
               </Text>
             )}
 
-            {/* Stats Cards Row (Pemasukan & Pengeluaran) */}
-            <View style={styles.statsGrid}>
-              <View style={styles.statCard}>
-                <View style={[styles.statIconBox, styles.statIconIncome]}>
-                  <ArrowUp size={16} color={Colors.positive} />
-                </View>
-                <View style={styles.statContent}>
-                  <Text style={styles.statValue}>
-                    {income === null ? '—' : formatRupiah(flow.income + flow.transferIn)}
-                  </Text>
-                  <Text style={styles.statLabel}>Pemasukan</Text>
-                </View>
-              </View>
-
-              <View style={styles.statCard}>
-                <View style={[styles.statIconBox, styles.statIconExpense]}>
-                  <ArrowDown size={16} color={Colors.negative} />
-                </View>
-                <View style={styles.statContent}>
-                  <Text style={[styles.statValue, styles.statValueExpense]}>
-                    {expense === null ? '—' : formatRupiah(flow.expense + flow.transferOut)}
-                  </Text>
-                  <Text style={styles.statLabel}>Pengeluaran</Text>
-                </View>
-              </View>
-            </View>
-
-            <Text style={styles.flowNote}>
-              Ringkasan masuk/keluar termasuk transfer antar akun.
-            </Text>
-          </View>
-        </View>
-
-        {/* Offline & Reconciliation Banners */}
-        {cycleQ.data?.primary_account_id && !reconciliationQ.data && (
-          <Pressable onPress={() => router.push('/reconciliation')} style={styles.reconcileBanner}>
-            <View style={styles.reconcileIcon}>
-              <Calendar size={14} color={Colors.warning} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.reconcileTitle}>Cek saldo akun primer</Text>
-              <Text style={styles.reconcileSub}>
-                Tutup siklus dengan mencocokkan saldo{' '}
-                {formatShortDate(cycleQ.data.end_date) ?? 'akhir periode'}.
+            {/* One line: these are cumulative totals, read far less often than
+                the figure above them. */}
+            <View style={styles.flowRow}>
+              <Text style={styles.flowItem}>
+                <Text style={styles.flowUp}>↑ </Text>
+                {income === null ? '—' : formatRupiah(flow.income + flow.transferIn)}
+              </Text>
+              <Text style={styles.flowItem}>
+                <Text style={styles.flowDown}>↓ </Text>
+                {expense === null ? '—' : formatRupiah(flow.expense + flow.transferOut)}
               </Text>
             </View>
-            <ChevronRight size={16} color={Colors.warning} />
-          </Pressable>
-        )}
+          </View>
+        </View>
 
         {!householdId && (
           <Pressable onPress={() => router.push('/(auth)/setup-choice')} style={styles.offline}>
@@ -372,72 +340,56 @@ export default function HomeScreen() {
           />
         )}
 
-        {/* Section: Aksi Cepat */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Aksi cepat</Text>
-          <View style={styles.quickActionsGrid}>
-            <Pressable
-              onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'out' } })}
-              style={styles.quickActionItem}
-            >
-              <View style={[styles.quickActionIconBox, styles.quickActionRed]}>
-                <Minus size={22} color={Colors.negative} />
-              </View>
-              <Text style={styles.quickActionLabel}>Pengeluaran</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push({ pathname: '/quick-add', params: { kind: 'in' } })}
-              style={styles.quickActionItem}
-            >
-              <View style={[styles.quickActionIconBox, styles.quickActionGreen]}>
-                <Plus size={22} color={Colors.accentStrong} />
-              </View>
-              <Text style={styles.quickActionLabel}>Pemasukan</Text>
-            </Pressable>
-
-            <Pressable onPress={() => router.push('/transfer')} style={styles.quickActionItem}>
-              <View style={[styles.quickActionIconBox, styles.quickActionBlue]}>
-                <ArrowLeftRight size={20} color={Colors.info} />
-              </View>
-              <Text style={styles.quickActionLabel}>Relokasi</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push('/(tabs)/obligations')}
-              style={styles.quickActionItem}
-            >
-              <View style={[styles.quickActionIconBox, styles.quickActionPurple]}>
-                <HandCoins size={20} color={Colors.purple} />
-              </View>
-              <Text style={styles.quickActionLabel}>Tanggungan</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Section: Perlu Perhatian (conditional unpaid expenses) */}
-        {unpaidCount > 0 && (
+        {/* Section: Perlu Perhatian — every open item in one list, so two
+            yellow blocks no longer stack on top of each other. */}
+        {(needsReconcile || unpaidCount > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Perlu perhatian</Text>
-              <Pressable onPress={openUnpaid} hitSlop={8}>
-                <Text style={styles.sectionLink}>Lihat semua</Text>
-              </Pressable>
+              {unpaidCount > 0 && (
+                <Pressable onPress={openUnpaid} hitSlop={8}>
+                  <Text style={styles.sectionLink}>Lihat semua</Text>
+                </Pressable>
+              )}
             </View>
-            <Pressable onPress={openUnpaid} style={styles.attentionCard}>
-              <View style={styles.attentionIconBox}>
-                <Text style={styles.attentionIconText}>!</Text>
-              </View>
-              <View style={styles.attentionCopy}>
-                <Text style={styles.attentionTitle}>{unpaidCount} tagihan belum dibayar</Text>
-                <Text style={styles.attentionSub} numberOfLines={1}>
-                  Terdekat ·{' '}
-                  {homeRows.find((row) => row.status === 'PENDING' && row.direction === 'EXPENSE')
-                    ?.name ?? 'Periksa daftar transaksi'}
-                </Text>
-              </View>
-              <ChevronRight size={18} color={Colors.warning} />
-            </Pressable>
+            <View style={styles.attentionList}>
+              {needsReconcile && (
+                <Pressable
+                  onPress={() => router.push('/reconciliation')}
+                  style={[styles.attentionRow, unpaidCount > 0 && styles.attentionRowDivided]}
+                >
+                  <View style={styles.attentionIconBox}>
+                    <Calendar size={16} color={Colors.warning} />
+                  </View>
+                  <View style={styles.attentionCopy}>
+                    <Text style={styles.attentionTitle}>Cek saldo akun primer</Text>
+                    <Text style={styles.attentionSub} numberOfLines={1}>
+                      Tutup siklus dengan mencocokkan saldo{' '}
+                      {formatShortDate(cycleQ.data?.end_date) ?? 'akhir periode'}.
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.warning} />
+                </Pressable>
+              )}
+              {unpaidCount > 0 && (
+                <Pressable onPress={openUnpaid} style={styles.attentionRow}>
+                  <View style={styles.attentionIconBox}>
+                    <Text style={styles.attentionIconText}>!</Text>
+                  </View>
+                  <View style={styles.attentionCopy}>
+                    <Text style={styles.attentionTitle}>
+                      {unpaidCount} tagihan belum dibayar · {formatRupiah(unpaidAmount)}
+                    </Text>
+                    <Text style={styles.attentionSub} numberOfLines={1}>
+                      Terdekat ·{' '}
+                      {homeRows.find((row) => row.status === 'PENDING' && row.direction === 'EXPENSE')
+                        ?.name ?? 'Periksa daftar transaksi'}
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.warning} />
+                </Pressable>
+              )}
+            </View>
           </View>
         )}
 
@@ -806,89 +758,7 @@ const styles = StyleSheet.create({
   },
 
   /* Stats Grid */
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
-  statCard: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-  },
-  statIconBox: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statIconIncome: {
-    backgroundColor: Colors.positiveSoft,
-  },
-  statIconExpense: {
-    backgroundColor: Colors.negativeSoft,
-  },
-  statContent: {
-    flex: 1,
-  },
-  statValue: {
-    color: Colors.textOnDark,
-    fontSize: 12,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  statValueExpense: {
-    color: Colors.negative,
-  },
-  statLabel: {
-    color: Colors.textOnDarkSecondary,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  flowNote: {
-    color: Colors.textOnDarkSecondary,
-    fontSize: 9.5,
-    marginTop: 8,
-  },
 
-  /* Banners */
-  reconcileBanner: {
-    backgroundColor: Colors.alertBg,
-    borderWidth: 1,
-    borderColor: '#F7DFA9',
-    borderRadius: Radius.md,
-    padding: 11,
-    marginHorizontal: 16,
-    marginTop: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  reconcileIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    backgroundColor: '#FFEFC7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reconcileTitle: {
-    color: Colors.textPrimary,
-    fontSize: FontSize.caption,
-    fontWeight: '700',
-  },
-  reconcileSub: {
-    color: '#93651F',
-    fontSize: 10,
-    marginTop: 2,
-  },
   offline: {
     backgroundColor: Colors.alertBg,
     borderWidth: 1,
@@ -931,54 +801,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* Quick Actions Grid */
-  quickActionsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  quickActionItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  quickActionIconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  quickActionRed: {
-    backgroundColor: Colors.negativeSoft,
-  },
-  quickActionGreen: {
-    backgroundColor: Colors.accentSoft,
-  },
-  quickActionBlue: {
-    backgroundColor: Colors.infoSoft,
-  },
-  quickActionPurple: {
-    backgroundColor: Colors.purpleSoft,
-  },
-  quickActionLabel: {
-    color: Colors.textSecondary,
-    fontSize: 10.5,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
 
   /* Attention Alert Card */
-  attentionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    padding: 12,
+  // One bordered card holding every open item, rather than one card each.
+  attentionList: {
     borderRadius: 14,
     backgroundColor: Colors.warningSoft,
     borderWidth: 1,
     borderColor: Colors.warningBorder,
+    overflow: 'hidden',
   },
+  attentionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 12,
+  },
+  attentionRowDivided: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.warningBorder,
+  },
+  flowRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 10,
+  },
+  flowItem: {
+    color: Colors.textOnDarkSecondary,
+    fontSize: 12.5,
+    fontVariant: ['tabular-nums'],
+  },
+  flowUp: { color: Colors.positive, fontWeight: '700' },
+  flowDown: { color: Colors.negative, fontWeight: '700' },
   attentionIconBox: {
     width: 34,
     height: 34,

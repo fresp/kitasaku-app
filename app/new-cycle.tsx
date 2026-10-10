@@ -11,7 +11,7 @@ import { useAccounts, useActiveCycle, useCategories, useCreateCycle, useObligati
 import { cyclePrimaryAccountId, defaultAccountId } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
-import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton, TextButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 import { ZeroBasedProjection } from '../components/ui/ZeroBasedProjection';
 
