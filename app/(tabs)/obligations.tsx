@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,24 +11,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Calendar from 'lucide-react-native/icons/calendar';
 import CheckCircle2 from 'lucide-react-native/icons/circle-check';
-import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Plus from 'lucide-react-native/icons/plus';
-import X from 'lucide-react-native/icons/x';
-import { Colors, Radius } from '../../constants/theme';
+import { Colors } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
-import {
-  useActiveCycle,
-  useHouseholdCycles,
-  useObligations,
-} from '../../lib/queries';
+import { useObligations } from '../../lib/queries';
 import {
   daysBetween,
   isSettled,
   paidAmount,
-  shortDateLabel,
 } from '../../lib/obligation';
 import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
@@ -65,24 +55,13 @@ export default function ObligationsScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;
-  const cycleQ = useActiveCycle(householdId);
-  const cyclesQ = useHouseholdCycles(householdId);
   const obligQ = useObligations(householdId);
 
   const [activeTab, setActiveTab] = useState<ObligationTab>('upcoming');
   const [showForm, setShowForm] = useState(false);
-  const [cyclePickerOpen, setCyclePickerOpen] = useState(false);
-  const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
 
   const todayISO = new Date().toISOString().slice(0, 10);
   const obligations = useMemo(() => obligQ.data ?? [], [obligQ.data]);
-
-  const activeCycle = useMemo(() => {
-    if (selectedCycleId) {
-      return (cyclesQ.data ?? []).find((c) => c.id === selectedCycleId) ?? cycleQ.data;
-    }
-    return cycleQ.data;
-  }, [selectedCycleId, cyclesQ.data, cycleQ.data]);
 
   // Partition obligations
   const upcomingList = useMemo(
@@ -94,27 +73,28 @@ export default function ObligationsScreen() {
     [obligations]
   );
 
+  // What the cycle pill used to imply but never delivered. An obligation is
+  // not owned by a cycle — only its payments are — so the honest cut is by
+  // what the obligation itself carries: a due date, or none at all.
+  const dueSoonCount = useMemo(
+    () =>
+      upcomingList.filter((o) => {
+        const d = daysBetween(todayISO, o.due_date);
+        return d !== null && d <= 14;
+      }).length,
+    [upcomingList, todayISO]
+  );
+  const undatedCount = useMemo(
+    () => upcomingList.filter((o) => !o.due_date).length,
+    [upcomingList]
+  );
+
   const totalUnpaid = useMemo(() => {
     return upcomingList.reduce((acc, o) => {
       const remaining = o.remaining_amount ?? (o.total_amount - paidAmount(o.total_amount, o.remaining_amount));
       return acc + (remaining > 0 ? remaining : 0);
     }, 0);
   }, [upcomingList]);
-
-  const cyclesList = cyclesQ.data ?? [];
-  const currentCycleIndex = cyclesList.findIndex((c) => c.id === activeCycle?.id);
-
-  function goToPrevCycle() {
-    if (currentCycleIndex < cyclesList.length - 1 && currentCycleIndex !== -1) {
-      setSelectedCycleId(cyclesList[currentCycleIndex + 1].id);
-    }
-  }
-
-  function goToNextCycle() {
-    if (currentCycleIndex > 0) {
-      setSelectedCycleId(cyclesList[currentCycleIndex - 1].id);
-    }
-  }
 
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
@@ -124,11 +104,7 @@ export default function ObligationsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={obligQ.isFetching}
-            onRefresh={() => {
-              void obligQ.refetch();
-              void cycleQ.refetch();
-              void cyclesQ.refetch();
-            }}
+            onRefresh={() => void obligQ.refetch()}
           />
         }
       >
@@ -142,54 +118,6 @@ export default function ObligationsScreen() {
           >
             <Plus size={20} color="#0B1527" />
           </Pressable>
-        </View>
-
-        {/* Cycle Pill Selector: < Oktober 2026 ▾ > */}
-        <View style={styles.cyclePillRow}>
-          <View style={styles.cyclePillContainer}>
-            <Pressable
-              onPress={goToPrevCycle}
-              disabled={currentCycleIndex >= cyclesList.length - 1}
-              style={[
-                styles.cycleNavArrow,
-                currentCycleIndex >= cyclesList.length - 1 && styles.cycleNavArrowDisabled,
-              ]}
-              hitSlop={8}
-              accessibilityLabel="Siklus sebelumnya"
-            >
-              <ChevronLeft
-                size={16}
-                color={currentCycleIndex >= cyclesList.length - 1 ? '#CBD5E1' : '#0B1527'}
-              />
-            </Pressable>
-
-            <Pressable
-              onPress={() => setCyclePickerOpen(true)}
-              style={styles.cyclePillCenter}
-              accessibilityLabel="Buka daftar siklus"
-            >
-              <Text style={styles.cyclePillText} numberOfLines={1}>
-                {activeCycle ? activeCycle.name : 'Pilih Siklus'}
-              </Text>
-              <ChevronDown size={14} color="#64748B" />
-            </Pressable>
-
-            <Pressable
-              onPress={goToNextCycle}
-              disabled={currentCycleIndex <= 0}
-              style={[
-                styles.cycleNavArrow,
-                currentCycleIndex <= 0 && styles.cycleNavArrowDisabled,
-              ]}
-              hitSlop={8}
-              accessibilityLabel="Siklus berikutnya"
-            >
-              <ChevronRight
-                size={16}
-                color={currentCycleIndex <= 0 ? '#CBD5E1' : '#0B1527'}
-              />
-            </Pressable>
-          </View>
         </View>
 
         {/* 3-Pill Filter Tabs: Mendatang | Terbayar | Semua */}
@@ -242,7 +170,11 @@ export default function ObligationsScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={styles.summaryLabel}>Total belum dibayar</Text>
             <Text style={styles.summaryAmount}>{formatRupiah(totalUnpaid)}</Text>
-            <Text style={styles.summarySub}>{upcomingList.length} tanggungan</Text>
+            <Text style={styles.summarySub}>
+              {upcomingList.length} tanggungan aktif
+              {dueSoonCount > 0 ? ` · ${dueSoonCount} jatuh tempo ≤ 14 hari` : ''}
+              {undatedCount > 0 ? ` · ${undatedCount} tanpa tanggal` : ''}
+            </Text>
           </View>
           <View style={styles.calendarIconBox}>
             <Calendar size={22} color={Colors.info} />
@@ -252,10 +184,7 @@ export default function ObligationsScreen() {
         {/* Query Errors / Loading */}
         {obligQ.isError && householdId && (
           <QueryError
-            onRetry={() => {
-              void obligQ.refetch();
-              void cycleQ.refetch();
-            }}
+            onRetry={() => void obligQ.refetch()}
             retrying={obligQ.isFetching}
             message="Pool tanggungan belum bisa dibaca. Datamu aman."
           />
@@ -418,58 +347,6 @@ export default function ObligationsScreen() {
         householdId={householdId}
       />
 
-      {/* Cycle Picker Modal */}
-      <Modal
-        visible={cyclePickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCyclePickerOpen(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setCyclePickerOpen(false)}
-        >
-          <Pressable style={styles.cycleSheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Pilih Siklus</Text>
-              <Pressable onPress={() => setCyclePickerOpen(false)} hitSlop={10}>
-                <X size={20} color={Colors.textPrimary} />
-              </Pressable>
-            </View>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {(cyclesQ.data ?? []).map((c) => {
-                const isSelected = c.id === activeCycle?.id;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => {
-                      setSelectedCycleId(c.id);
-                      setCyclePickerOpen(false);
-                    }}
-                    style={[styles.cycleOption, isSelected && styles.cycleOptionActive]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.cycleOptionName,
-                          isSelected && styles.cycleOptionNameActive,
-                        ]}
-                      >
-                        {c.name} {c.is_active ? '· Aktif' : ''}
-                      </Text>
-                      <Text style={styles.cycleOptionDates}>
-                        {shortDateLabel(c.start_date)} – {shortDateLabel(c.end_date)}
-                      </Text>
-                    </View>
-                    {isSelected && <ChevronRight size={16} color={Colors.info} />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -509,45 +386,6 @@ const styles = StyleSheet.create({
   },
 
   /* Cycle Pill Selector */
-  cyclePillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: -2,
-    marginBottom: 2,
-  },
-  cyclePillContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: Radius.pill,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-  },
-  cycleNavArrow: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cycleNavArrowDisabled: {
-    opacity: 0.35,
-  },
-  cyclePillCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  cyclePillText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0B1527',
-    maxWidth: 160,
-  },
 
   /* 3-Pill Filter Tabs */
   filterTabs: {
@@ -731,62 +569,4 @@ const styles = StyleSheet.create({
   },
 
   /* Modal */
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlayScrim,
-    justifyContent: 'flex-end',
-  },
-  cycleSheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    paddingBottom: 36,
-    gap: 14,
-  },
-  sheetHandle: {
-    width: 44,
-    height: 4,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.borderStrong,
-    alignSelf: 'center',
-    marginBottom: 4,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  sheetTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  cycleOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderSubtle,
-  },
-  cycleOptionActive: {
-    backgroundColor: '#F8FAFC',
-  },
-  cycleOptionName: {
-    fontSize: 13.5,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  cycleOptionNameActive: {
-    color: Colors.info,
-    fontWeight: '700',
-  },
-  cycleOptionDates: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    marginTop: 2,
-  },
 });
