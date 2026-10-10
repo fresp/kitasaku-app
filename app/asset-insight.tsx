@@ -273,7 +273,14 @@ export default function AssetInsightScreen() {
           </Pressable>
         </View>
 
-        {/* Dual Summary Cards */}
+        {/* Dual Summary Cards.
+            countsTowardInsight() keeps only BANK and E_WALLET rows here, so a
+            card swipe is counted once — when its bill is paid from the bank —
+            rather than twice. That makes these figures smaller than the ones
+            on Siklus, which is correct and needs saying on the screen. */}
+        <Text style={styles.scopeNote}>
+          Realisasi di akun kas (bank &amp; e-wallet), di luar kartu kredit dan transfer.
+        </Text>
         <View style={styles.summaryGrid}>
           {/* Pemasukan Card */}
           <View style={styles.incomeCard}>
@@ -635,6 +642,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#EF4444',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  scopeNote: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#94A3B8',
+    marginBottom: -4,
   },
   cardLabel: {
     fontSize: 12.5,

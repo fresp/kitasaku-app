@@ -419,7 +419,10 @@ export default function CycleDetailScreen() {
             {/* Saldo Kas Siklus Hero Card */}
             <View style={styles.heroCard}>
               <View style={styles.heroHeader}>
-                <Text style={styles.heroLabel}>Saldo Kas Siklus</Text>
+                <Text style={styles.heroLabel}>
+                  Saldo Kas Siklus
+                  {displayAccount?.name ? ` · ${displayAccount.name}` : ''}
+                </Text>
                 <Pressable onPress={() => setBalanceHidden(!balanceHidden)} hitSlop={8}>
                   {balanceHidden ? (
                     <EyeOff size={16} color="#64748B" />
@@ -441,7 +444,14 @@ export default function CycleDetailScreen() {
                 </Text>
               </View>
 
-              {/* Inflow vs Outflow Dual Cards */}
+              {/* Inflow vs Outflow Dual Cards.
+                  Scoped to the account above, PAID rows only, and transfers in
+                  and out of it count. Three other screens say "Pengeluaran"
+                  over a different set of rows, so the scope has to be on the
+                  label until they share one definition. */}
+              <Text style={styles.flowScopeNote}>
+                Hanya transaksi terbayar di akun ini, termasuk transfer.
+              </Text>
               <View style={styles.flowRow}>
                 <View style={[styles.flowCard, { backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' }]}>
                   <View style={styles.cardHeaderSmall}>
@@ -472,12 +482,12 @@ export default function CycleDetailScreen() {
             {/* Anggaran Progress Overview */}
             <View style={styles.card}>
               <View style={styles.cardTitleRow}>
-                <Text style={styles.cardTitleSmall}>Alokasi Anggaran</Text>
+                <Text style={styles.cardTitleSmall}>Pagu Kategori</Text>
                 <Text style={styles.budgetBigAmount}>{formatRupiah(totalBudget)}</Text>
               </View>
               <View style={styles.budgetMetaRow}>
                 <Text style={styles.budgetSpentText}>
-                  {formatRupiah(totalSpent)} terpakai
+                  {formatRupiah(totalSpent)} belanja berkategori
                 </Text>
                 <Text style={styles.budgetPctText}>{overallBudgetPct}%</Text>
               </View>
@@ -492,6 +502,10 @@ export default function CycleDetailScreen() {
                   ]}
                 />
               </View>
+              <Text style={styles.flowScopeNote}>
+                Semua akun termasuk kartu kredit, di luar transfer dan baris
+                tanpa kategori. Bukan total pengeluaran siklus.
+              </Text>
             </View>
 
             {/* Top Categories */}
@@ -549,7 +563,7 @@ export default function CycleDetailScreen() {
               <Text style={styles.budgetHeroAmount}>{formatRupiah(totalBudget)}</Text>
               <View style={styles.budgetMetaRow}>
                 <Text style={styles.budgetSpentText}>
-                  {formatRupiah(totalSpent)} terpakai
+                  {formatRupiah(totalSpent)} belanja berkategori
                 </Text>
                 <Text style={styles.budgetPctText}>{overallBudgetPct}%</Text>
               </View>
@@ -852,6 +866,12 @@ const styles = StyleSheet.create({
   flowLabel: {
     fontSize: 12,
     color: '#64748B',
+  },
+  flowScopeNote: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#94A3B8',
+    marginTop: 2,
   },
   flowAmount: {
     fontSize: 14,
