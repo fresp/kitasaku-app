@@ -65,19 +65,39 @@ export default function CycleHistoryScreen() {
 
   const cycles = useMemo(() => cyclesQ.data ?? [], [cyclesQ.data]);
 
-  // Aggregate cycle income and expenses from transactions
+  // Realised money per cycle, plus what is still only planned.
+  //
+  // This loop used to count every row it found: a CANCELLED transaction still
+  // added to the total, and a PENDING plan was added at its planned amount as
+  // if it had been spent. `useYearInsight` does not filter status in the
+  // query, and `buildYearBuckets` drops cancelled rows in code — this loop was
+  // the one place that did not, which is why this screen reported a larger
+  // figure than every other screen for the same cycle.
+  //
+  // Pending is kept, but as its own number. A plan is a commitment, not an
+  // outflow, and summing the two under one label is what made "Pengeluaran"
+  // unreconcilable against the ledger.
   const cycleMetrics = useMemo(() => {
-    const map: Record<string, { income: number; expense: number }> = {};
+    const map: Record<
+      string,
+      { income: number; expense: number; pendingExpense: number }
+    > = {};
     for (const t of yearInsightQ.data?.txns ?? []) {
       if (!t.cycle_id) continue;
+      if (t.status === 'CANCELLED') continue;
       if (!map[t.cycle_id]) {
-        map[t.cycle_id] = { income: 0, expense: 0 };
+        map[t.cycle_id] = { income: 0, expense: 0, pendingExpense: 0 };
       }
-      const amt = t.status === 'PAID' ? t.actual_amount : t.planned_amount;
+      if (t.status === 'PENDING') {
+        if (t.direction === 'EXPENSE') {
+          map[t.cycle_id].pendingExpense += t.planned_amount;
+        }
+        continue;
+      }
       if (t.direction === 'INCOME') {
-        map[t.cycle_id].income += amt;
+        map[t.cycle_id].income += t.actual_amount;
       } else if (t.direction === 'EXPENSE') {
-        map[t.cycle_id].expense += amt;
+        map[t.cycle_id].expense += t.actual_amount;
       }
     }
     return map;
@@ -142,6 +162,7 @@ export default function CycleHistoryScreen() {
             const metrics = cycleMetrics[cycle.id];
             const income = metrics?.income ?? 0;
             const expense = metrics?.expense ?? 0;
+            const pendingExpense = metrics?.pendingExpense ?? 0;
             const remaining = income - expense;
 
             let statusText = 'Selesai';
@@ -195,6 +216,14 @@ export default function CycleHistoryScreen() {
                     <Text style={styles.metricLabel}>Pengeluaran</Text>
                     <Text style={styles.metricValue}>{formatRupiah(expense)}</Text>
                   </View>
+                  {pendingExpense > 0 && (
+                    <View style={styles.metricRow}>
+                      <Text style={styles.metricLabel}>Rencana belum dibayar</Text>
+                      <Text style={styles.metricPending}>
+                        {formatRupiah(pendingExpense)}
+                      </Text>
+                    </View>
+                  )}
 
                   {/* Balance Row */}
                   <View style={styles.balanceRow}>
@@ -314,6 +343,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#0B1527',
+  },
+  metricPending: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#B45309',
   },
   balanceRow: {
     flexDirection: 'row',
