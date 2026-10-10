@@ -9,7 +9,7 @@ import type { RepaymentMode } from './obligation';
 import type { InstallmentMode } from './installments';
 import type { Beneficiary } from './beneficiary';
 import { cleanAccountNumber } from './beneficiary';
-import { assertEligibleCashAccountForHousehold } from './cash-account';
+import { assertActiveAccountForHousehold, assertEligibleCashAccountForHousehold } from './cash-account';
 import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
 import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
 export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
@@ -499,14 +499,22 @@ export function useMarkAsPaid() {
       }
       const effectiveAccountId = args.accountId ?? args.txn.account_id;
       if (!effectiveAccountId) {
-        throw new Error('Pilih rekening bank atau e-wallet aktif untuk transaksi ini.');
+        throw new Error('Pilih akun untuk transaksi ini.');
       }
       const sb = requireSupabase();
       const { data: account, error: accountError } = await sb.from('accounts')
         .select('household_id, type, is_active').eq('id', effectiveAccountId)
         .eq('household_id', args.txn.household_id).maybeSingle();
       if (accountError) throw accountError;
-      assertEligibleCashAccountForHousehold(account, args.txn.household_id);
+      // An ordinary expense may be paid from any active account (migration 029).
+      // A debt payment may not: settling an obligation with a credit card moves
+      // no cash and turns one debt into another, which the card's own bill then
+      // books a second time.
+      if (args.txn.obligation_id) {
+        assertEligibleCashAccountForHousehold(account, args.txn.household_id);
+      } else {
+        assertActiveAccountForHousehold(account, args.txn.household_id);
+      }
       const { error } = await sb.rpc('execute_planned_transaction', {
         p_household_id: args.txn.household_id,
         p_transaction_id: args.txn.id,

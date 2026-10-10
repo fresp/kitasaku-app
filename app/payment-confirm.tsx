@@ -53,8 +53,12 @@ export default function PaymentConfirmScreen() {
   const loadFailed = txnsQ.isError || cycleQ.isError || accsQ.isError;
   const loading = !loadFailed && txnsQ.isLoading;
 
+  // Any active account since migration 029 — a card or cash payment is confirmed
+  // like any other and stays in the cycle's trail. Obligation payments are the
+  // exception: those must move real cash, see useMarkAsPaid.
   const accountOptions = (accsQ.data ?? []).filter((account) =>
-    account.is_active !== false && isZeroBasedCashAccount(account)
+    account.is_active !== false
+    && (!liveTxn?.obligation_id || isZeroBasedCashAccount(account))
   );
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isFinal, setIsFinal] = useState(false);
