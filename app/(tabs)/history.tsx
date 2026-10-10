@@ -165,6 +165,14 @@ export default function HistoryScreen() {
     () => allRows.filter((r) => r.status === 'PENDING').length,
     [allRows]
   );
+  // The banner carries the amount too, so it ties back to Home's "setelah N
+  // tagihan dibayar" instead of being a bare count.
+  const pendingAmount = useMemo(
+    () => allRows
+      .filter((r) => r.status === 'PENDING')
+      .reduce((sum, r) => sum + r.displayAmount, 0),
+    [allRows]
+  );
 
   // "Belum dieksekusi" is a checklist, not a page: it always shows every pending
   // row, so it can never disagree with the banner above it. Paging applies to the
@@ -406,7 +414,7 @@ export default function HistoryScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.bulkBannerTitle}>
-                {pendingCount} transaksi belum dieksekusi
+                {pendingCount} transaksi belum dieksekusi · {formatRupiah(pendingAmount)}
               </Text>
               <Text style={styles.bulkBannerSub}>Tap untuk checklist &amp; eksekusi</Text>
             </View>

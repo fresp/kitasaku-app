@@ -13,6 +13,7 @@ import { assertActiveAccountForHousehold, assertEligibleCashAccountForHousehold 
 import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
 import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
 export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
+export { nonCashSpend } from './cashflow';
 export type { SourceFundRow } from './zero-based-accounting';
 export { calcCashflow, homeCashBalances } from './cashflow';
 export type { Cashflow } from './cashflow';
@@ -338,7 +339,9 @@ export function useTransactions(householdId: string | undefined, cycleId: string
     queryFn: async (): Promise<Txn[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name)')
+        // account type: Home notes what was spent from a card or cash
+        // (lib/cashflow.ts nonCashSpend).
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name, type)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!)
         .order('created_at', { ascending: false }).limit(200);
       if (error) throw error;

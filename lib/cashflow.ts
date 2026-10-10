@@ -1,3 +1,4 @@
+import { isZeroBasedCashAccount } from './account';
 import { defaultFlowType } from './zero-based';
 import type { FlowType } from './zero-based';
 
@@ -16,6 +17,8 @@ export function homeCashBalances(cashflow: Cashflow, openingStated: number | nul
 
 export interface CashflowTxn {
   status: 'PENDING' | 'PAID' | 'CANCELLED';
+  /** Joined account row; PostgREST returns it as an object or a one-item array. */
+  accounts?: { type?: string | null } | { type?: string | null }[] | null;
   direction: 'INCOME' | 'EXPENSE';
   flow_type?: FlowType | null;
   obligation_id?: string | null;
@@ -38,6 +41,13 @@ export interface Cashflow {
   transferOut: number;
   /** Every non-cancelled pending row in the cycle, across accounts. */
   pendingCount: number;
+  /**
+   * Pending rows that will leave the SELECTED account — the count that belongs
+   * with `pendingExpense`. `unpaidExpenseCount` spans the whole cycle, so
+   * pairing that one with a per-account amount would show a count and a figure
+   * that disagree.
+   */
+  pendingOutflowCount: number;
   paidCount: number;
   unpaidExpenseCount: number;
   pendingIncomeCount: number;
@@ -51,6 +61,7 @@ export function calcCashflow(txns: CashflowTxn[], accountId?: string | null): Ca
   let transferIn = 0;
   let transferOut = 0;
   let pendingCount = 0;
+  let pendingOutflowCount = 0;
   let paidCount = 0;
   let unpaidExpenseCount = 0;
   let pendingIncomeCount = 0;
@@ -98,6 +109,7 @@ export function calcCashflow(txns: CashflowTxn[], accountId?: string | null): Ca
       } else if (outgoing) {
         pendingExpense += amount;
         pendingOut += amount;
+        pendingOutflowCount += 1;
       }
     }
   }
@@ -106,6 +118,7 @@ export function calcCashflow(txns: CashflowTxn[], accountId?: string | null): Ca
   return {
     actualCash,
     projectedRemaining: actualCash - pendingOut,
+    pendingOutflowCount,
     income,
     expense,
     pendingIncome,
@@ -117,4 +130,30 @@ export function calcCashflow(txns: CashflowTxn[], accountId?: string | null): Ca
     unpaidExpenseCount,
     pendingIncomeCount,
   };
+}
+
+const OUTGOING_FLOWS = ['EXPENSE', 'DEBT_PAYMENT', 'ASSET_ALLOCATION'];
+
+/**
+ * What this cycle spent from accounts that hold no cash of their own — a credit
+ * card, or physical cash. Home's balance figures are per cash account, so this
+ * money never shows there: it left no bank account, and for a card it has not
+ * left anything yet. Surfaced as a note so a card purchase does not read as a
+ * transaction that went missing.
+ *
+ * A row whose account is not joined is left out: unknown is not the same as
+ * non-cash, and guessing would overstate the note.
+ */
+export function nonCashSpend(txns: CashflowTxn[]): number {
+  let total = 0;
+  for (const t of txns) {
+    if (t.status !== 'PAID') continue;
+    const joined = Array.isArray(t.accounts) ? t.accounts[0] : t.accounts;
+    const type = joined?.type;
+    if (!type || isZeroBasedCashAccount({ type })) continue;
+    const flow = t.flow_type ?? defaultFlowType(t.direction, t.obligation_id ?? null);
+    if (!OUTGOING_FLOWS.includes(flow)) continue;
+    total += t.actual_amount;
+  }
+  return total;
 }

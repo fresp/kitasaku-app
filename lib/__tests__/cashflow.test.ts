@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcCashflow, homeCashBalances } from '../cashflow';
+import { calcCashflow, nonCashSpend, homeCashBalances } from '../cashflow';
 import type { Txn } from '../queries';
 
 function txn(overrides: Partial<Txn>): Txn {
@@ -72,5 +72,63 @@ describe('account Home cashflow', () => {
     expect(result.actualCash).toBe(0);
     expect(result.pendingCount).toBe(0);
     expect(result.paidCount).toBe(1);
+  });
+});
+
+describe('nonCashSpend', () => {
+  const base = {
+    status: 'PAID' as const,
+    direction: 'EXPENSE' as const,
+    flow_type: 'EXPENSE' as const,
+    account_id: 'a1',
+    actual_amount: 100_000,
+    planned_amount: 100_000,
+  };
+
+  it('sums paid outflows on credit card and cash accounts', () => {
+    expect(nonCashSpend([
+      { ...base, accounts: { type: 'CREDIT_CARD' } },
+      { ...base, accounts: [{ type: 'CASH' }], actual_amount: 50_000 },
+    ])).toBe(150_000);
+  });
+
+  it('ignores bank and e-wallet outflows, which the balance already reflects', () => {
+    expect(nonCashSpend([
+      { ...base, accounts: { type: 'BANK' } },
+      { ...base, accounts: { type: 'E_WALLET' } },
+    ])).toBe(0);
+  });
+
+  it('ignores pending and cancelled rows', () => {
+    expect(nonCashSpend([
+      { ...base, status: 'PENDING', accounts: { type: 'CREDIT_CARD' } },
+      { ...base, status: 'CANCELLED', accounts: { type: 'CREDIT_CARD' } },
+    ])).toBe(0);
+  });
+
+  it('ignores income and transfers on a card', () => {
+    expect(nonCashSpend([
+      { ...base, direction: 'INCOME', flow_type: 'OPERATING_INCOME', accounts: { type: 'CREDIT_CARD' } },
+      { ...base, flow_type: 'TRANSFER', accounts: { type: 'CREDIT_CARD' } },
+    ])).toBe(0);
+  });
+
+  it('leaves out a row whose account was not joined', () => {
+    expect(nonCashSpend([{ ...base }, { ...base, accounts: null }])).toBe(0);
+  });
+});
+
+describe('calcCashflow pendingOutflowCount', () => {
+  it('counts only the pending rows leaving the selected account', () => {
+    const rows = [
+      { status: 'PENDING' as const, direction: 'EXPENSE' as const, flow_type: 'EXPENSE' as const,
+        account_id: 'a1', actual_amount: 0, planned_amount: 300_000 },
+      { status: 'PENDING' as const, direction: 'EXPENSE' as const, flow_type: 'EXPENSE' as const,
+        account_id: 'a2', actual_amount: 0, planned_amount: 400_000 },
+    ];
+    const flow = calcCashflow(rows, 'a1');
+    expect(flow.pendingCount).toBe(2);
+    expect(flow.pendingOutflowCount).toBe(1);
+    expect(flow.pendingExpense).toBe(300_000);
   });
 });

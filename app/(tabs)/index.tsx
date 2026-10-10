@@ -24,6 +24,7 @@ import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import {
   calcCashflow,
+  nonCashSpend,
   useActiveCycle,
   useBankAccounts,
   useCycleReconciliation,
@@ -149,6 +150,9 @@ export default function HomeScreen() {
   const expense = movementUnavailable ? null : flow.expense + flow.transferOut;
   const actualCash = movementUnavailable ? null : selectedActualBalance;
   const projectedRemaining = movementUnavailable ? null : selectedProjectedBalance;
+  // Spent from a card or cash: it never moves the balances above, so without a
+  // note it reads as a purchase that went missing from Home.
+  const cardSpend = useMemo(() => nonCashSpend(txns), [txns]);
   const unanchoredMovement = movementUnavailable ? null : flow.actualCash;
   const amountLabel = (value: number | null) => (value === null ? '—' : signedRupiah(value));
 
@@ -270,15 +274,36 @@ export default function HomeScreen() {
                 : '—'}
             </Text>
 
-            {/* Estimate Line (anchored balance only) */}
+            {/* What is left once this account's unexecuted plans are paid. */}
             {actualCash !== null && projectedRemaining !== null && (
               <View style={styles.estimateBox}>
-                <Text style={styles.estimateLabel}>Estimasi akhir siklus</Text>
-                <View style={styles.estimateValueRow}>
-                  <Text style={styles.estimateValue}>{amountLabel(projectedRemaining)}</Text>
+                <View style={styles.estimateHeadRow}>
+                  <Text style={styles.estimateLabel}>
+                    {flow.pendingOutflowCount > 0
+                      ? `Setelah ${flow.pendingOutflowCount} tagihan dibayar`
+                      : 'Tidak ada tagihan tersisa'}
+                  </Text>
                   <View style={styles.estimateDot} />
                 </View>
+                <Text style={styles.estimateValue}>{amountLabel(projectedRemaining)}</Text>
+                {flow.pendingOutflowCount > 0 && (
+                  <View style={styles.estimateBreakdownRow}>
+                    <Text style={styles.estimateBreakdownLabel}>Belum dieksekusi</Text>
+                    <Text style={styles.estimateBreakdownValue}>
+                      &minus; {formatRupiah(flow.pendingExpense)}
+                    </Text>
+                  </View>
+                )}
               </View>
+            )}
+
+            {/* A card purchase moves no money out of this account — say so,
+                otherwise it looks like the spending never registered. */}
+            {!movementUnavailable && cardSpend > 0 && (
+              <Text style={styles.cardSpendNote}>
+                Belum termasuk {formatRupiah(cardSpend)} belanja kartu kredit/tunai — uangnya
+                belum keluar dari rekening ini.
+              </Text>
             )}
 
             {/* Stats Cards Row (Pemasukan & Pengeluaran) */}
@@ -726,9 +751,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.12)',
   },
+  estimateHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   estimateLabel: {
     color: Colors.textOnDarkSecondary,
-    fontSize: 10,
+    fontSize: 11,
   },
   estimateValueRow: {
     flexDirection: 'row',
@@ -738,9 +768,35 @@ const styles = StyleSheet.create({
   },
   estimateValue: {
     color: Colors.textOnDark,
-    fontSize: 16,
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 3,
+    fontVariant: ['tabular-nums'],
+  },
+  estimateBreakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  estimateBreakdownLabel: {
+    color: Colors.textOnDarkMuted,
+    fontSize: 11,
+  },
+  estimateBreakdownValue: {
+    color: Colors.accent,
+    fontSize: 12,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
+  },
+  cardSpendNote: {
+    color: Colors.textOnDarkMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 10,
   },
   estimateDot: {
     width: 6,
