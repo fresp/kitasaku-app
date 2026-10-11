@@ -31,6 +31,7 @@ import {
   useRecordAssetValuation,
 } from '../lib/queries';
 import { PrimaryButton } from '../components/ui/Button';
+import { MoneyInput } from '../components/ui/MoneyInput';
 import { QueryError } from '../components/ui/QueryError';
 
 const BANDS = [
@@ -333,19 +334,11 @@ export default function AssetsScreen() {
                   ))}
                 </View>
 
-                <View style={styles.moneyBox}>
-                  <Text style={styles.label}>
-                    {operation === 'value' ? 'NILAI ASET' : 'NOMINAL'}
-                  </Text>
-                  <TextInput
-                    value={amountText}
-                    onChangeText={setAmountText}
-                    placeholder="0"
-                    placeholderTextColor={Colors.borderStrong}
-                    keyboardType="number-pad"
-                    style={styles.moneyInput}
-                  />
-                  <Text style={styles.moneyEcho}>{formatRupiah(amount)}</Text>
+                <MoneyInput
+                  label={operation === 'value' ? 'NILAI ASET' : 'NOMINAL'}
+                  value={amountText}
+                  onChangeText={setAmountText}
+                >
                   {valuationDelta !== null && valuationDelta !== 0 && (
                     <Text
                       style={[
@@ -357,7 +350,7 @@ export default function AssetsScreen() {
                       {formatRupiah(Math.abs(valuationDelta))} dari valuasi terakhir.
                     </Text>
                   )}
-                </View>
+                </MoneyInput>
 
                 {operation === 'value' ? (
                   <>
@@ -560,15 +553,6 @@ const styles = StyleSheet.create({
   segText: { color: Colors.textSecondary, fontSize: 12.5, fontWeight: '600' },
   segTextOn: { color: Colors.white, fontWeight: '700' },
 
-  moneyBox: {
-    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
-    padding: 12, gap: 2, backgroundColor: Colors.surface,
-  },
-  moneyInput: {
-    fontSize: 26, fontWeight: '800', color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
-  },
-  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
   moneyDelta: { color: Colors.accentStrong, fontSize: FontSize.caption, marginTop: 2 },
   moneyDeltaDown: { color: Colors.pendingText },
 

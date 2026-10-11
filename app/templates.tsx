@@ -39,6 +39,7 @@ import {
   type PlannedExpenseGroup,
 } from '../lib/account';
 import { PrimaryButton } from '../components/ui/Button';
+import { MoneyInput } from '../components/ui/MoneyInput';
 
 /**
  * Screen 9 — Template Rutin.
@@ -409,24 +410,18 @@ export default function TemplatesScreen() {
                 {/* The amount is the hero: it is the only field that moves the
                     baseline, and the delta line is what tells the family by how
                     much before they commit to it. */}
-                <View style={styles.moneyBox}>
-                  <Text style={styles.label}>NOMINAL DEFAULT</Text>
-                  <TextInput
-                    value={draft.amountText}
-                    onChangeText={(v) => setDraft({ ...draft, amountText: v })}
-                    placeholder="0"
-                    placeholderTextColor={Colors.borderStrong}
-                    keyboardType="number-pad"
-                    style={styles.moneyInput}
-                  />
-                  <Text style={styles.moneyEcho}>{formatRupiah(draftAmount)}</Text>
+                <MoneyInput
+                  label="NOMINAL DEFAULT"
+                  value={draft.amountText}
+                  onChangeText={(v) => setDraft({ ...draft, amountText: v })}
+                >
                   {draft.original && draftDelta !== 0 && (
                     <Text style={styles.moneyWas}>
                       Sebelumnya {formatRupiah(draft.original.default_amount)} ·{' '}
                       {draftDelta > 0 ? 'naik' : 'turun'} {formatRupiah(Math.abs(draftDelta))}
                     </Text>
                   )}
-                </View>
+                </MoneyInput>
 
                 <PickRow
                   label="Kategori"
@@ -742,15 +737,6 @@ const styles = StyleSheet.create({
   },
   hint: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16 },
 
-  moneyBox: {
-    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
-    padding: 12, gap: 2, backgroundColor: Colors.surface, marginTop: 2,
-  },
-  moneyInput: {
-    fontSize: 26, fontWeight: '800', color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
-  },
-  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
   moneyWas: { color: Colors.financingText, fontSize: FontSize.caption, marginTop: 2 },
 
   pickRow: {

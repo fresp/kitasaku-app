@@ -40,3 +40,32 @@ export function formatDelta(current: number, previous: number): { text: string; 
 export function unpaidPlansLabel(count: number, amount: number): string {
   return `${count} tagihan belum dibayar · ${formatRupiah(amount)}`;
 }
+
+/**
+ * Digits of a typed money field, as an integer.
+ *
+ * Everything that is not a digit is dropped, so a value already carrying its
+ * thousands separators ("1.817.548") round-trips, and so does a pasted string
+ * with spaces or a stray "Rp".
+ */
+export function parseRupiahInput(text: string): number {
+  const digits = text.replace(/[^0-9]/g, '');
+  if (!digits) return 0;
+  const value = Number(digits);
+  return Number.isSafeInteger(value) ? value : 0;
+}
+
+/**
+ * What a money field should display while it is being typed: the digits with
+ * id-ID thousands separators and no "Rp" prefix, because the prefix is
+ * rendered beside the field rather than inside its value. Keeping it out of
+ * the text is what makes it impossible for a backspace to eat it.
+ *
+ * An empty field stays empty rather than becoming "0", so the placeholder can
+ * still show.
+ */
+export function formatRupiahInput(text: string): string {
+  const digits = text.replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  return formatRupiah(parseRupiahInput(digits), { withPrefix: false });
+}

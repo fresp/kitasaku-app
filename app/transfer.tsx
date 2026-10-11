@@ -16,10 +16,10 @@ import ArrowLeftRight from 'lucide-react-native/icons/arrow-left-right';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import X from 'lucide-react-native/icons/x';
 import { Colors, FontSize, Radius } from '../constants/theme';
-import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useCreateTransfer } from '../lib/queries';
 import { PrimaryButton } from '../components/ui/Button';
+import { MoneyInput } from '../components/ui/MoneyInput';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number {
@@ -129,18 +129,7 @@ export default function TransferScreen() {
           />
         )}
 
-        <View style={styles.moneyBox}>
-          <Text style={styles.label}>NOMINAL</Text>
-          <TextInput
-            value={amountText}
-            onChangeText={setAmountText}
-            placeholder="0"
-            placeholderTextColor={Colors.borderStrong}
-            keyboardType="number-pad"
-            style={styles.moneyInput}
-          />
-          <Text style={styles.moneyEcho}>{formatRupiah(amount)}</Text>
-        </View>
+        <MoneyInput label="NOMINAL" value={amountText} onChangeText={setAmountText} />
 
         <PickRow
           label="Dari"
@@ -316,15 +305,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, color: Colors.textPrimary, backgroundColor: Colors.canvas,
     fontSize: FontSize.body,
   },
-  moneyBox: {
-    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
-    padding: 12, gap: 2, backgroundColor: Colors.surface, marginTop: 2,
-  },
-  moneyInput: {
-    fontSize: 28, fontWeight: '800', color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
-  },
-  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
 
   pickRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,

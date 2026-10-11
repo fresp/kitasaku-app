@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,6 +32,7 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import X from 'lucide-react-native/icons/x';
 import { categoryIconName } from '../lib/category-icon';
 import { PrimaryButton } from '../components/ui/Button';
+import { MoneyInput } from '../components/ui/MoneyInput';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { QueryError } from '../components/ui/QueryError';
 
@@ -369,17 +369,7 @@ export default function AllocationScreen() {
                   remainder lands while the amount is still being typed is the
                   whole point of the screen; it used to be visible only after
                   the allocation was saved. */}
-              <View style={styles.moneyBox}>
-                <Text style={styles.formLabel}>NOMINAL</Text>
-                <TextInput
-                  value={amountText}
-                  onChangeText={setAmountText}
-                  placeholder="0"
-                  placeholderTextColor={Colors.borderStrong}
-                  keyboardType="number-pad"
-                  style={styles.moneyInput}
-                />
-                <Text style={styles.moneyEcho}>{formatRupiah(amount)}</Text>
+              <MoneyInput label="NOMINAL" value={amountText} onChangeText={setAmountText}>
                 {summary && amount > 0 && (
                   <Text style={[styles.moneyAfter, afterAllocation < 0 && styles.moneyAfterBad]}>
                     {afterAllocation < 0
@@ -387,7 +377,7 @@ export default function AllocationScreen() {
                       : `Sisa belum dialokasikan jadi ${formatRupiah(afterAllocation)}.`}
                   </Text>
                 )}
-              </View>
+              </MoneyInput>
 
               {type === 'DEBT_PAYMENT' && (
                 <PickRow
@@ -629,15 +619,6 @@ const styles = StyleSheet.create({
   sheetTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
   sheetSub: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 3 },
 
-  moneyBox: {
-    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
-    padding: 12, gap: 2, backgroundColor: Colors.surface, marginTop: 2,
-  },
-  moneyInput: {
-    fontSize: 26, fontWeight: '800', color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
-  },
-  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
   moneyAfter: { color: Colors.financingText, fontSize: FontSize.caption, marginTop: 2 },
   moneyAfterBad: { color: Colors.pendingText },
 

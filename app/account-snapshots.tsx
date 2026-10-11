@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +25,7 @@ import {
   useRecordCycleAccountSnapshot,
 } from '../lib/queries';
 import { PrimaryButton } from '../components/ui/Button';
+import { MoneyInput } from '../components/ui/MoneyInput';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number | null {
@@ -225,26 +225,18 @@ export default function AccountSnapshotsScreen() {
                   </Pressable>
                 </View>
 
-                <View style={styles.moneyBox}>
-                  <Text style={styles.label}>SALDO AKHIR</Text>
-                  <TextInput
-                    value={text}
-                    onChangeText={(v) => { setText(v); setErr(null); }}
-                    keyboardType="number-pad"
-                    placeholder="0"
-                    placeholderTextColor={Colors.borderStrong}
-                    editable={!saveSnapshot.isPending}
-                    style={styles.moneyInput}
-                  />
-                  <Text style={styles.moneyEcho}>
-                    {closing === null ? 'Rp 0' : formatRupiah(closing)}
-                  </Text>
+                <MoneyInput
+                  label="SALDO AKHIR"
+                  value={text}
+                  onChangeText={(v) => { setText(v); setErr(null); }}
+                  editable={!saveSnapshot.isPending}
+                >
                   {!!editingSaved && closing !== null && closing !== editingSaved.closing_stated && (
                     <Text style={styles.moneyWas}>
                       Sebelumnya {formatRupiah(editingSaved.closing_stated)}.
                     </Text>
                   )}
-                </View>
+                </MoneyInput>
 
                 <Text style={styles.note}>
                   Tidak ada angka saldo yang akan dibuat otomatis dari transaksi — ini
@@ -323,14 +315,5 @@ const styles = StyleSheet.create({
   sheetTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
   sheetSub: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 3 },
 
-  moneyBox: {
-    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
-    padding: 12, gap: 2, backgroundColor: Colors.surface,
-  },
-  moneyInput: {
-    fontSize: 26, fontWeight: '800', color: Colors.textPrimary,
-    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
-  },
-  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
   moneyWas: { color: Colors.financingText, fontSize: FontSize.caption, marginTop: 2 },
 });
