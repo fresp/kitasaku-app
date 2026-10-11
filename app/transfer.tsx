@@ -19,7 +19,7 @@ import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { useAccounts, useActiveCycle, useCreateTransfer } from '../lib/queries';
-import { PrimaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number {
@@ -210,7 +210,6 @@ export default function TransferScreen() {
           label={createTransfer.isPending ? 'Menyimpan…' : 'Simpan Relokasi'}
           onPress={canSubmit && !createTransfer.isPending ? submit : undefined}
         />
-        <TextButton label="Batal" onPress={() => router.back()} />
       </ScrollView>
 
       <Modal

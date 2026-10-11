@@ -25,7 +25,7 @@ import {
   useCycleAccountSnapshots,
   useRecordCycleAccountSnapshot,
 } from '../lib/queries';
-import { PrimaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number | null {
@@ -270,7 +270,6 @@ export default function AccountSnapshotsScreen() {
                       : undefined
                   }
                 />
-                <TextButton label="Batal" onPress={closeEditor} />
               </>
             )}
           </View>

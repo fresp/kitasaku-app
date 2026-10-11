@@ -38,7 +38,7 @@ import {
   splitPlannedExpense,
   type PlannedExpenseGroup,
 } from '../lib/account';
-import { PrimaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 
 /**
  * Screen 9 — Template Rutin.
@@ -499,10 +499,11 @@ export default function TemplatesScreen() {
                   label={saving ? 'Menyimpan…' : draft.original ? 'Simpan Perubahan' : 'Simpan Template'}
                   onPress={save}
                 />
-                <TextButton label="Batal" onPress={closeDraft} />
 
                 {/* Archiving, not deleting: a template that has already cloned
-                    transactions into past cycles is referenced by them. */}
+                    transactions into past cycles is referenced by them.
+                    Separated by a rule rather than stacked as a third button —
+                    it is a different kind of act from saving an edit. */}
                 {draft.original && (
                   <Pressable
                     onPress={() => draft.original && toggleStatus(draft.original)}
@@ -775,8 +776,11 @@ const styles = StyleSheet.create({
   segText: { color: Colors.textSecondary, fontSize: 12.5, fontWeight: '600' },
   segTextOn: { color: Colors.white, fontWeight: '700' },
 
-  archiveBtn: { alignItems: 'center', paddingVertical: 10 },
-  archiveText: { color: Colors.textSecondary, fontSize: 12.5, fontWeight: '700' },
+  archiveBtn: {
+    alignItems: 'center', paddingTop: 14, marginTop: 4,
+    borderTopWidth: 1, borderTopColor: Colors.borderSubtle,
+  },
+  archiveText: { color: Colors.textMuted, fontSize: 12.5, fontWeight: '700' },
 
   optionRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,

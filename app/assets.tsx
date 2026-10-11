@@ -30,7 +30,7 @@ import {
   useCreateAssetRelease,
   useRecordAssetValuation,
 } from '../lib/queries';
-import { PrimaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 const BANDS = [
@@ -244,8 +244,6 @@ export default function AssetsScreen() {
         ))}
 
         {err && !opOpen && !createOpen && <Text style={styles.error}>{err}</Text>}
-
-        <TextButton label="Tutup" onPress={() => router.back()} />
       </ScrollView>
 
       {/* ---- New position ---- */}
@@ -289,7 +287,6 @@ export default function AssetsScreen() {
               label={createAsset.isPending ? 'Menyimpan…' : 'Buat Posisi Aset'}
               onPress={saveAsset}
             />
-            <TextButton label="Batal" onPress={() => setCreateOpen(false)} />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -444,7 +441,6 @@ export default function AssetsScreen() {
                   }
                   onPress={mutationPending ? undefined : submitOperation}
                 />
-                <TextButton label="Batal" onPress={closeOperation} />
               </ScrollView>
             )}
           </View>

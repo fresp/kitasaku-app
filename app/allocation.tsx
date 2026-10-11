@@ -32,7 +32,7 @@ import type { AllocationType, CycleAllocation } from '../lib/queries';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import X from 'lucide-react-native/icons/x';
 import { categoryIconName } from '../lib/category-icon';
-import { PrimaryButton, TextButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { QueryError } from '../components/ui/QueryError';
 
@@ -429,7 +429,6 @@ export default function AllocationScreen() {
                 label={createAlloc.isPending ? 'Menyimpan…' : 'Simpan Alokasi'}
                 onPress={submit}
               />
-              <TextButton label="Batal" onPress={closeForm} />
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
