@@ -8,7 +8,7 @@ import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { cycleWindowFrom } from '../lib/profile';
 import { useAccounts, useActiveCycle, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
-import { cyclePrimaryAccountId, defaultAccountId } from '../lib/account';
+import { cyclePrimaryAccountId, defaultAccountId, splitPlannedExpense } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, TextButton } from '../components/ui/Button';
@@ -101,9 +101,24 @@ export default function NewCycleScreen() {
   // and books a salary as if it were a bill. The split matters more now than it
   // did before: the EXPENSE side is what gets written to `cycle_allocations`
   // when the cycle opens, so the gate and the stored plan have to agree.
-  const recurringExpense = selected
-    .filter((t) => t.direction === 'EXPENSE')
-    .reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+  const selectedExpense = selected.filter((t) => t.direction === 'EXPENSE');
+  const recurringExpense = selectedExpense.reduce(
+    (s, t) => s + amountFor(t.id, t.default_amount),
+    0
+  );
+
+  // Where each routine position takes its money from. The rule itself lives in
+  // lib/account.ts so the gate and the breakdown can never disagree about what
+  // counts as cash.
+  // Not memoized: `selectedExpense` is rebuilt every render anyway, so a
+  // useMemo here only blocks React Compiler from optimizing the component.
+  const expenseSplit = splitPlannedExpense(selectedExpense, activePrimaryId, (t) =>
+    amountFor(t.id, t.default_amount)
+  );
+
+  const primaryAccountName =
+    accsQ.data?.find((a) => a.id === activePrimaryId)?.name ?? 'akun primer';
+  const nonCashPlanned = expenseSplit.amounts.card;
   const recurringIncome = selected
     .filter((t) => t.direction === 'INCOME')
     .reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
@@ -454,7 +469,24 @@ export default function NewCycleScreen() {
           }}
           allocations={{
             expense: recurringExpense,
-            expenseCount: selected.filter((t) => t.direction === 'EXPENSE').length,
+            expenseCount: selectedExpense.length,
+            expenseLines: [
+              {
+                label: primaryAccountName,
+                value: expenseSplit.amounts.primary,
+                count: expenseSplit.counts.primary,
+              },
+              {
+                label: 'Akun kas lain',
+                value: expenseSplit.amounts.otherCash,
+                count: expenseSplit.counts.otherCash,
+              },
+              {
+                label: 'Kartu kredit · ditagih siklus berikutnya',
+                value: expenseSplit.amounts.card,
+                count: expenseSplit.counts.card,
+              },
+            ],
             debtPayment: totalDebtPayment,
             debtCount: selectedObligations.length,
             savingsAssets: 0,
@@ -466,7 +498,9 @@ export default function NewCycleScreen() {
           note={
             fundingGap > 0
               ? `Kebutuhan ${formatRupiah(requiredAllocation)} melebihi sumber dana ${formatRupiah(sourceFunds)}. Tutup gap dengan menambah pemasukan, melepas pos rutin yang tidak dipakai, atau menunda kewajiban ke siklus berikutnya.`
-              : unallocatedLabel
+              : nonCashPlanned > 0
+                ? `${unallocatedLabel} Catatan: ${formatRupiah(nonCashPlanned)} dari rencana di atas ada di kartu kredit dan masih ikut dihitung sebagai kebutuhan siklus ini, padahal kasnya baru keluar saat tagihannya dibayar.`
+                : unallocatedLabel
           }
           strategies={
             fundingGap > 0 ? (

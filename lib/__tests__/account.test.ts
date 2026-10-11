@@ -6,6 +6,7 @@ import {
   maskAccountNumber,
   normalizeAccountNumber,
   resolveAccountIcon,
+  splitPlannedExpense,
   sortAccounts,
   validateAccountNumber,
   defaultAccountId,
@@ -54,5 +55,50 @@ describe('account helpers and presentation rules (Flow J)', () => {
     expect(cyclePrimaryAccountId([
       { id: 'prior', type: 'BANK', is_active: true }, { id: 'next', type: 'BANK', is_active: true },
     ], 'prior')).toBe('prior');
+  });
+});
+
+describe('splitPlannedExpense', () => {
+  const amountOf = (r: { amount: number }) => r.amount;
+
+  it('sorts a position by the pocket its money leaves', () => {
+    const rows = [
+      { amount: 1_000_000, account_id: 'bank-1', accounts: { type: 'BANK' } },
+      { amount: 300_000, account_id: 'wallet', accounts: { type: 'E_WALLET' } },
+      { amount: 220_000, account_id: 'cc', accounts: { type: 'CREDIT_CARD' } },
+    ];
+    const split = splitPlannedExpense(rows, 'bank-1', amountOf);
+    expect(split.amounts).toEqual({ primary: 1_000_000, otherCash: 300_000, card: 220_000 });
+    expect(split.counts).toEqual({ primary: 1, otherCash: 1, card: 1 });
+    // The breakdown must always reconcile to the figure shown above it.
+    expect(split.total).toBe(1_520_000);
+    expect(split.amounts.primary + split.amounts.otherCash + split.amounts.card).toBe(split.total);
+  });
+
+  it('counts an unjoined or account-less row as cash, never as a card', () => {
+    const rows = [
+      { amount: 500_000, account_id: null },
+      { amount: 400_000, account_id: 'unknown', accounts: null },
+      { amount: 100_000, account_id: 'unknown-2', accounts: [] as { type?: string | null }[] },
+    ];
+    const split = splitPlannedExpense(rows, 'bank-1', amountOf);
+    expect(split.amounts.card).toBe(0);
+    expect(split.amounts.otherCash).toBe(1_000_000);
+  });
+
+  it('puts the primary account first even when it is a card', () => {
+    // A household can set any account as the cycle's primary; the reconciliation
+    // anchor wins over the cash test, or the breakdown would disagree with the
+    // account the cycle is actually closed against.
+    const rows = [{ amount: 250_000, account_id: 'cc', accounts: { type: 'CREDIT_CARD' } }];
+    expect(splitPlannedExpense(rows, 'cc', amountOf).amounts).toEqual({
+      primary: 250_000, otherCash: 0, card: 0,
+    });
+  });
+
+  it('has no primary group when the cycle has no primary account', () => {
+    const rows = [{ amount: 250_000, account_id: 'bank-1', accounts: { type: 'BANK' } }];
+    const split = splitPlannedExpense(rows, null, amountOf);
+    expect(split.amounts).toEqual({ primary: 0, otherCash: 250_000, card: 0 });
   });
 });

@@ -50,6 +50,17 @@ export interface ZeroBasedProjectionAllocations {
    */
   other: number;
   otherCount: number;
+  /**
+   * Optional split of `expense` by the account the money leaves. The rows are
+   * indented under the total and must sum back to `expense`; the caller owns
+   * that, because only it knows how the positions were grouped.
+   *
+   * Buka Siklus clones routine positions from every account, cards included,
+   * and a card position does not take cash out of this cycle - its bill does,
+   * later, as a DEBT_PAYMENT. Folding both into one figure hides which part of
+   * the plan the cycle's cash actually has to cover.
+   */
+  expenseLines?: { label: string; value: number; count: number }[];
 }
 
 export function ZeroBasedProjection({
@@ -89,6 +100,16 @@ export function ZeroBasedProjection({
         label={`− Pengeluaran rutin (${allocations.expenseCount} pos)`}
         value={-allocations.expense}
       />
+      {(allocations.expenseLines ?? [])
+        .filter((l) => l.count > 0)
+        .map((l) => (
+          <View key={l.label} style={styles.projSubRow}>
+            <Text style={styles.projSubLabel}>
+              {l.label} ({l.count} pos)
+            </Text>
+            <Text style={styles.projSubValue}>{signedRupiah(-l.value)}</Text>
+          </View>
+        ))}
       <ProjRow
         label={`− Pembayaran kewajiban (${allocations.debtCount})`}
         value={-allocations.debtPayment}
@@ -187,6 +208,15 @@ const styles = StyleSheet.create({
     gap: 8, paddingVertical: 2,
   },
   projRowLabel: { color: Colors.borderStrong, fontSize: FontSize.caption, flex: 1 },
+  projSubRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    gap: 8, paddingLeft: 14,
+  },
+  projSubLabel: { color: Colors.textMuted, fontSize: FontSize.microLabel, flex: 1 },
+  projSubValue: {
+    color: Colors.textMuted, fontSize: FontSize.microLabel,
+    fontWeight: '600', fontVariant: ['tabular-nums'],
+  },
   projRowValue: { fontSize: FontSize.body, fontWeight: '700', fontVariant: ['tabular-nums'] },
   divider: { height: 1, backgroundColor: Colors.heroFooter, marginVertical: 5 },
   projNote: { color: Colors.textMuted, fontSize: FontSize.caption, lineHeight: 16, marginTop: 2 },

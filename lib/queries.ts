@@ -174,7 +174,9 @@ export interface Template {
   status: 'ACTIVE' | 'COMPLETED'; notes: string | null;
   /** Day of month the bill is due; null = no known due day (migration 006). */
   due_day?: number | null;
-  categories?: { name: string; icon?: string | null } | null; accounts?: { name: string } | null;
+  categories?: { name: string; icon?: string | null } | null;
+  /** `type` is what tells a cash position from a card one (see splitPlannedExpense). */
+  accounts?: { name: string; type?: string | null } | null;
 }
 export interface ObligationInstallment {
   id: string; household_id: string; obligation_id: string; cycle_id: string | null;
@@ -445,7 +447,10 @@ export function useTemplates(householdId: string | undefined) {
     queryFn: async (): Promise<Template[]> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('recurring_templates')
-        .select('*, categories(name, icon), accounts(name)')
+        // account type, not just the name: Buka Siklus has to tell a routine
+        // position that will leave a cash account from one booked to a credit
+        // card, which does not consume cash in the cycle it is spent.
+        .select('*, categories(name, icon), accounts(name, type)')
         .eq('household_id', householdId!).order('name');
       if (error) throw error;
       return (data ?? []) as Template[];

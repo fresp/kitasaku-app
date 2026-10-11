@@ -150,3 +150,58 @@ export function isHomeCashAccount(account: { type: string }): boolean {
 export function isZeroBasedCashAccount(account: { type: string }): boolean {
   return account.type === 'BANK' || account.type === 'E_WALLET';
 }
+
+export type PlannedExpenseGroup = 'primary' | 'otherCash' | 'card';
+
+export interface PlannedExpenseRow {
+  account_id?: string | null;
+  /** Joined account row; PostgREST returns it as an object or a one-item array. */
+  accounts?: { type?: string | null } | { type?: string | null }[] | null;
+}
+
+export interface PlannedExpenseSplit {
+  amounts: Record<PlannedExpenseGroup, number>;
+  counts: Record<PlannedExpenseGroup, number>;
+  total: number;
+}
+
+/**
+ * Which pocket a planned expense will come out of.
+ *
+ * A cycle clones routine positions from every account (migration 029), but the
+ * three groups do not cost the same thing. The primary account is what the
+ * cycle is reconciled against. Another cash account is still this cycle's
+ * money. A card is not: the swipe takes no cash now, and the card's bill takes
+ * it later as a DEBT_PAYMENT — so a plan that counts both books the same
+ * rupiah twice.
+ *
+ * A row with no account, or one whose account was not joined, counts as cash.
+ * `isZeroBasedCashAccount` is the same rule read from the other side, and
+ * guessing "card" from missing data would shrink a figure the family relies on.
+ */
+export function plannedExpenseGroup(row: PlannedExpenseRow, primaryAccountId: string | null): PlannedExpenseGroup {
+  if (primaryAccountId && row.account_id === primaryAccountId) return 'primary';
+  const joined = Array.isArray(row.accounts) ? row.accounts[0] : row.accounts;
+  const type = joined?.type;
+  if (type && !isZeroBasedCashAccount({ type })) return 'card';
+  return 'otherCash';
+}
+
+/** Sums planned expenses into the three pockets. `total` always equals the sum. */
+export function splitPlannedExpense<T extends PlannedExpenseRow>(
+  rows: T[],
+  primaryAccountId: string | null,
+  amountOf: (row: T) => number,
+): PlannedExpenseSplit {
+  const amounts: Record<PlannedExpenseGroup, number> = { primary: 0, otherCash: 0, card: 0 };
+  const counts: Record<PlannedExpenseGroup, number> = { primary: 0, otherCash: 0, card: 0 };
+  let total = 0;
+  for (const row of rows) {
+    const key = plannedExpenseGroup(row, primaryAccountId);
+    const amount = amountOf(row);
+    amounts[key] += amount;
+    counts[key] += 1;
+    total += amount;
+  }
+  return { amounts, counts, total };
+}
