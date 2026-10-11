@@ -108,7 +108,9 @@ function Gate() {
         <Stack.Screen name="loan-detail" options={{ presentation: 'card' }} />
         <Stack.Screen name="funding-gap" options={{ presentation: 'card' }} />
         <Stack.Screen name="reconciliation" options={{ presentation: 'card' }} />
-        <Stack.Screen name="transfer" options={{ presentation: 'card' }} />
+        {/* Three decisions, so it rises as a sheet over whatever called it —
+            the FAB menu or Quick Add — instead of pushing a page. */}
+        <Stack.Screen name="transfer" options={{ presentation: 'modal' }} />
         <Stack.Screen name="asset-insight" options={{ presentation: 'card' }} />
         <Stack.Screen name="assets" options={{ presentation: 'card' }} />
         <Stack.Screen name="account-summary" options={{ presentation: 'card' }} />

@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
@@ -19,8 +29,10 @@ import {
   useZeroBasedSummary,
 } from '../lib/queries';
 import type { AllocationType, CycleAllocation } from '../lib/queries';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import X from 'lucide-react-native/icons/x';
 import { categoryIconName } from '../lib/category-icon';
-import { PrimaryButton, SecondaryButton } from '../components/ui/Button';
+import { PrimaryButton, TextButton } from '../components/ui/Button';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { QueryError } from '../components/ui/QueryError';
 
@@ -71,7 +83,11 @@ export default function AllocationScreen() {
   const createAlloc = useCreateAllocation();
   const deleteAlloc = useDeleteAllocation();
 
+  // The form is a sheet over the list rather than a block appended to it: the
+  // allocations already made are the context for deciding the next one, and
+  // inline the list was pushed off screen by seven rows of chips.
   const [showForm, setShowForm] = useState(false);
+  const [picker, setPicker] = useState<'none' | 'type' | 'category' | 'obligation' | 'account'>('none');
   const [type, setType] = useState<AllocationType>('EXPENSE');
   const [amountText, setAmountText] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -101,6 +117,10 @@ export default function AllocationScreen() {
   const displayedAllocations = eligibleAllocations;
   const hasExcludedAllocations = legacyAllocations.length > 0;
   const amount = parseAmount(amountText);
+  const selectedCategory = categories.find((c) => c.id === categoryId) ?? null;
+  const selectedObligation = obligations.find((ob) => ob.id === obligationId) ?? null;
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const afterAllocation = (summary?.unallocatedFunds ?? 0) - amount;
 
   // Rebuild allocations grouped by the same eligible-account rule as summary.
   const grouped = useMemo(() => {
@@ -122,6 +142,18 @@ export default function AllocationScreen() {
     () => overspendTotal(displayedAllocations, txnById),
     [displayedAllocations, txnById]
   );
+
+  function openForm() {
+    setErr(null);
+    setPicker('none');
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setPicker('none');
+    setErr(null);
+  }
 
   async function submit() {
     setErr(null);
@@ -145,7 +177,8 @@ export default function AllocationScreen() {
         obligationId: type === 'DEBT_PAYMENT' ? obligationId : null,
         accountId: selectedAccountId,
       });
-      setAmountText(''); setShowForm(false);
+      setAmountText('');
+      closeForm();
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan alokasi.');
     }
@@ -226,109 +259,7 @@ export default function AllocationScreen() {
           </View>
         )}
 
-        {showForm ? (
-          <View style={styles.form}>
-            <Text style={styles.formLabel}>JENIS ALOKASI</Text>
-            <View style={styles.chips}>
-              {ALLOCATION_ORDER.map((t) => {
-                const active = t === type;
-                return (
-                  <Pressable key={t} onPress={() => setType(t)} style={[styles.chip, active && styles.chipActive]}>
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                      {ALLOCATION_LABELS[t]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.formLabel}>NOMINAL</Text>
-            <TextInput
-              value={amountText}
-              onChangeText={setAmountText}
-              placeholder="mis. 1500000"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
-            <Text style={styles.formHint}>{formatRupiah(amount)}</Text>
-
-            {type === 'DEBT_PAYMENT' && (
-              <>
-                <Text style={styles.formLabel}>TANGGUNGAN</Text>
-                <View style={styles.chips}>
-                  {obligations.map((o) => {
-                    const active = o.id === obligationId;
-                    return (
-                      <Pressable
-                        key={o.id}
-                        onPress={() => setObligationId(o.id)}
-                        style={[styles.chip, active && styles.chipOutline]}
-                      >
-                        <Text style={styles.chipText}>
-                          {o.title} · {formatRupiah(o.remaining_amount)}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  {obligations.length === 0 && (
-                    <Text style={styles.muted}>Belum ada tanggungan. Catat lewat menu Pinjaman.</Text>
-                  )}
-                </View>
-              </>
-            )}
-
-            <Text style={styles.formLabel}>KATEGORI (OPSIONAL)</Text>
-            <View style={styles.chips}>
-              {categories.map((c) => {
-                const active = c.id === categoryId;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => setCategoryId(active ? null : c.id)}
-                    style={[styles.chip, active && styles.chipOutline]}
-                  >
-                    <BrandIcon
-                      name={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
-                      size={15}
-                      label=""
-                    />
-                    <Text style={styles.chipText}>{c.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.formLabel}>AKUN</Text>
-            <View style={styles.chips}>
-              {accounts.map((a) => {
-                const active = a.id === selectedAccountId;
-                return (
-                  <Pressable
-                    key={a.id}
-                    onPress={() => setAccountId(a.id)}
-                    style={[styles.chip, active && styles.chipOutline]}
-                  >
-                    <Text style={styles.chipText}>{a.name}</Text>
-                  </Pressable>
-                );
-              })}
-              {accounts.length === 0 && (
-                <Text style={styles.muted}>
-                  {accsQ.isLoading ? 'Memuat akun…' : 'Tambahkan rekening bank atau e-wallet terlebih dahulu.'}
-                </Text>
-              )}
-            </View>
-
-            <PrimaryButton
-              label={createAlloc.isPending ? 'Menyimpan…' : 'Simpan Alokasi'}
-              onPress={submit}
-            />
-            <SecondaryButton label="Batal" onPress={() => { setShowForm(false); setErr(null); }} />
-          </View>
-        ) : (
-          <PrimaryButton label="+ Alokasikan Dana" onPress={() => setShowForm(true)} />
-        )}
+        <PrimaryButton label="+ Alokasikan Dana" onPress={openForm} />
 
         {allocsQ.isError && householdId && (
           <QueryError
@@ -401,6 +332,188 @@ export default function AllocationScreen() {
           </View>
         ))}
       </ScrollView>
+
+      {/* ---- Allocation sheet ---- */}
+      <Modal visible={showForm} transparent animationType="slide" onRequestClose={closeForm}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.scrim}
+        >
+          <View style={styles.sheet}>
+            <View style={styles.grab} />
+            <ScrollView
+              contentContainerStyle={{ gap: 10, paddingBottom: 18 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.sheetHead}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetTitle}>Alokasi baru</Text>
+                  <Text style={styles.sheetSub}>
+                    {summary
+                      ? `Belum dialokasikan ${formatRupiah(summary.unallocatedFunds)}`
+                      : 'Belum ada siklus aktif'}
+                  </Text>
+                </View>
+                <Pressable onPress={closeForm} hitSlop={10}>
+                  <X size={20} color={Colors.textPrimary} />
+                </Pressable>
+              </View>
+
+              <PickRow
+                label="Jenis"
+                value={ALLOCATION_LABELS[type]}
+                onPress={() => setPicker('type')}
+              />
+
+              {/* Zero-based means this has to reach Rp 0. Showing where the
+                  remainder lands while the amount is still being typed is the
+                  whole point of the screen; it used to be visible only after
+                  the allocation was saved. */}
+              <View style={styles.moneyBox}>
+                <Text style={styles.formLabel}>NOMINAL</Text>
+                <TextInput
+                  value={amountText}
+                  onChangeText={setAmountText}
+                  placeholder="0"
+                  placeholderTextColor={Colors.borderStrong}
+                  keyboardType="number-pad"
+                  style={styles.moneyInput}
+                />
+                <Text style={styles.moneyEcho}>{formatRupiah(amount)}</Text>
+                {summary && amount > 0 && (
+                  <Text style={[styles.moneyAfter, afterAllocation < 0 && styles.moneyAfterBad]}>
+                    {afterAllocation < 0
+                      ? `Melebihi dana tersedia ${formatRupiah(-afterAllocation)}.`
+                      : `Sisa belum dialokasikan jadi ${formatRupiah(afterAllocation)}.`}
+                  </Text>
+                )}
+              </View>
+
+              {type === 'DEBT_PAYMENT' && (
+                <PickRow
+                  label="Tanggungan"
+                  value={selectedObligation?.title ?? 'Belum dipilih'}
+                  muted={!selectedObligation}
+                  onPress={() => setPicker('obligation')}
+                />
+              )}
+
+              <PickRow
+                label="Kategori"
+                value={selectedCategory?.name ?? 'Opsional'}
+                muted={!selectedCategory}
+                onPress={() => setPicker('category')}
+              />
+              <PickRow
+                label="Akun"
+                value={selectedAccount?.name ?? 'Belum dipilih'}
+                muted={!selectedAccount}
+                onPress={() => setPicker('account')}
+              />
+
+              {accounts.length === 0 && (
+                <Text style={styles.muted}>
+                  {accsQ.isLoading
+                    ? 'Memuat akun…'
+                    : 'Tambahkan rekening bank atau e-wallet terlebih dahulu.'}
+                </Text>
+              )}
+
+              {err && (
+                <View style={styles.errBox}>
+                  <Text style={styles.errText}>{err}</Text>
+                </View>
+              )}
+
+              <PrimaryButton
+                label={createAlloc.isPending ? 'Menyimpan…' : 'Simpan Alokasi'}
+                onPress={submit}
+              />
+              <TextButton label="Batal" onPress={closeForm} />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ---- Option pickers ---- */}
+      <Modal
+        visible={picker !== 'none'}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPicker('none')}
+      >
+        <Pressable style={styles.scrim} onPress={() => setPicker('none')}>
+          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.grab} />
+            <Text style={styles.sheetTitle}>
+              {picker === 'type'
+                ? 'Jenis alokasi'
+                : picker === 'category'
+                  ? 'Pilih kategori'
+                  : picker === 'obligation'
+                    ? 'Pilih tanggungan'
+                    : 'Pilih akun'}
+            </Text>
+            <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ paddingVertical: 6 }}>
+              {picker === 'type' &&
+                ALLOCATION_ORDER.map((t) => (
+                  <OptionRow
+                    key={t}
+                    label={ALLOCATION_LABELS[t]}
+                    selected={t === type}
+                    onPress={() => { setType(t); setPicker('none'); }}
+                  />
+                ))}
+              {picker === 'category' && (
+                <>
+                  <OptionRow
+                    label="Tanpa kategori"
+                    selected={categoryId === null}
+                    onPress={() => { setCategoryId(null); setPicker('none'); }}
+                  />
+                  {categories.map((c) => (
+                    <OptionRow
+                      key={c.id}
+                      label={c.name}
+                      icon={categoryIconName({ name: c.name, type: c.type, icon: c.icon })}
+                      selected={c.id === categoryId}
+                      onPress={() => { setCategoryId(c.id); setPicker('none'); }}
+                    />
+                  ))}
+                </>
+              )}
+              {picker === 'obligation' && (
+                <>
+                  {obligations.map((ob) => (
+                    <OptionRow
+                      key={ob.id}
+                      label={ob.title}
+                      sub={`Sisa ${formatRupiah(ob.remaining_amount)}`}
+                      selected={ob.id === obligationId}
+                      onPress={() => { setObligationId(ob.id); setPicker('none'); }}
+                    />
+                  ))}
+                  {obligations.length === 0 && (
+                    <Text style={styles.muted}>
+                      Belum ada tanggungan. Catat lewat menu Pinjaman.
+                    </Text>
+                  )}
+                </>
+              )}
+              {picker === 'account' &&
+                accounts.map((a) => (
+                  <OptionRow
+                    key={a.id}
+                    label={a.name}
+                    sub={a.type}
+                    selected={a.id === selectedAccountId}
+                    onPress={() => { setAccountId(a.id); setPicker('none'); }}
+                  />
+                ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -431,6 +544,55 @@ function SummaryRow({
   );
 }
 
+function PickRow({
+  label,
+  value,
+  muted,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.pickRow}>
+      <Text style={styles.pickLabel}>{label}</Text>
+      <View style={styles.pickValueWrap}>
+        <Text style={[styles.pickValue, muted && styles.pickValueMuted]} numberOfLines={1}>
+          {value}
+        </Text>
+        <ChevronRight size={14} color={Colors.textMuted} />
+      </View>
+    </Pressable>
+  );
+}
+
+function OptionRow({
+  label,
+  sub,
+  icon,
+  selected,
+  onPress,
+}: {
+  label: string;
+  sub?: string;
+  icon?: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.optionRow, selected && styles.optionRowOn]}>
+      {!!icon && <BrandIcon name={icon} size={18} label="" />}
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.optionText, selected && styles.optionTextOn]}>{label}</Text>
+        {!!sub && <Text style={styles.optionSub}>{sub}</Text>}
+      </View>
+      {selected && <Text style={styles.optionCheck}>✓</Text>}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.canvas },
   container: { padding: 16, gap: 12, paddingBottom: 32 },
@@ -450,6 +612,55 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderSubtle, padding: 14, gap: 8,
   },
   formLabel: { color: Colors.textMuted, fontSize: FontSize.caption, fontWeight: '700', letterSpacing: 1 },
+
+  scrim: { flex: 1, backgroundColor: Colors.overlayScrim, justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 18, paddingBottom: 28, maxHeight: '88%',
+  },
+  pickerSheet: {
+    backgroundColor: Colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 18, paddingBottom: 28, gap: 6,
+  },
+  grab: {
+    width: 44, height: 4, borderRadius: Radius.pill, backgroundColor: Colors.borderStrong,
+    alignSelf: 'center', marginBottom: 12,
+  },
+  sheetHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  sheetTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
+  sheetSub: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 3 },
+
+  moneyBox: {
+    borderWidth: 1.5, borderColor: Colors.brandPrimary, borderRadius: Radius.md,
+    padding: 12, gap: 2, backgroundColor: Colors.surface, marginTop: 2,
+  },
+  moneyInput: {
+    fontSize: 26, fontWeight: '800', color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'], padding: 0, marginTop: 2,
+  },
+  moneyEcho: { color: Colors.textSecondary, fontSize: FontSize.body, fontWeight: '600' },
+  moneyAfter: { color: Colors.financingText, fontSize: FontSize.caption, marginTop: 2 },
+  moneyAfterBad: { color: Colors.pendingText },
+
+  pickRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
+    paddingHorizontal: 13, paddingVertical: 13, backgroundColor: Colors.surface,
+  },
+  pickLabel: { color: Colors.textSecondary, fontSize: 12.5 },
+  pickValueWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 1 },
+  pickValue: { color: Colors.textPrimary, fontSize: 13.5, fontWeight: '700', flexShrink: 1 },
+  pickValueMuted: { color: Colors.textMuted, fontWeight: '500' },
+
+  optionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 13, paddingHorizontal: 12, borderRadius: Radius.md,
+  },
+  optionRowOn: { backgroundColor: Colors.subtle },
+  optionText: { color: Colors.textPrimary, fontSize: 14 },
+  optionTextOn: { fontWeight: '700' },
+  optionSub: { color: Colors.textMuted, fontSize: FontSize.caption, marginTop: 1 },
+  optionCheck: { color: Colors.accentStrong, fontSize: 15, fontWeight: '800' },
   formHint: { color: Colors.textSecondary, fontSize: FontSize.body, fontVariant: ['tabular-nums'] },
   input: {
     borderWidth: 1, borderColor: Colors.borderSubtle, borderRadius: Radius.md,
