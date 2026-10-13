@@ -545,6 +545,8 @@ export function useUpdateTransaction() {
       categoryId: string | null;
       accountId: string | null;
       status: 'PENDING' | 'PAID';
+      /** undefined leaves the tag alone; null moves the row back to the cycle. */
+      specialBudgetId?: string | null;
     }): Promise<Txn> => {
       if (args.name.trim().length < 3) throw new Error('Nama transaksi minimal 3 huruf.');
       if (!(args.amount > 0)) throw new Error('Nominal harus lebih dari Rp 0.');
@@ -568,6 +570,7 @@ export function useUpdateTransaction() {
         // Editing a plan must not make it look executed or move cash.
         patch.release_date = null;
       }
+      if (args.specialBudgetId !== undefined) patch.special_budget_id = args.specialBudgetId;
       const { data, error } = await sb.from('transactions').update(patch)
         .eq('id', args.id).select('*').single();
       if (error) throw error;
@@ -648,8 +651,13 @@ export function useQuickAdd() {
       direction: 'INCOME' | 'EXPENSE'; categoryId: string | null; accountId: string | null;
       makeRecurring: boolean; releaseDate?: string | null;
       status?: 'PENDING' | 'PAID';
+      /** Anggaran Khusus to record into; executed one-off rows only (migration 032). */
+      specialBudgetId?: string | null;
     }) => {
       const status = args.status ?? 'PAID';
+      if (args.specialBudgetId && (status !== 'PAID' || args.makeRecurring)) {
+        throw new Error('Anggaran khusus hanya untuk transaksi yang sudah terjadi dan tidak rutin.');
+      }
       if (status === 'PENDING' && args.makeRecurring) {
         throw new Error('Rencana transaksi tidak dapat dibuat rutin sebelum dieksekusi.');
       }
@@ -674,6 +682,7 @@ export function useQuickAdd() {
         status,
         release_date: status === 'PAID' ? (args.releaseDate ?? todayISO()) : null,
         category_id: args.categoryId, account_id: args.accountId,
+        special_budget_id: args.specialBudgetId ?? null,
         created_by: user?.id ?? null,
         executed_by: status === 'PAID' ? (user?.id ?? null) : null,
       }).select('*').single();

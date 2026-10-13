@@ -85,6 +85,8 @@ export default function CycleHistoryScreen() {
     for (const t of yearInsightQ.data?.txns ?? []) {
       if (!t.cycle_id) continue;
       if (t.status === 'CANCELLED') continue;
+      // Anggaran Khusus rows belong to their budget, not the cycle's figures.
+      if (t.special_budget_id) continue;
       if (!map[t.cycle_id]) {
         map[t.cycle_id] = { income: 0, expense: 0, pendingExpense: 0 };
       }

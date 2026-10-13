@@ -4,7 +4,9 @@ import {
   cyclePortion,
   daysPastEnd,
   isTaggableTxn,
+  localISODate,
   quickAddBudgets,
+  specialBudgetAttention,
   specialBudgetFigures,
   specialBudgetStatus,
   validateSpecialBudgetInput,
@@ -190,5 +192,34 @@ describe('isTaggableTxn', () => {
     expect(isTaggableTxn({ ...ok, recurring_template_id: 't1' })).toBe(false);
     expect(isTaggableTxn({ ...ok, flow_type: 'DEBT_PAYMENT', obligation_id: 'o1' })).toBe(false);
     expect(isTaggableTxn({ ...ok, flow_type: 'TRANSFER' })).toBe(false);
+  });
+});
+
+describe('localISODate', () => {
+  it('keeps the local calendar day instead of shifting to UTC', () => {
+    expect(localISODate(new Date(2026, 2, 10, 0, 5))).toBe('2026-03-10');
+    expect(localISODate(new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31');
+  });
+});
+
+describe('specialBudgetAttention', () => {
+  it('lists deficits first, then ended budgets still open, and skips closed or healthy ones', () => {
+    const list = [
+      budget({ id: 'leb', end_date: '2026-03-31' }),
+      budget({ id: 'reno', name: 'Renovasi', start_date: '2026-02-01', end_date: '2026-04-30' }),
+      budget({ id: 'ok', start_date: '2026-04-01', end_date: '2026-04-30' }),
+      budget({ id: 'done', end_date: '2026-03-01', closed_at: '2026-03-05T00:00:00Z' }),
+    ];
+    const figures = {
+      leb: { remaining: 10_770_187 } as never,
+      reno: { remaining: -250_000 } as never,
+      ok: { remaining: 100 } as never,
+      done: { remaining: -5 } as never,
+    };
+    const rows = specialBudgetAttention(list, figures, '2026-04-03');
+    expect(rows.map((r) => [r.budget.id, r.kind, r.daysPast])).toEqual([
+      ['reno', 'DEFICIT', 0],
+      ['leb', 'ENDED', 3],
+    ]);
   });
 });

@@ -52,6 +52,8 @@ export default function BudgetHealthScreen() {
     const byCat = new Map<string, number>();
     for (const t of txns) {
       if (t.direction !== 'EXPENSE' || t.status !== 'PAID' || !t.category_id) continue;
+      // Anggaran Khusus spending is judged against its own budget, not the pagu.
+      if (t.special_budget_id) continue;
       byCat.set(t.category_id, (byCat.get(t.category_id) ?? 0) + t.actual_amount);
     }
     return cats.map((c) => {

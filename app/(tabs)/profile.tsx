@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Bell from 'lucide-react-native/icons/bell';
 import Calendar from 'lucide-react-native/icons/calendar';
+import CalendarRange from 'lucide-react-native/icons/calendar-range';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import CreditCard from 'lucide-react-native/icons/credit-card';
 import FileText from 'lucide-react-native/icons/file-text';
@@ -144,8 +145,13 @@ export default function ProfileScreen() {
           <MenuRow
             icon={TrendingUp}
             title="Aset"
-            isLast
             onPress={() => router.push('/assets')}
+          />
+          <MenuRow
+            icon={CalendarRange}
+            title="Anggaran Khusus"
+            isLast
+            onPress={() => router.push('/special-budgets')}
           />
         </View>
 

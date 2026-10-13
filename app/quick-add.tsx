@@ -17,7 +17,7 @@ import Info from 'lucide-react-native/icons/info';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../constants/theme';
 import { formatRupiah, formatRupiahShort } from '../lib/format';
-import { defaultAccountId } from '../lib/account';
+import { defaultAccountId, isZeroBasedCashAccount } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
   useAccounts,
@@ -25,7 +25,10 @@ import {
   useCategories,
   useCreateFinancingLoan,
   useQuickAdd,
+  useSpecialBudgets,
 } from '../lib/queries';
+import { quickAddBudgets } from '../lib/special-budget';
+import { BudgetPicker } from '../components/special-budget/BudgetPicker';
 import {
   longDateFullLabel,
   REPAYMENT_MODES,
@@ -62,7 +65,7 @@ function isKind(value: unknown): value is Kind {
 
 export default function QuickAddScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ kind?: string; scope?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; scope?: string; budgetId?: string }>();
   const initialKind: Kind = isKind(params.kind) ? params.kind : 'out';
   const initialAudit = params.scope === 'audit';
 
@@ -78,6 +81,12 @@ export default function QuickAddScreen() {
   const accsQ = useAccounts(householdId);
   const quickAdd = useQuickAdd();
   const createLoan = useCreateFinancingLoan();
+  const budgetsQ = useSpecialBudgets(householdId);
+  // Preselected only when opened from an Anggaran Khusus ("Catat" on its
+  // detail screen). Everywhere else the cycle is the default.
+  const [budgetId, setBudgetId] = useState<string | null>(
+    typeof params.budgetId === 'string' && params.budgetId ? params.budgetId : null
+  );
 
   const [name, setName] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -120,6 +129,15 @@ export default function QuickAddScreen() {
   const selectedAccountId = accountId ?? defaultAccountId(accounts);
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const formattedReleaseDate = longDateFullLabel(releaseDate);
+
+  // Only budgets running on the transaction's date, and only for an ordinary
+  // executed row inside the cycle flow (no loans, no audit entries).
+  const runningBudgets = useMemo(
+    () => (isValidISODate(releaseDate) ? quickAddBudgets(budgetsQ.data ?? [], releaseDate) : []),
+    [budgetsQ.data, releaseDate]
+  );
+  const budgetPickerVisible = !isLoan && !auditMode && runningBudgets.length > 0;
+  const selectedBudget = budgetPickerVisible ? runningBudgets.find((b) => b.id === budgetId) ?? null : null;
 
   const tenor = parseAmount(tenorText);
   const monthlyRateBps = Math.round((Number(monthlyRateText.replace(',', '.')) || 0) * 100);
@@ -203,6 +221,11 @@ export default function QuickAddScreen() {
       return;
     }
 
+    if (selectedBudget && !(selectedAccount && isZeroBasedCashAccount(selectedAccount))) {
+      setErr('Anggaran khusus hanya untuk transaksi dari rekening bank atau e-wallet.');
+      return;
+    }
+
     try {
       await quickAdd.mutateAsync({
         householdId,
@@ -212,9 +235,10 @@ export default function QuickAddScreen() {
         direction: kind === 'out' ? 'EXPENSE' : 'INCOME',
         categoryId: selectedCategoryId,
         accountId: selectedAccountId,
-        makeRecurring: auditMode ? false : recurring,
-        releaseDate: saveAsPending ? null : releaseDate,
-        status: saveAsPending ? 'PENDING' : 'PAID',
+        makeRecurring: auditMode || selectedBudget ? false : recurring,
+        releaseDate: saveAsPending && !selectedBudget ? null : releaseDate,
+        status: saveAsPending && !selectedBudget ? 'PENDING' : 'PAID',
+        specialBudgetId: selectedBudget?.id ?? null,
       });
       router.back();
     } catch (e: any) {
@@ -507,6 +531,22 @@ export default function QuickAddScreen() {
                 </Pressable>
               </View>
 
+              {budgetPickerVisible && (
+                <BudgetPicker
+                  budgets={runningBudgets}
+                  value={selectedBudget?.id ?? null}
+                  onChange={setBudgetId}
+                  cycleLabel={cycleQ.data?.name ?? 'Siklus'}
+                  hint={
+                    selectedBudget
+                      ? `Dihitung di ${selectedBudget.name}, tidak mengurangi angka siklus. Saldo rekening tetap berkurang.`
+                      : null
+                  }
+                />
+              )}
+
+              {!selectedBudget && (
+              <>
               {/* Field: Status Pelunasan */}
               <View style={styles.switchCard}>
                 <View style={{ flex: 1 }}>
@@ -538,6 +578,8 @@ export default function QuickAddScreen() {
                   trackColor={{ true: Colors.paidText, false: Colors.borderStrong }}
                 />
               </View>
+              </>
+              )}
 
               {/* Field: Catatan (opsional) */}
               <View style={styles.fieldBlock}>
@@ -578,6 +620,8 @@ export default function QuickAddScreen() {
             <Text style={styles.primaryButtonText}>
               {isSubmitting
                 ? 'Menyimpan…'
+                : selectedBudget
+                ? `Simpan ke ${selectedBudget.name}${amount > 0 ? ` · ${formatRupiahShort(amount)}` : ''}`
                 : amount > 0
                 ? `Simpan · ${formatRupiahShort(amount)}`
                 : 'Simpan'}

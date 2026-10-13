@@ -116,6 +116,10 @@ function Gate() {
         <Stack.Screen name="account-summary" options={{ presentation: 'card' }} />
         <Stack.Screen name="account-snapshots" options={{ presentation: 'card' }} />
         <Stack.Screen name="allocation" options={{ presentation: 'card' }} />
+        <Stack.Screen name="special-budgets" options={{ presentation: 'card' }} />
+        <Stack.Screen name="special-budget" options={{ presentation: 'card' }} />
+        <Stack.Screen name="special-budget-new" options={{ presentation: 'card' }} />
+        <Stack.Screen name="special-budget-close" options={{ presentation: 'card' }} />
         <Stack.Screen
           name="payment-confirm"
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}

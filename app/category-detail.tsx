@@ -44,7 +44,10 @@ export default function CategoryDetailScreen() {
   // Only rows that were actually executed count against the pagu; a PENDING row
   // is a plan, and this screen answers "what has this category cost so far?".
   const items = useMemo(
-    () => (ledgerQ.data ?? []).filter((t) => t.category_id === id && t.direction === 'EXPENSE'),
+    // Anggaran Khusus rows are judged against their own budget, not this pagu.
+    () => (ledgerQ.data ?? []).filter(
+      (t) => t.category_id === id && t.direction === 'EXPENSE' && !t.special_budget_id
+    ),
     [ledgerQ.data, id]
   );
   const paidItems = items.filter((t) => t.status === 'PAID');

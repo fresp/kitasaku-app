@@ -877,4 +877,20 @@ describe('buildYearBuckets account scope', () => {
       b.find((x) => x.cycleIds.includes('c1'))!;
     expect(month(withCard).actualExpense).toBe(month(bankOnly).actualExpense);
   });
+
+  it('leaves Anggaran Khusus rows out so a Lebaran month does not read as a habit change', () => {
+    const withBudget = buildYearBuckets({
+      cycles,
+      txns: [
+        base,
+        { ...base, special_budget_id: 'lebaran' },
+        { ...base, direction: 'INCOME' as const, flow_type: 'OPERATING_INCOME' as const, special_budget_id: 'lebaran' },
+      ],
+      allocations: [],
+      year: 2026,
+    });
+    const month = withBudget.find((x) => x.cycleIds.includes('c1'))!;
+    expect(month.actualExpense).toBe(100_000);
+    expect(month.actualIncome).toBe(0);
+  });
 });

@@ -80,6 +80,13 @@ export function countsTowardInsight(row: { accounts?: InsightJoinedAccount }): b
 
 export interface InsightTxn {
   cycle_id: string | null;
+  /**
+   * Set when the row belongs to an Anggaran Khusus (migration 032). Insight
+   * reads the routine cycle only, so these rows are left out entirely: a
+   * Lebaran THR or a renovation bill would otherwise spike one month and read
+   * as a change in the family's habits. The budget has its own screen.
+   */
+  special_budget_id?: string | null;
   accounts?: InsightJoinedAccount;
   direction: 'INCOME' | 'EXPENSE';
   flow_type?: FlowType | null;
@@ -263,6 +270,7 @@ export function buildYearBuckets(args: {
   for (const t of args.txns) {
     if (t.status === 'CANCELLED') continue;
     if (!t.cycle_id) continue;
+    if (t.special_budget_id) continue;
     if (!countsTowardInsight(t)) continue;
     const month = monthByCycle.get(t.cycle_id);
     if (month === undefined) continue;

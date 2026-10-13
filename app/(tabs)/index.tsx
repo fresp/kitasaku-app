@@ -24,9 +24,18 @@ import {
   useCycleReconciliation,
   useHomeCashAccounts,
   useHomeCashBalance,
+  useSpecialBudgetFigures,
+  useSpecialBudgets,
   useTransactions,
   useZeroBasedSummary,
 } from '../../lib/queries';
+import {
+  cyclePortion,
+  localISODate,
+  specialBudgetAttention,
+  specialBudgetStatus,
+} from '../../lib/special-budget';
+import { SpecialBudgetRow } from '../../components/special-budget/SpecialBudgetRow';
 import { formatShortDate } from '../../lib/zero-based';
 import { cycleRangeLabel, memberInitials } from '../../lib/profile';
 import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
@@ -38,6 +47,8 @@ import type { RowItem } from '../../components/ui/TransactionRow';
 
 type HomeRow = Omit<RowItem, 'status'> & {
   status: Txn['status'];
+  /** Anggaran Khusus the row belongs to, shown instead of the account. */
+  budgetName?: string | null;
   direction?: Txn['direction'];
   categoryIcon?: string | null;
   categoryType?: Txn['direction'];
@@ -93,6 +104,8 @@ export default function HomeScreen() {
   const summaryQ = useZeroBasedSummary(householdId, cycleId, 'planned');
   const reconciliationQ = useCycleReconciliation(householdId, cycleId);
   const homeCashQ = useHomeCashBalance(householdId, cycleQ.data, txnsQ.data ?? [], selectedAccount?.id);
+  const budgetsQ = useSpecialBudgets(householdId);
+  const budgetFiguresQ = useSpecialBudgetFigures(householdId);
 
   const failed = txnsQ.isError || cycleQ.isError || summaryQ.isError || reconciliationQ.isError || homeCashQ.isError || homeAccountsQ.isError;
   const retryAll = () => {
@@ -114,6 +127,8 @@ export default function HomeScreen() {
         reconciliationQ.refetch(),
         homeCashQ.refetch(),
         homeAccountsQ.refetch(),
+        budgetsQ.refetch(),
+        budgetFiguresQ.refetch(),
       ]);
     } finally {
       setRefreshing(false);
@@ -133,9 +148,16 @@ export default function HomeScreen() {
 
   // Six, not three: with Aksi cepat and the stacked banners gone the screen ends
   // halfway down, and the space is better spent on the ledger than on nothing.
+  const budgetNameById = useMemo(
+    () => new Map((budgetsQ.data ?? []).map((b) => [b.id, b.name])),
+    [budgetsQ.data]
+  );
   const homeRows = useMemo<HomeRow[]>(
-    () => txns.filter((txn) => txn.status !== 'CANCELLED').map(toRow).slice(0, 6),
-    [txns]
+    () => txns
+      .filter((txn) => txn.status !== 'CANCELLED')
+      .slice(0, 6)
+      .map((t) => ({ ...toRow(t), budgetName: t.special_budget_id ? budgetNameById.get(t.special_budget_id) ?? null : null })),
+    [txns, budgetNameById]
   );
   // Searched over every transaction, not over the handful Home prints: the rows
   // are ordered by creation, so a plan written when the cycle opened falls
@@ -170,6 +192,31 @@ export default function HomeScreen() {
   const amountLabel = (value: number | null) => (value === null ? '—' : signedRupiah(value));
 
   const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Anggaran Khusus: money they still claim sits in the same accounts, so the
+  // cycle's share of the primary balance is the balance minus what open
+  // budgets have left (deficits are never added back).
+  const localToday = localISODate(new Date());
+  const budgetFigures = budgetFiguresQ.data;
+  const openBudgets = useMemo(
+    () => (budgetsQ.data ?? [])
+      .filter((b) => specialBudgetStatus(b, localToday) !== 'CLOSED')
+      .sort((a, b) => a.end_date.localeCompare(b.end_date)),
+    [budgetsQ.data, localToday]
+  );
+  const budgetAttention = useMemo(
+    () => (budgetFigures ? specialBudgetAttention(openBudgets, budgetFigures, localToday) : []),
+    [openBudgets, budgetFigures, localToday]
+  );
+  const budgetsFailed = budgetsQ.isError || budgetFiguresQ.isError;
+  const split =
+    actualCash !== null && budgetFigures && selectedAccount?.id === cycleQ.data?.primary_account_id
+      ? cyclePortion(actualCash, openBudgets.map((b) => budgetFigures[b.id]?.remaining ?? 0))
+      : null;
+  const showSplit = !!split && split.budgets > 0;
+  const splitPct = split && actualCash && actualCash > 0
+    ? Math.max(0, Math.min(100, Math.round((split.budgets / actualCash) * 100)))
+    : 100;
   const rangeLabel = cycleRangeLabel(cycleQ.data?.start_date, cycleQ.data?.end_date, todayISO);
 
   const openUnpaid = () => router.push({ pathname: '/(tabs)/history', params: { status: 'PENDING' } });
@@ -310,6 +357,27 @@ export default function HomeScreen() {
               </View>
             )}
 
+            {showSplit && split && (
+              <View style={styles.splitBox}>
+                <View
+                  style={styles.splitTrack}
+                  accessibilityRole="image"
+                  accessibilityLabel={`Siklus ${formatRupiah(split.cycle)}, anggaran khusus ${formatRupiah(split.budgets)}`}
+                >
+                  <View style={[styles.splitCycle, { flex: Math.max(0, 100 - splitPct) }]} />
+                  <View style={[styles.splitBudget, { flex: splitPct }]} />
+                </View>
+                <View style={styles.splitLegend}>
+                  <Text style={styles.splitText}>
+                    <Text style={{ color: Colors.accent }}>● </Text>Siklus {signedRupiah(split.cycle)}
+                  </Text>
+                  <Text style={styles.splitText}>
+                    <Text style={{ color: Colors.purple }}>● </Text>Anggaran khusus {formatRupiah(split.budgets)}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* A card purchase moves no money out of this account — say so,
                 otherwise it looks like the spending never registered. */}
             {!movementUnavailable && cardSpend > 0 && (
@@ -352,7 +420,7 @@ export default function HomeScreen() {
 
         {/* Section: Perlu Perhatian — every open item in one list, so two
             yellow blocks no longer stack on top of each other. */}
-        {(needsReconcile || unpaidCount > 0) && (
+        {(needsReconcile || unpaidCount > 0 || budgetAttention.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Perlu perhatian</Text>
@@ -397,7 +465,76 @@ export default function HomeScreen() {
                   <ChevronRight size={18} color={Colors.warning} />
                 </Pressable>
               )}
+              {budgetAttention.map((a, i) => (
+                <Pressable
+                  key={a.budget.id}
+                  onPress={() =>
+                    a.kind === 'ENDED'
+                      ? router.push({ pathname: '/special-budget-close', params: { id: a.budget.id } })
+                      : router.push({ pathname: '/special-budget', params: { id: a.budget.id } })
+                  }
+                  style={[
+                    styles.attentionRow,
+                    (needsReconcile || unpaidCount > 0 || i > 0) && styles.attentionRowTopDivided,
+                  ]}
+                >
+                  <View style={styles.attentionIconBox}>
+                    <Text style={styles.attentionIconText}>{a.kind === 'DEFICIT' ? '−' : '!'}</Text>
+                  </View>
+                  <View style={styles.attentionCopy}>
+                    <Text style={styles.attentionTitle} numberOfLines={1}>
+                      {a.kind === 'DEFICIT'
+                        ? `${a.budget.name} minus ${formatRupiah(-a.remaining)}`
+                        : a.daysPast === 0
+                          ? `${a.budget.name} selesai hari ini`
+                          : `${a.budget.name} selesai ${a.daysPast} hari lalu`}
+                    </Text>
+                    <Text style={styles.attentionSub} numberOfLines={1}>
+                      {a.kind === 'DEFICIT'
+                        ? 'Kekurangannya sudah memakai dana siklus. Tutup untuk mencatatnya.'
+                        : a.remaining > 0
+                          ? `Sisa ${formatRupiah(a.remaining)} belum ditentukan tempatnya.`
+                          : 'Tutup kalau sudah tidak ada transaksi susulan.'}
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.warning} />
+                </Pressable>
+              ))}
             </View>
+          </View>
+        )}
+
+        {/* Section: Anggaran Khusus — only when the family has one open. */}
+        {householdId && (budgetsFailed || openBudgets.length > 0) && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Anggaran khusus</Text>
+              <Pressable onPress={() => router.push('/special-budgets')} hitSlop={8}>
+                <Text style={styles.sectionLink}>Lihat semua</Text>
+              </Pressable>
+            </View>
+            {budgetsFailed ? (
+              <QueryError
+                onRetry={() => {
+                  void budgetsQ.refetch();
+                  void budgetFiguresQ.refetch();
+                }}
+                retrying={budgetsQ.isFetching || budgetFiguresQ.isFetching}
+              />
+            ) : (
+              <View style={styles.budgetCard}>
+                {openBudgets.map((b, i) => (
+                  <SpecialBudgetRow
+                    key={b.id}
+                    budget={b}
+                    figures={budgetFigures?.[b.id]}
+                    todayISO={localToday}
+                    onPress={() => router.push({ pathname: '/special-budget', params: { id: b.id } })}
+                    isLast={i === openBudgets.length - 1}
+                  />
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -548,7 +685,7 @@ function ActivityRow({
           {item.name}
         </Text>
         <Text style={styles.activityMeta} numberOfLines={1}>
-          {item.category} · {item.account}
+          {item.category} · {item.budgetName ?? item.account}
         </Text>
       </View>
       <View style={styles.activityRight}>
@@ -828,6 +965,40 @@ const styles = StyleSheet.create({
   attentionRowDivided: {
     borderBottomWidth: 1,
     borderBottomColor: Colors.warningBorder,
+  },
+  attentionRowTopDivided: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.warningBorder,
+  },
+  budgetCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.surface,
+  },
+  splitBox: {
+    marginTop: 10,
+    gap: 6,
+  },
+  splitTrack: {
+    flexDirection: 'row',
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: Colors.navySoft,
+  },
+  splitCycle: { backgroundColor: Colors.accent },
+  splitBudget: { backgroundColor: Colors.purple },
+  splitLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  splitText: {
+    color: Colors.textOnDarkSecondary,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
   },
   flowRow: {
     flexDirection: 'row',

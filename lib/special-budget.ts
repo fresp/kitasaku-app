@@ -190,3 +190,53 @@ export function isTaggableTxn(row: {
     && !row.recurring_template_id
     && !row.obligation_id;
 }
+
+/**
+ * A Date as the local calendar day. `toISOString()` shifts to UTC, which in
+ * Jakarta turns a midnight date picked on the 10th into the 9th.
+ */
+export function localISODate(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+export type SpecialBudgetTone = 'default' | 'paid' | 'alert' | 'pending';
+
+export function specialBudgetStatusLabel(status: SpecialBudgetStatus): { label: string; tone: SpecialBudgetTone } {
+  switch (status) {
+    case 'UPCOMING': return { label: 'Akan datang', tone: 'default' };
+    case 'RUNNING': return { label: 'Berjalan', tone: 'paid' };
+    case 'ENDED_OPEN': return { label: 'Selesai · belum ditutup', tone: 'alert' };
+    default: return { label: 'Ditutup', tone: 'default' };
+  }
+}
+
+export interface SpecialBudgetAttention {
+  budget: SpecialBudget;
+  kind: 'ENDED' | 'DEFICIT';
+  daysPast: number;
+  remaining: number;
+}
+
+/**
+ * What Home's "Perlu perhatian" shows for special budgets. An ended budget
+ * still open needs a close decision; an open budget in deficit is already
+ * spending cycle money and must stay visible until it is closed. One row per
+ * budget, deficit first because it is the one that misstates the cycle.
+ */
+export function specialBudgetAttention(
+  budgets: SpecialBudget[],
+  figures: Record<string, SpecialBudgetFigures | undefined>,
+  todayISO: string,
+): SpecialBudgetAttention[] {
+  const out: SpecialBudgetAttention[] = [];
+  for (const b of budgets) {
+    const status = specialBudgetStatus(b, todayISO);
+    if (status === 'CLOSED') continue;
+    const remaining = figures[b.id]?.remaining ?? 0;
+    if (remaining < 0) out.push({ budget: b, kind: 'DEFICIT', daysPast: daysPastEnd(b, todayISO), remaining });
+    else if (status === 'ENDED_OPEN') out.push({ budget: b, kind: 'ENDED', daysPast: daysPastEnd(b, todayISO), remaining });
+  }
+  return out.sort((a, b) => (a.kind === b.kind ? b.daysPast - a.daysPast : a.kind === 'DEFICIT' ? -1 : 1));
+}

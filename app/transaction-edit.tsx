@@ -14,6 +14,7 @@ import Calendar from 'lucide-react-native/icons/calendar';
 import CreditCard from 'lucide-react-native/icons/credit-card';
 import FileText from 'lucide-react-native/icons/file-text';
 import Folder from 'lucide-react-native/icons/folder';
+import CalendarRange from 'lucide-react-native/icons/calendar-range';
 import Pencil from 'lucide-react-native/icons/pencil';
 import Trash2 from 'lucide-react-native/icons/trash';
 import Wallet from 'lucide-react-native/icons/wallet';
@@ -26,9 +27,12 @@ import {
   useActiveCycle,
   useCancelPendingTransaction,
   useCategories,
+  useSpecialBudgets,
   useTransactionLedger,
   useUpdateTransaction,
 } from '../lib/queries';
+import { isTaggableTxn, localISODate, specialBudgetStatus } from '../lib/special-budget';
+import { BudgetPicker } from '../components/special-budget/BudgetPicker';
 import { useAuth } from '../lib/auth-context';
 import { categoryIconName } from '../lib/category-icon';
 import { BrandIcon } from '../components/ui/BrandIcon';
@@ -55,6 +59,7 @@ export default function TransactionEditScreen() {
   const accsQ = useAccounts(householdId);
   const update = useUpdateTransaction();
   const cancelTxn = useCancelPendingTransaction();
+  const budgetsQ = useSpecialBudgets(householdId);
 
   const txn = useMemo(
     () => (ledgerQ.data ?? []).find((row) => row.id === id),
@@ -68,6 +73,8 @@ export default function TransactionEditScreen() {
   const [categoryId, setCategoryId] = useState<string | null | undefined>(undefined);
   const [accountId, setAccountId] = useState<string | null | undefined>(undefined);
   const [dateEditing, setDateEditing] = useState(false);
+  // undefined = untouched, null = back to the cycle, id = into that budget.
+  const [budgetChoice, setBudgetChoice] = useState<string | null | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
 
   const currentName = name ?? txn?.name ?? '';
@@ -84,6 +91,19 @@ export default function TransactionEditScreen() {
     (c) => c.type === (txn?.direction === 'INCOME' ? 'INCOME' : 'EXPENSE')
   );
   const accounts = accsQ.data ?? [];
+  const budgets = budgetsQ.data ?? [];
+  const today = localISODate(new Date());
+  const txnBudget = budgets.find((b) => b.id === txn?.special_budget_id);
+  const openBudgets = budgets.filter((b) => specialBudgetStatus(b, today) !== 'CLOSED');
+  const currentBudgetId = budgetChoice === undefined ? txn?.special_budget_id ?? null : budgetChoice;
+  // A closed budget froze its rows; anything else follows the database guard.
+  const budgetEditable = !!txn && !txnBudget?.closed_at && openBudgets.length > 0 && (
+    !!txn.special_budget_id ||
+    isTaggableTxn({
+      ...txn,
+      account_type: accounts.find((a) => a.id === currentAccountId)?.type ?? txn.accounts?.type ?? null,
+    })
+  );
   const loading = ledgerQ.isLoading || cycleQ.isLoading;
   const failed = ledgerQ.isError || cycleQ.isError;
 
@@ -108,6 +128,7 @@ export default function TransactionEditScreen() {
         categoryId: currentCategoryId,
         accountId: currentAccountId,
         status: txn.status as 'PENDING' | 'PAID',
+        specialBudgetId: budgetChoice,
       });
       setIsEditing(false);
     } catch (e: any) {
@@ -327,6 +348,15 @@ export default function TransactionEditScreen() {
                 </View>
               </View>
 
+              {budgetEditable && (
+                <BudgetPicker
+                  budgets={openBudgets}
+                  value={currentBudgetId}
+                  onChange={setBudgetChoice}
+                  cycleLabel="Siklus"
+                />
+              )}
+
               {err && (
                 <View style={styles.errBox}>
                   <Text style={styles.errText}>{err}</Text>
@@ -431,6 +461,16 @@ export default function TransactionEditScreen() {
                   </View>
                   <Text style={styles.metaValue}>
                     {txn.accounts?.name ?? 'Tanpa akun'}
+                  </Text>
+                </View>
+
+                <View style={styles.metaRow}>
+                  <View style={styles.metaRowLeft}>
+                    <CalendarRange size={18} color={Colors.textSecondary} />
+                    <Text style={styles.metaLabel}>Masuk ke</Text>
+                  </View>
+                  <Text style={styles.metaValue}>
+                    {txnBudget ? `${txnBudget.name}${txnBudget.closed_at ? ' (ditutup)' : ''}` : 'Siklus'}
                   </Text>
                 </View>
 
