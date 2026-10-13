@@ -1,40 +1,56 @@
 // Push registration and tap routing (Phase 15). Verified against the Expo SDK 57
-// expo-notifications reference. Push needs a development build or EAS APK; in
-// Expo Go on Android remote push is unavailable, so every step here fails soft:
-// the notifications table stays the source of truth whether or not a push lands.
+// expo-notifications and expo-constants references.
+//
+// Expo Go on Android throws as soon as expo-notifications is imported (remote
+// push was removed from Expo Go in SDK 53), which would take the whole tab
+// layout down. The module is therefore loaded lazily and never in Expo Go:
+// there the app runs without push, while development builds and EAS APKs get
+// the full behaviour. The notifications table stays the source of truth either
+// way, so a missing push never loses anything.
 
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { supabase } from './supabase';
 import { routeForNotification } from './notifications';
 
 export const ANDROID_CHANNEL_ID = 'ruang-keluarga';
 
+type NotificationsModule = typeof import('expo-notifications');
+
+const pushSupported =
+  Platform.OS !== 'web' && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
+
+let cached: NotificationsModule | null | undefined;
+
+function notifications(): NotificationsModule | null {
+  if (cached !== undefined) return cached;
+  if (!pushSupported) {
+    cached = null;
+    return cached;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('expo-notifications') as NotificationsModule;
+    // Without a handler, notifications are not shown while the app is open.
+    mod.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+    cached = mod;
+  } catch (e) {
+    console.warn('[push] expo-notifications unavailable:', e instanceof Error ? e.message : e);
+    cached = null;
+  }
+  return cached;
+}
+
 let registeredToken: string | null = null;
-
-if (Platform.OS !== 'web') {
-  // Without a handler, notifications are not shown while the app is open.
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-}
-
-async function ensureAndroidChannel(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Ruang Keluarga',
-    description: 'Pengajuan tanggungan, pembayaran, dan kabar dari anggota ruang.',
-    importance: Notifications.AndroidImportance.HIGH,
-  });
-}
 
 function easProjectId(): string | undefined {
   const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
@@ -43,13 +59,20 @@ function easProjectId(): string | undefined {
 
 /** Asks permission once, then stores this device's Expo push token. */
 export async function registerForPush(): Promise<string | null> {
-  if (Platform.OS === 'web' || !supabase) return null;
+  const N = notifications();
+  if (!N || !supabase) return null;
   try {
-    await ensureAndroidChannel();
-    let perm = await Notifications.getPermissionsAsync();
-    if (!perm.granted) perm = await Notifications.requestPermissionsAsync();
+    if (Platform.OS === 'android') {
+      await N.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
+        name: 'Ruang Keluarga',
+        description: 'Pengajuan tanggungan, pembayaran, dan kabar dari anggota ruang.',
+        importance: N.AndroidImportance.HIGH,
+      });
+    }
+    let perm = await N.getPermissionsAsync();
+    if (!perm.granted) perm = await N.requestPermissionsAsync();
     if (!perm.granted) return null;
-    const token = (await Notifications.getExpoPushTokenAsync({ projectId: easProjectId() })).data;
+    const token = (await N.getExpoPushTokenAsync({ projectId: easProjectId() })).data;
     const { error } = await supabase.rpc('register_push_token', {
       p_token: token,
       p_platform: Platform.OS,
@@ -91,18 +114,26 @@ export function usePushRegistration(userId: string | undefined): void {
  */
 export function useNotificationTapRouting(enabled: boolean): void {
   const router = useRouter();
-  const lastResponse = Notifications.useLastNotificationResponse();
   const handled = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!enabled || Platform.OS === 'web' || !lastResponse) return;
-    if (lastResponse.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
-    const id = lastResponse.notification.request.identifier;
-    if (handled.current === id) return;
-    handled.current = id;
-    const route = routeForNotification(
-      (lastResponse.notification.request.content.data ?? {}) as Record<string, unknown>,
-    );
-    if (route) router.push(route);
-  }, [enabled, lastResponse, router]);
+    const N = notifications();
+    if (!enabled || !N) return;
+
+    const open = (response: import('expo-notifications').NotificationResponse | null) => {
+      if (!response || response.actionIdentifier !== N.DEFAULT_ACTION_IDENTIFIER) return;
+      const id = response.notification.request.identifier;
+      if (handled.current === id) return;
+      handled.current = id;
+      const route = routeForNotification(
+        (response.notification.request.content.data ?? {}) as Record<string, unknown>,
+      );
+      if (route) router.push(route);
+    };
+
+    // Cold start: the tap that launched the app arrived before this mounted.
+    void N.getLastNotificationResponseAsync().then(open).catch(() => {});
+    const sub = N.addNotificationResponseReceivedListener(open);
+    return () => sub.remove();
+  }, [enabled, router]);
 }
