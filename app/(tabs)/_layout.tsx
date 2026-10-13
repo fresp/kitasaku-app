@@ -19,10 +19,14 @@ import X from 'lucide-react-native/icons/x';
 import { Colors, FontSize, Radius } from '../../constants/theme';
 import { useAuth } from '../../lib/auth-context';
 import { useHouseholdRealtime } from '../../lib/realtime';
+import { useNotificationTapRouting, usePushRegistration } from '../../lib/push';
 
 export default function TabsLayout() {
-  const { household } = useAuth();
-  useHouseholdRealtime(household?.id);
+  const { household, session } = useAuth();
+  const userId = session?.user.id;
+  useHouseholdRealtime(household?.id, userId);
+  usePushRegistration(userId);
+  useNotificationTapRouting(!!household);
 
   return (
     <Tabs

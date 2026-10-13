@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { unregisterPush } from './push';
 import { getHousehold, getMyMembership, type Household, type Membership } from './household';
 
 interface AuthState {
@@ -88,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (!supabase) return;
+    await unregisterPush();
     await supabase.auth.signOut();
     setSession(null);
     setMembership(null);

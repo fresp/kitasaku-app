@@ -34,7 +34,15 @@
           "resizeMode": "contain"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0B1527",
+          "defaultChannel": "ruang-keluarga"
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 // One channel per household: any change to a transaction/obligation/template/cycle
 // on the partner's device immediately invalidates the cache on this device → the UI
 // refreshes automatically.
-export function useHouseholdRealtime(householdId: string | undefined) {
+export function useHouseholdRealtime(householdId: string | undefined, userId?: string) {
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -138,10 +138,30 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           qc.invalidateQueries({ queryKey: ['installments'] });
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'obligation_events', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['obl-events'] });
+        }
+      );
+
+    // Notifications are per recipient, not per household: RLS only lets this
+    // user read their own rows, and the filter keeps the partner's traffic out.
+    if (userId) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `recipient_user_id=eq.${userId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['notifications'] });
+        }
+      );
+    }
+
+    channel.subscribe();
 
     return () => {
       supabase?.removeChannel(channel);
     };
-  }, [householdId, qc]);
+  }, [householdId, userId, qc]);
 }

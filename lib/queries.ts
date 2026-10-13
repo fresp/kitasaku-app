@@ -3,6 +3,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import { requireSupabase } from './supabase';
 import { listHouseholdMembers, updateHousehold, updateMyMemberProfile } from './household';
 import { isRepaymentMode } from './obligation';
+import { normalizeShareNote } from './collaboration';
+import type { BulkPreviewRow, ObligationEvent } from './collaboration';
+import type { NotificationRow } from './notifications';
 import { calcCashflow as calculateHomeCashflow, homeCashBalances } from './cashflow';
 import type { CashflowTxn } from './cashflow';
 import type { RepaymentMode } from './obligation';
@@ -152,6 +155,8 @@ export interface Obligation {
   planned_installment_amount?: number | null; installment_count?: number | null;
   current_installment?: number | null; start_date?: string | null; due_date?: string | null;
   interest_fee_amount?: number | null;
+  /** Pengaju (Phase 15). NULL for rows created before migration 033. */
+  created_by?: string | null;
   interest_mode?: InstallmentMode | null;
   interest_rate_bps?: number | null;
   principal_amount?: number | null;
@@ -219,6 +224,8 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['audit-txns'] });
   qc.invalidateQueries({ queryKey: ['reconciliation'] });
   qc.invalidateQueries({ queryKey: ['cycle-sweep'] });
+  // Payments write the tanggungan activity trail (migration 033).
+  qc.invalidateQueries({ queryKey: ['obl-events'] });
 }
 
 export function useActiveCycle(householdId: string | undefined) {
@@ -2810,4 +2817,142 @@ export function useUpdateBeneficiary() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Kolaborasi ruang (Phase 15, migration 033)
+
+/** Aktivitas tab: the append-only trail of one tanggungan, oldest first. */
+export function useObligationEvents(householdId: string | undefined, obligationId: string | undefined) {
+  return useQuery({
+    queryKey: ['obl-events', householdId, obligationId],
+    enabled: !!householdId && !!obligationId,
+    queryFn: async (): Promise<ObligationEvent[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligation_events')
+        .select('*')
+        .eq('household_id', householdId!)
+        .eq('obligation_id', obligationId!)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as ObligationEvent[];
+    },
+  });
+}
+
+/**
+ * Opt-in kabar for transactions that are already saved. Never part of the
+ * money write: a failed share leaves the payment as it is.
+ */
+export function useShareTransactions() {
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; transactionIds: string[]; recipientIds: string[]; note?: string | null;
+    }): Promise<number> => {
+      if (args.recipientIds.length === 0 || args.transactionIds.length === 0) return 0;
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('share_transactions', {
+        p_household_id: args.householdId,
+        p_transaction_ids: args.transactionIds,
+        p_recipient_ids: args.recipientIds,
+        p_note: normalizeShareNote(args.note),
+      });
+      if (error) throw error;
+      return typeof data === 'number' ? data : 0;
+    },
+  });
+}
+
+/** Eksekusi Bersama, step 1: the server says which selected rows can go. */
+export function useBulkExecutePreview(householdId: string | undefined, transactionIds: string[]) {
+  const ids = [...transactionIds].sort();
+  return useQuery({
+    queryKey: ['txns', 'bulk-preview', householdId, ids],
+    enabled: !!householdId && ids.length > 0,
+    staleTime: 0,
+    queryFn: async (): Promise<BulkPreviewRow[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('preview_bulk_execute', {
+        p_household_id: householdId!,
+        p_transaction_ids: ids,
+      });
+      if (error) throw error;
+      return (data ?? []) as BulkPreviewRow[];
+    },
+  });
+}
+
+/**
+ * Eksekusi Bersama, step 2: one all-or-nothing write (re-validated server
+ * side), with the kabar written in the same transaction. Replaces the old
+ * client loop of useMarkAsPaid, which could leave a batch half paid.
+ */
+export function useBulkExecute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; transactionIds: string[]; recipientIds: string[]; note?: string | null;
+    }): Promise<string[]> => {
+      if (args.transactionIds.length === 0) throw new Error('Pilih minimal satu transaksi.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('bulk_execute_transactions', {
+        p_household_id: args.householdId,
+        p_transaction_ids: args.transactionIds,
+        p_recipient_ids: args.recipientIds,
+        p_note: normalizeShareNote(args.note),
+      });
+      if (error) throw error;
+      return ((data ?? []) as unknown[]).map(String);
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['tmpl'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
+    },
+  });
+}
+
+export function useNotification(notificationId: string | undefined) {
+  return useQuery({
+    queryKey: ['notifications', notificationId],
+    enabled: !!notificationId,
+    queryFn: async (): Promise<NotificationRow | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('notifications')
+        .select('*').eq('id', notificationId!).maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as NotificationRow | null;
+    },
+  });
+}
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (notificationId: string) => {
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('mark_notification_read', { p_notification_id: notificationId });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+/** Rows of a kabar, read live so a later edit or cancellation shows truthfully. */
+export function useTransactionsByIds(householdId: string | undefined, ids: string[]) {
+  return useQuery({
+    queryKey: ['txns', 'by-ids', householdId, [...ids].sort()],
+    enabled: !!householdId && ids.length > 0,
+    queryFn: async (): Promise<(Txn & { accounts: { name: string } | null })[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, accounts!transactions_account_id_fkey(name)')
+        .eq('household_id', householdId!)
+        .in('id', ids)
+        .order('release_date', { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as (Txn & { accounts: { name: string } | null })[];
+    },
+  });
+}
 
