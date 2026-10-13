@@ -734,39 +734,20 @@ end $$;
 alter table public.notifications replica identity full;
 alter table public.obligation_events replica identity full;
 
-create or replace function public.realtime_health()
-returns table (tablename text, registered boolean, replica_identity text)
-language sql
-security definer
-set search_path = public, pg_catalog
-as $$
-  with targets(tablename) as (
-    values ('transactions'),('obligations'),('recurring_templates'),('cycles'),
-           ('categories'),('accounts'),('household_members'),('households'),
-           ('notifications'),('obligation_events')
-  )
-  select
-    d.tablename,
-    exists (
-      select 1 from pg_publication_tables pt
-      where pt.pubname = 'supabase_realtime'
-        and pt.schemaname = 'public'
-        and pt.tablename = d.tablename
-    ) as registered,
-    coalesce(c.relreplident::text, '-') as replica_identity
-  from targets d
-  left join pg_class c
-    on c.relname = d.tablename
-   and c.relnamespace = 'public'::regnamespace
-  order by d.tablename;
-$$;
-grant execute on function public.realtime_health() to anon, authenticated;
+-- realtime_health() is deliberately NOT redefined: its return contract is
+-- owned by 003 (see 004 and 014), and remote databases created from the
+-- Indonesian 003 return a `terdaftar` column, so CREATE OR REPLACE with a
+-- different row type fails with 42P13. Verify the two new tables with the
+-- pg_publication_tables query in the verification block instead.
 
 -- Manual verification (SQL Editor, first run):
 --
--- 1. Objects exist and realtime is registered (expect registered = true and
---    replica_identity = 'f' for notifications and obligation_events):
---   select * from public.realtime_health();
+-- 1. Objects exist and realtime is registered (expect 2 rows, relreplident = 'f'):
+--   select pt.tablename, c.relreplident
+--     from pg_publication_tables pt
+--     join pg_class c on c.relname = pt.tablename and c.relnamespace = 'public'::regnamespace
+--    where pt.pubname = 'supabase_realtime' and pt.schemaname = 'public'
+--      and pt.tablename in ('notifications', 'obligation_events');
 --   select column_name from information_schema.columns
 --    where table_name = 'obligations' and column_name = 'created_by';
 --
