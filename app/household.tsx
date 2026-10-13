@@ -321,8 +321,8 @@ export default function HouseholdScreen() {
         <View style={styles.group}>
           <View style={styles.member}>
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.memberName}>Notifikasi Pengeluaran Pasangan</Text>
-              <Text style={styles.memberMeta}>Instan saat pasangan mencatat belanjaan.</Text>
+              <Text style={styles.memberName}>Notifikasi Ruang Keluarga</Text>
+              <Text style={styles.memberMeta}>Pengajuan tanggungan dan kabar dari anggota ruang.</Text>
             </View>
             <Switch
               value={myNotify}

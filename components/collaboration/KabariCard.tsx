@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import Bell from 'lucide-react-native/icons/bell';
 import { Colors, FontSize, Radius } from '../../constants/theme';
@@ -12,20 +12,23 @@ export interface KabariState {
 }
 
 /**
- * Default per Phase 15: on, every other member selected. Seeded once the
- * roster arrives so a late load does not leave the card empty.
+ * Default per Phase 15: on, every other member selected. Until the member
+ * touches the chips, the selection follows the roster, so a roster that loads
+ * late still ends up fully selected.
  */
 export function useKabariState(members: HouseholdMember[], myUserId: string | undefined) {
   const others = useMemo(() => defaultShareRecipients(members, myUserId), [members, myUserId]);
-  const [state, setState] = useState<KabariState>({ enabled: true, recipientIds: [], note: '' });
-  const [seeded, setSeeded] = useState(false);
-  useEffect(() => {
-    if (seeded || others.length === 0) return;
-    setState((s) => ({ ...s, recipientIds: others }));
-    setSeeded(true);
-  }, [others, seeded]);
+  const [enabled, setEnabled] = useState(true);
+  const [chosen, setChosen] = useState<string[] | null>(null);
+  const [note, setNote] = useState('');
+  const state: KabariState = { enabled, recipientIds: chosen ?? others, note };
+  const setState = (next: KabariState) => {
+    setEnabled(next.enabled);
+    setChosen(next.recipientIds);
+    setNote(next.note);
+  };
   /** Who actually gets the kabar right now (empty when switched off). */
-  const activeRecipients = state.enabled ? state.recipientIds : [];
+  const activeRecipients = enabled ? state.recipientIds : [];
   return { state, setState, activeRecipients, hasOthers: others.length > 0 };
 }
 

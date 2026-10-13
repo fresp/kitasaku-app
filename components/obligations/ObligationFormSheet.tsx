@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Bell from 'lucide-react-native/icons/bell';
 import Calendar from 'lucide-react-native/icons/calendar';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
@@ -22,7 +23,9 @@ import {
   formatBankBadge,
   type Beneficiary,
 } from '../../lib/beneficiary';
-import { useCategories, useCreateObligation } from '../../lib/queries';
+import { useCategories, useCreateObligation, useHouseholdMembers } from '../../lib/queries';
+import { useAuth } from '../../lib/auth-context';
+import { defaultShareRecipients, recipientsSentence } from '../../lib/collaboration';
 import { BeneficiaryPickerSheet } from './BeneficiaryPickerSheet';
 
 export type FormObligationType = 'BILL' | 'INSTALLMENT' | 'REIMBURSEMENT' | 'LOAN';
@@ -59,6 +62,15 @@ export function ObligationFormSheet({
   const [totalText, setTotalText] = useState('');
   const [frequency, setFrequency] = useState('Bulanan');
   const [type, setType] = useState<FormObligationType>('BILL');
+  // Jenis decides REIMBURSEMENT; for a Tagihan the type still follows Frekuensi.
+  const [jenis, setJenis] = useState<'TAGIHAN' | 'REIMBURSE'>('TAGIHAN');
+  const { session } = useAuth();
+  const membersQ = useHouseholdMembers(householdId);
+  const notifySentence = useMemo(() => {
+    const members = membersQ.data?.members ?? [];
+    const line = recipientsSentence(members, defaultShareRecipients(members, session?.user.id));
+    return line ? `${line} ada pengajuan baru. Kamu dikabari saat dibayar atau dibatalkan.` : null;
+  }, [membersQ.data, session?.user.id]);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string>('');
   const [notes, setNotes] = useState('');
@@ -89,6 +101,7 @@ export function ObligationFormSheet({
     setTotalText('');
     setFrequency('Bulanan');
     setType('BILL');
+    setJenis('TAGIHAN');
     setCategoryId(null);
     setDueDate('');
     setNotes('');
@@ -138,7 +151,7 @@ export function ObligationFormSheet({
       await createOb.mutateAsync({
         householdId,
         title: title.trim(),
-        type,
+        type: jenis === 'REIMBURSE' ? 'REIMBURSEMENT' : type,
         total: totalAmount,
         dueDate: dueDate.trim() || null,
         categoryId: categoryId || null,
@@ -185,6 +198,29 @@ export function ObligationFormSheet({
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
+              {/* Jenis: the only way to submit a reimburse from the app */}
+              <View style={styles.field}>
+                <Text style={styles.label}>Jenis</Text>
+                <View style={styles.segment}>
+                  {(['TAGIHAN', 'REIMBURSE'] as const).map((j) => {
+                    const on = jenis === j;
+                    return (
+                      <Pressable
+                        key={j}
+                        onPress={() => setJenis(j)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        style={[styles.segmentTab, on && styles.segmentTabOn]}
+                      >
+                        <Text style={[styles.segmentText, on && styles.segmentTextOn]}>
+                          {j === 'TAGIHAN' ? 'Tagihan' : 'Reimburse'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
               {/* Field 1: Nama Tanggungan */}
               <View style={styles.field}>
                 <Text style={styles.label}>Nama Tanggungan</Text>
@@ -229,7 +265,8 @@ export function ObligationFormSheet({
                 />
               </View>
 
-              {/* Field 4: Frekuensi */}
+              {/* Field 4: Frekuensi (a reimburse is paid back once) */}
+              {jenis === 'TAGIHAN' && (
               <View style={styles.field}>
                 <Text style={styles.label}>Frekuensi</Text>
                 <Pressable
@@ -240,6 +277,7 @@ export function ObligationFormSheet({
                   <ChevronDown size={18} color={Colors.textMuted} />
                 </Pressable>
               </View>
+              )}
 
               {/* Field 5: Tanggal jatuh tempo */}
               <View style={styles.field}>
@@ -313,6 +351,13 @@ export function ObligationFormSheet({
                   thumbColor={Colors.white}
                 />
               </View>
+
+              {notifySentence && (
+                <View style={styles.notifyBox}>
+                  <Bell size={16} color={Colors.info} />
+                  <Text style={styles.notifyText}>{notifySentence}</Text>
+                </View>
+              )}
 
               {/* Error display */}
               {err && <Text style={styles.errorText}>{err}</Text>}
@@ -604,6 +649,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0B1527',
   },
+  segment: {
+    flexDirection: 'row',
+    backgroundColor: Colors.subtle,
+    borderRadius: Radius.pill,
+    padding: 3,
+  },
+  segmentTab: { flex: 1, paddingVertical: 9, borderRadius: Radius.pill, alignItems: 'center' },
+  segmentTabOn: { backgroundColor: Colors.navy },
+  segmentText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  segmentTextOn: { color: Colors.white, fontWeight: '700' },
+  notifyBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.infoSoft,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  notifyText: { flex: 1, fontSize: 12, fontWeight: '600', color: Colors.textPrimary, lineHeight: 17 },
   switchSubtitle: {
     fontSize: 12,
     color: '#64748B',

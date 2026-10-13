@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activityTimeline,
   buildTimeline,
   cancellationReasonLabel,
   defaultShareRecipients,
@@ -155,5 +156,26 @@ describe('bulk preview', () => {
   it('treats an unreported or empty selection as not ready', () => {
     expect(summarizeBulkPreview(['a'], []).allOk).toBe(false);
     expect(summarizeBulkPreview([], []).allOk).toBe(false);
+  });
+});
+
+describe('activityTimeline', () => {
+  it('folds in payments that predate the trail, without duplicating covered ones', () => {
+    const events: ObligationEvent[] = [
+      ev({ id: 'e-created', created_at: '2026-10-01T00:00:00Z', amount: 300000, payload: { type: 'BILL' } }),
+      ev({ id: 'e-pay', kind: 'PAYMENT', actor_user_id: F, transaction_id: 't2', amount: 100000,
+           remaining_after: 100000, is_final: false, created_at: '2026-10-05T00:00:00Z', payload: {} }),
+    ];
+    const items = activityTimeline(
+      events,
+      [
+        { id: 't1', actual_amount: 100000, executed_by: R, created_at: '2026-09-20T00:00:00Z', accounts: { name: 'BCA' } },
+        { id: 't2', actual_amount: 100000, executed_by: F, created_at: '2026-10-05T00:00:00Z' },
+      ],
+      members,
+    );
+    expect(items.map((i) => i.id)).toEqual(['payment-t1', 'e-created', 'e-pay']);
+    expect(items[0].title).toBe('Dibayar oleh rani');
+    expect(items[0].subtitle).toBe('Rp 100.000 dari BCA');
   });
 });

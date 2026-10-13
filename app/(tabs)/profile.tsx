@@ -291,8 +291,8 @@ export default function ProfileScreen() {
             <View style={styles.actionRow}>
               <Bell size={18} color={Colors.textPrimary} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.actionRowText}>Notifikasi Pengeluaran</Text>
-                <Text style={styles.actionRowSub}>Saat pasangan mencatat pengeluaran</Text>
+                <Text style={styles.actionRowText}>Notifikasi Ruang Keluarga</Text>
+                <Text style={styles.actionRowSub}>Pengajuan tanggungan dan kabar dari anggota ruang</Text>
               </View>
               <Switch
                 value={notifyOn}
@@ -358,9 +358,9 @@ export default function ProfileScreen() {
               <View style={{ gap: 14 }}>
                 <View style={styles.infoRow}>
                   <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={styles.infoLabel}>Notifikasi Transaksi Pasangan</Text>
+                    <Text style={styles.infoLabel}>Notifikasi Ruang Keluarga</Text>
                     <Text style={styles.infoSub}>
-                      Kirim pemberitahuan saat ada pengeluaran baru di ruang keluarga
+                      Pengajuan dan perubahan tanggungan, serta kabar pembayaran dari anggota. Kalau dimatikan, tetap tercatat di aplikasi.
                     </Text>
                   </View>
                   <Switch

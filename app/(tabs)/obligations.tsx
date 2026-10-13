@@ -15,7 +15,8 @@ import Plus from 'lucide-react-native/icons/plus';
 import { Colors } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
-import { useObligations } from '../../lib/queries';
+import { useHouseholdMembers, useObligations } from '../../lib/queries';
+import { obligationListSubtitle } from '../../lib/collaboration';
 import {
   daysBetween,
   isSettled,
@@ -55,6 +56,8 @@ export default function ObligationsScreen() {
   const router = useRouter();
   const { household } = useAuth();
   const householdId = household?.id;
+  const membersQ = useHouseholdMembers(householdId);
+  const members = membersQ.data?.members ?? [];
   const obligQ = useObligations(householdId);
 
   const [activeTab, setActiveTab] = useState<ObligationTab>('upcoming');
@@ -247,13 +250,7 @@ export default function ObligationsScreen() {
                         {item.title}
                       </Text>
                       <Text style={styles.itemSubtitle}>
-                        {item.type === 'LOAN'
-                          ? 'Pinjaman'
-                          : item.type === 'INSTALLMENT'
-                          ? 'Cicilan'
-                          : item.type === 'REIMBURSEMENT'
-                          ? 'Reimburse'
-                          : 'Tagihan'}
+                        {obligationListSubtitle(item.type, members, item.created_by)}
                       </Text>
                       {days !== null && (
                         <Text style={styles.countdownText}>
@@ -317,11 +314,7 @@ export default function ObligationsScreen() {
                         {item.title}
                       </Text>
                       <Text style={styles.itemSubtitle}>
-                        {item.type === 'LOAN'
-                          ? 'Pinjaman'
-                          : item.type === 'INSTALLMENT'
-                          ? 'Cicilan'
-                          : 'Tagihan'}
+                        {obligationListSubtitle(item.type, members, item.created_by)}
                       </Text>
                     </View>
 

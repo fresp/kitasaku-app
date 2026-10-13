@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import Bell from 'lucide-react-native/icons/bell';
 import Check from 'lucide-react-native/icons/check';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
@@ -40,11 +41,14 @@ import {
   useAllocateDebtPayment,
   useCancelObligation,
   useBeneficiaries,
+  useHouseholdMembers,
+  useObligationEvents,
   useObligationInstallments,
   useObligationPayments,
   useObligations,
   useTransactionById,
 } from '../lib/queries';
+import { activityTimeline, memberName, requesterLabel, type TimelineTone } from '../lib/collaboration';
 import {
   installmentProgressLabel,
   longDateFullLabel,
@@ -61,15 +65,34 @@ import {
 } from '../lib/installments';
 import { categoryIconName } from '../lib/category-icon';
 import { BrandIcon } from '../components/ui/BrandIcon';
+import { QueryError } from '../components/ui/QueryError';
 import { PrimaryButton, TextButton } from '../components/ui/Button';
 
 type DetailTab = 'detail' | 'history';
 
+const TONE: Record<TimelineTone, { bg: string; fg: string }> = {
+  info: { bg: Colors.infoSoft, fg: Colors.info },
+  paid: { bg: Colors.accentSoft, fg: Colors.accentStrong },
+  neutral: { bg: Colors.subtle, fg: Colors.textSecondary },
+  cancelled: { bg: Colors.pendingBg, fg: Colors.pendingText },
+};
+
+function activityTimeLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = longDateFullLabel(iso.slice(0, 10)) ?? '';
+  // Midnight UTC marks a date-only row (old payments); it has no real time.
+  if (iso.endsWith('T00:00:00Z')) return date;
+  const time = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return `${date} · ${time}`;
+}
+
 export default function LoanDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { household } = useAuth();
+  const { household, session } = useAuth();
   const householdId = household?.id;
+  const myUserId = session?.user.id;
 
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
@@ -78,6 +101,8 @@ export default function LoanDetailScreen() {
   const payQ = useObligationPayments(householdId, id);
   const accsQ = useAccounts(householdId);
   const beneficiariesQ = useBeneficiaries(householdId);
+  const membersQ = useHouseholdMembers(householdId);
+  const eventsQ = useObligationEvents(householdId, id);
   const configureInstallments = useConfigureObligationInstallments();
   const pay = useAllocateDebtPayment();
   const cancelObligation = useCancelObligation();
@@ -110,6 +135,12 @@ export default function LoanDetailScreen() {
   );
   const installments = useMemo(() => instQ.data ?? [], [instQ.data]);
   const payments = useMemo(() => payQ.data ?? [], [payQ.data]);
+  const members = useMemo(() => membersQ.data?.members ?? [], [membersQ.data]);
+  // Aktivitas: the trail from migration 033, plus payments made before it.
+  const timeline = useMemo(
+    () => activityTimeline(eventsQ.data ?? [], payments, members),
+    [eventsQ.data, payments, members],
+  );
 
   const schedulePrincipal = Number(schedulePrincipalText.replace(/[^0-9]/g, '') || 0);
   const scheduleTenor = Number(scheduleTenorText.replace(/[^0-9]/g, '') || 0);
@@ -357,7 +388,7 @@ export default function LoanDetailScreen() {
                 activeTab === 'history' && styles.segmentTabTextActive,
               ]}
             >
-              Riwayat
+              Aktivitas
             </Text>
           </Pressable>
         </View>
@@ -368,6 +399,13 @@ export default function LoanDetailScreen() {
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Kategori</Text>
               <Text style={styles.metaValue}>{obligationTypeLabel(obligation.type)}</Text>
+            </View>
+
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Diajukan oleh</Text>
+              <Text style={[styles.metaValue, !obligation.created_by && styles.metaValueMuted]}>
+                {requesterLabel(members, obligation.created_by)}
+              </Text>
             </View>
 
             <View style={styles.metaRow}>
@@ -458,38 +496,49 @@ export default function LoanDetailScreen() {
           </View>
         )}
 
-        {/* Tab 2: Riwayat View */}
+        {/* Tab 2: Aktivitas — who did what, oldest first */}
         {activeTab === 'history' && (
           <View style={styles.metaCard}>
-            {payments.length === 0 ? (
+            {eventsQ.isError ? (
+              <View style={styles.emptyBox}>
+                <QueryError
+                  onRetry={() => void eventsQ.refetch()}
+                  retrying={eventsQ.isFetching}
+                  message="Aktivitas belum bisa dibaca. Datamu aman."
+                />
+              </View>
+            ) : timeline.length === 0 ? (
               <View style={styles.emptyBox}>
                 <ReceiptText size={24} color={Colors.textMuted} />
-                <Text style={styles.emptyTitle}>Belum ada riwayat pembayaran</Text>
+                <Text style={styles.emptyTitle}>
+                  {eventsQ.isLoading ? 'Memuat aktivitas…' : 'Belum ada aktivitas'}
+                </Text>
                 <Text style={styles.emptySub}>
-                  Setiap cicilan atau pelunasan akan tercatat otomatis di sini.
+                  Pengajuan, pembayaran, dan perubahan akan tercatat otomatis di sini.
                 </Text>
               </View>
             ) : (
-              payments.map((p, idx) => {
-                const isLast = idx === payments.length - 1;
-                return (
-                  <View
-                    key={p.id}
-                    style={[styles.histRow, !isLast && styles.histRowBorder]}
-                  >
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={styles.histName}>
-                        {p.accounts?.name ?? 'Pembayaran Tanggungan'}
-                      </Text>
-                      <Text style={styles.histDate}>
-                        {longDateFullLabel(p.release_date ?? p.created_at.slice(0, 10))}
-                        {p.is_final_payment ? ' · Pelunasan' : ''}
-                      </Text>
+              <View style={styles.timeline}>
+                {timeline.map((item, idx) => {
+                  const isLast = idx === timeline.length - 1;
+                  const tone = TONE[item.tone];
+                  return (
+                    <View key={item.id} style={styles.tlRow}>
+                      <View style={styles.tlRail}>
+                        <View style={[styles.tlDot, { backgroundColor: tone.bg }]}>
+                          <View style={[styles.tlDotInner, { backgroundColor: tone.fg }]} />
+                        </View>
+                        {!isLast && <View style={styles.tlLine} />}
+                      </View>
+                      <View style={[styles.tlBody, !isLast && { paddingBottom: 14 }]}>
+                        <Text style={styles.histName}>{item.title}</Text>
+                        {item.subtitle && <Text style={styles.tlSub}>{item.subtitle}</Text>}
+                        <Text style={styles.histDate}>{activityTimeLabel(item.at)}</Text>
+                      </View>
                     </View>
-                    <Text style={styles.histAmt}>{formatRupiah(p.actual_amount)}</Text>
-                  </View>
-                );
-              })
+                  );
+                })}
+              </View>
             )}
           </View>
         )}
@@ -558,6 +607,14 @@ export default function LoanDetailScreen() {
                       ? `Sisa setelah ini ${formatRupiah(obligation.remaining_amount - payAmount)}.`
                       : 'Nominal akan dicatat sebagai pelunasan tanggungan.'}
                 </Text>
+                {obligation.created_by && obligation.created_by !== myUserId && (
+                  <View style={styles.notifyRow}>
+                    <Bell size={14} color={Colors.accentStrong} />
+                    <Text style={styles.notifyText}>
+                      {memberName(members, obligation.created_by) ?? 'Pengaju'} (pengaju) akan diberi tahu setelah dikonfirmasi.
+                    </Text>
+                  </View>
+                )}
 
                 <PrimaryButton
                   label={pay.isPending
@@ -985,6 +1042,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
   },
+  metaValueMuted: { color: Colors.textMuted, fontWeight: '600' },
+  timeline: { paddingVertical: 14 },
+  tlRow: { flexDirection: 'row', gap: 12 },
+  tlRail: { width: 24, alignItems: 'center' },
+  tlDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  tlDotInner: { width: 8, height: 8, borderRadius: 4 },
+  tlLine: { flex: 1, width: 2, backgroundColor: Colors.borderSubtle, marginTop: 4 },
+  tlBody: { flex: 1, gap: 2 },
+  tlSub: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  notifyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.accentSoft, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 10,
+  },
+  notifyText: { flex: 1, fontSize: 12, fontWeight: '600', color: Colors.positiveSoft },
   histName: {
     fontSize: 13,
     fontWeight: '600',

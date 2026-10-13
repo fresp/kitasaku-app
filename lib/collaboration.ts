@@ -250,3 +250,41 @@ export function summarizeBulkPreview(selectedIds: string[], rows: BulkPreviewRow
   }
   return { allOk, problems };
 }
+
+// ---------------------------------------------------------------------------
+// Payments made before migration 033 have no PAYMENT event. They still belong
+// in the Aktivitas tab, so they are folded in from the payment rows.
+
+export interface PaymentRowRef {
+  id: string;
+  actual_amount: number;
+  executed_by?: string | null;
+  release_date?: string | null;
+  created_at: string;
+  is_final_payment?: boolean | null;
+  accounts?: { name?: string | null } | null;
+}
+
+export function activityTimeline(
+  events: ObligationEvent[],
+  payments: PaymentRowRef[],
+  members: MemberRef[],
+): TimelineItem[] {
+  const covered = new Set(events.map((e) => e.transaction_id).filter((x): x is string => !!x));
+  const legacy: TimelineItem[] = payments
+    .filter((p) => !covered.has(p.id))
+    .map((p) => {
+      const who = memberName(members, p.executed_by);
+      const account = p.accounts?.name?.trim();
+      return {
+        id: `payment-${p.id}`,
+        title: `${p.is_final_payment ? 'Pelunasan' : 'Dibayar'}${who ? ` oleh ${who}` : ''}`,
+        subtitle: `${formatRupiah(p.actual_amount)}${account ? ` dari ${account}` : ''}`,
+        tone: 'paid' as const,
+        at: p.release_date && p.created_at.slice(0, 10) !== p.release_date ? `${p.release_date}T00:00:00Z` : p.created_at,
+      };
+    });
+  return [...buildTimeline(events, members), ...legacy].sort(
+    (a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
+  );
+}
