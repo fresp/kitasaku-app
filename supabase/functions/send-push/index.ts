@@ -8,10 +8,13 @@
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (provided by the platform),
 //      PUSH_WEBHOOK_SECRET (set with `supabase secrets set`).
 
-declare const Deno: {
+// Read from globalThis so the file type-checks both in the Supabase editor
+// (where Deno's own types exist) and outside it, without redeclaring Deno.
+type DenoLike = {
   env: { get(name: string): string | undefined };
   serve(handler: (req: Request) => Response | Promise<Response>): void;
 };
+const Deno = (globalThis as unknown as { Deno: DenoLike }).Deno;
 
 type NotificationRow = {
   id: string;
