@@ -60,6 +60,26 @@ describe('liquid-account Zero-Based totals', () => {
   });
 });
 
+describe('special budget rows in cycle zero-based', () => {
+  it('leaves income tagged to a special budget out of the cycle source funds', () => {
+    const result = aggregateCashSourceFunds([
+      { direction: 'INCOME', flow_type: 'OPERATING_INCOME', planned_amount: 20_000_000, actual_amount: 20_000_000, status: 'PAID', account_type: 'BANK' },
+      { direction: 'INCOME', flow_type: 'OPERATING_INCOME', planned_amount: 10_000_000, actual_amount: 10_000_000, status: 'PAID', account_type: 'BANK', special_budget_id: 'lebaran' },
+      { direction: 'INCOME', flow_type: 'ASSET_RELEASE', planned_amount: 15_000_000, actual_amount: 15_000_000, status: 'PAID', account_type: 'BANK', special_budget_id: 'renovasi' },
+    ], 'actual');
+    expect(result.operatingIncome).toBe(20_000_000);
+    expect(result.assetRelease).toBe(0);
+    expect(result.total).toBe(20_000_000);
+  });
+
+  it('keeps cycle funding of a special budget as an ordinary OTHER allocation', () => {
+    const result = aggregateCashAllocations([
+      { allocation_type: 'OTHER', amount: 1_500_000, accounts: { type: 'BANK' } },
+    ]);
+    expect(result.other).toBe(1_500_000);
+  });
+});
+
 describe('allocationUsage', () => {
   const paid = { id: 't1', status: 'PAID' as const, actual_amount: 659_465 };
   const pending = { id: 't2', status: 'PENDING' as const, actual_amount: 0 };

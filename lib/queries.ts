@@ -12,6 +12,11 @@ import { cleanAccountNumber } from './beneficiary';
 import { assertActiveAccountForHousehold, assertEligibleCashAccountForHousehold } from './cash-account';
 import { aggregateCashAllocations as aggregateAllocations, aggregateCashSourceFunds as aggregateSourceFunds, eligibleCashAllocation } from './zero-based-accounting';
 import type { AllocationAccountingRow, SourceFundRow } from './zero-based-accounting';
+import { specialBudgetFigures, validateSpecialBudgetInput } from './special-budget';
+import type {
+  SpecialBudget, SpecialBudgetAllocationRow, SpecialBudgetCloseDestination,
+  SpecialBudgetFigures, SpecialBudgetTxnRow,
+} from './special-budget';
 export { aggregateCashAllocations, aggregateCashSourceFunds } from './zero-based-accounting';
 export { nonCashSpend } from './cashflow';
 export type { SourceFundRow } from './zero-based-accounting';
@@ -136,6 +141,8 @@ export interface Txn {
   name: string; category_id: string | null; account_id: string | null;
   direction: 'INCOME' | 'EXPENSE'; flow_type?: FlowType | null; planned_amount: number; actual_amount: number;
   counter_account_id?: string | null; asset_id?: string | null;
+  /** Anggaran Khusus this row belongs to (migration 032); excluded from cycle zero-based. */
+  special_budget_id?: string | null;
   release_date: string | null; status: TransactionStatus;
   cancelled_at?: string | null; cancelled_by?: string | null;
   cancellation_reason?: CancellationReason | null; cancellation_note?: string | null;
@@ -219,6 +226,10 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['audit-txns'] });
   qc.invalidateQueries({ queryKey: ['reconciliation'] });
   qc.invalidateQueries({ queryKey: ['cycle-sweep'] });
+  // Anggaran Khusus figures are read from the same transactions and allocations.
+  qc.invalidateQueries({ queryKey: ['special-budgets'] });
+  qc.invalidateQueries({ queryKey: ['special-budget-figures'] });
+  qc.invalidateQueries({ queryKey: ['special-budget-txns'] });
 }
 
 export function useActiveCycle(householdId: string | undefined) {
@@ -1593,6 +1604,8 @@ export interface CycleAllocation {
   note: string | null; created_by: string | null; created_at: string;
   /** The planned row this commitment came from (migration 028). */
   transaction_id?: string | null;
+  /** Set when this OTHER allocation funds an Anggaran Khusus from the cycle (migration 032). */
+  special_budget_id?: string | null;
   cancelled_at?: string | null; cancelled_by?: string | null; cancellation_reason?: string | null;
   categories?: { name: string; icon?: string | null } | null;
   obligations?: { title: string } | null;
@@ -1624,7 +1637,7 @@ export function useCycleSourceFunds(
     queryFn: async (): Promise<SourceFundsBreakdown> => {
       const sb = requireSupabase();
       const { data, error } = await sb.from('transactions')
-        .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, accounts!transactions_account_id_fkey(type)')
+        .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, special_budget_id, accounts!transactions_account_id_fkey(type)')
         .eq('household_id', householdId!).eq('cycle_id', cycleId!);
       if (error) throw error;
       const rows = (data ?? []).map((row: any) => ({ ...row, account_type: (Array.isArray(row.accounts) ? row.accounts[0]?.type : row.accounts?.type) ?? '' })) as SourceFundRow[];
@@ -1658,7 +1671,7 @@ export function useZeroBasedSummary(
       const sb = requireSupabase();
       const [txnsRes, allocsRes] = await Promise.all([
         sb.from('transactions')
-          .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, accounts!transactions_account_id_fkey(type)')
+          .select('direction, flow_type, planned_amount, actual_amount, status, obligation_id, special_budget_id, accounts!transactions_account_id_fkey(type)')
           .eq('household_id', householdId!).eq('cycle_id', cycleId!),
         sb.from('cycle_allocations')
           .select('allocation_type, amount, cancelled_at, accounts(type)')
@@ -2810,4 +2823,179 @@ export function useUpdateBeneficiary() {
   });
 }
 
+// ============ Anggaran Khusus (special budgets, migration 032) ============
+// Figures are derived in lib/special-budget.ts from tagged rows; the database
+// guards (tagging rules, frozen rows after close) are the authority.
 
+export function useSpecialBudgets(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['special-budgets', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<SpecialBudget[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('special_budgets').select('*')
+        .eq('household_id', householdId!)
+        .order('end_date', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as SpecialBudget[];
+    },
+  });
+}
+
+/** Figures for every budget of the household, keyed by budget id. */
+export function useSpecialBudgetFigures(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['special-budget-figures', householdId],
+    enabled: !!householdId,
+    queryFn: async (): Promise<Record<string, SpecialBudgetFigures>> => {
+      const sb = requireSupabase();
+      const [txnsRes, allocsRes] = await Promise.all([
+        sb.from('transactions')
+          .select('special_budget_id, direction, flow_type, obligation_id, status, actual_amount, cancelled_at')
+          .eq('household_id', householdId!).not('special_budget_id', 'is', null),
+        sb.from('cycle_allocations')
+          .select('special_budget_id, amount, cancelled_at')
+          .eq('household_id', householdId!).not('special_budget_id', 'is', null),
+      ]);
+      if (txnsRes.error) throw txnsRes.error;
+      if (allocsRes.error) throw allocsRes.error;
+      const txns = (txnsRes.data ?? []) as SpecialBudgetTxnRow[];
+      const allocs = (allocsRes.data ?? []) as SpecialBudgetAllocationRow[];
+      const ids = new Set<string>();
+      for (const r of txns) if (r.special_budget_id) ids.add(r.special_budget_id);
+      for (const r of allocs) if (r.special_budget_id) ids.add(r.special_budget_id);
+      // A plain object, not a Map: react-query only shares structure for plain data.
+      const out: Record<string, SpecialBudgetFigures> = {};
+      for (const id of ids) out[id] = specialBudgetFigures(id, txns, allocs);
+      return out;
+    },
+  });
+}
+
+export function useSpecialBudgetTransactions(householdId: string | undefined, budgetId: string | undefined) {
+  return useQuery({
+    queryKey: ['special-budget-txns', householdId, budgetId],
+    enabled: !!householdId && !!budgetId,
+    queryFn: async (): Promise<Txn[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name, type)')
+        .eq('household_id', householdId!).eq('special_budget_id', budgetId!)
+        .order('release_date', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Txn[];
+    },
+  });
+}
+
+export function useCreateSpecialBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; name: string; startDate: string; endDate: string;
+    }): Promise<SpecialBudget> => {
+      const invalid = validateSpecialBudgetInput(args);
+      if (invalid) throw new Error(invalid);
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('special_budgets').insert({
+        household_id: args.householdId,
+        name: args.name.trim(),
+        start_date: args.startDate,
+        end_date: args.endDate,
+      }).select('*').single();
+      if (error) throw error;
+      return data as SpecialBudget;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['special-budgets'] }),
+  });
+}
+
+/** Rename or move the dates (e.g. extend a renovation that ran late). */
+export function useUpdateSpecialBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; budgetId: string; name: string; startDate: string; endDate: string;
+    }): Promise<void> => {
+      const invalid = validateSpecialBudgetInput(args);
+      if (invalid) throw new Error(invalid);
+      const sb = requireSupabase();
+      const { error } = await sb.from('special_budgets')
+        .update({ name: args.name.trim(), start_date: args.startDate, end_date: args.endDate })
+        .eq('id', args.budgetId).eq('household_id', args.householdId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['special-budgets'] }),
+  });
+}
+
+/** Sisihkan dari Siklus: an OTHER allocation in the running cycle, no cash movement. */
+export function useFundSpecialBudgetFromCycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; budgetId: string; cycleId: string; accountId: string; amount: number;
+    }): Promise<string> => {
+      if (!(args.amount > 0)) throw new Error('Nominal harus lebih dari Rp 0.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('fund_special_budget_from_cycle', {
+        p_household_id: args.householdId,
+        p_budget_id: args.budgetId,
+        p_cycle_id: args.cycleId,
+        p_account_id: args.accountId,
+        p_amount: args.amount,
+      });
+      if (error) throw error;
+      return data as string;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+/**
+ * Close a budget and settle its remainder in one database transaction.
+ * `expectedRemaining` is the figure the user confirmed; the RPC refuses when a
+ * partner's write changed it in between.
+ */
+export function useCloseSpecialBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; budgetId: string; expectedRemaining: number;
+      destination: SpecialBudgetCloseDestination;
+      cycleId: string | null; accountId: string | null; assetId: string | null;
+    }): Promise<number> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('close_special_budget', {
+        p_household_id: args.householdId,
+        p_budget_id: args.budgetId,
+        p_expected_remaining: args.expectedRemaining,
+        p_destination: args.destination,
+        p_cycle_id: args.cycleId,
+        p_account_id: args.accountId,
+        p_asset_id: args.assetId,
+      });
+      if (error) throw error;
+      return Number(data ?? 0);
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}
+
+/** Move an executed row into or out of a budget (null = back to the cycle). */
+export function useSetTransactionSpecialBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string; transactionId: string; budgetId: string | null;
+    }): Promise<void> => {
+      const sb = requireSupabase();
+      const { error } = await sb.from('transactions')
+        .update({ special_budget_id: args.budgetId })
+        .eq('id', args.transactionId).eq('household_id', args.householdId);
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
+  });
+}

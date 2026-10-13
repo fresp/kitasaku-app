@@ -10,6 +10,12 @@ export interface SourceFundRow {
   actual_amount: number;
   status: 'PENDING' | 'PAID' | 'CANCELLED';
   account_type?: string | null;
+  /**
+   * Set when the row belongs to a special budget (migration 032). Such rows are
+   * counted by lib/special-budget.ts and never as cycle source funds — THR set
+   * aside for Lebaran must not inflate the cycle it happened to land in.
+   */
+  special_budget_id?: string | null;
 }
 
 export interface AllocationAccountingRow {
@@ -27,6 +33,7 @@ export function aggregateCashSourceFunds(rows: SourceFundRow[], mode: SummaryMod
   let operatingIncome = 0, financingInflow = 0, assetRelease = 0;
   for (const txn of rows) {
     if (txn.status === 'CANCELLED' || !isZeroBasedCashAccount({ type: txn.account_type ?? '' })) continue;
+    if (txn.special_budget_id) continue;
     const flow = txn.flow_type ?? defaultFlowType(txn.direction, txn.obligation_id ?? null);
     const amount = resolveModeAmount(txn, mode);
     if (flow === 'OPERATING_INCOME') operatingIncome += amount;

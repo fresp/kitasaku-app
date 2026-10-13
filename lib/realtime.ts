@@ -35,6 +35,9 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           // Insight & Aset charts the same rows for a whole year under its own
           // key; without this the partner's edits leave its charts stale.
           qc.invalidateQueries({ queryKey: ['year-insight'] });
+          // Anggaran Khusus figures and lists are built from tagged rows.
+          qc.invalidateQueries({ queryKey: ['special-budget-figures'] });
+          qc.invalidateQueries({ queryKey: ['special-budget-txns'] });
         }
       )
       .on(
@@ -126,6 +129,16 @@ export function useHouseholdRealtime(householdId: string | undefined) {
           qc.invalidateQueries({ queryKey: ['oblig'] });
           // The asset trend and the funding-gap chart are built from these rows.
           qc.invalidateQueries({ queryKey: ['year-insight'] });
+          // Funding an Anggaran Khusus from the cycle is an allocation row.
+          qc.invalidateQueries({ queryKey: ['special-budget-figures'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'special_budgets', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['special-budgets'] });
+          qc.invalidateQueries({ queryKey: ['special-budget-figures'] });
         }
       )
       .on(
