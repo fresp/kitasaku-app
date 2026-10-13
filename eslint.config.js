@@ -5,6 +5,6 @@ const expoConfig = require("eslint-config-expo/flat");
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ["dist/*", ".claude/worktrees/**"],
+    ignores: ["dist/*", ".claude/worktrees/**", "supabase/functions/**"],
   }
 ]);
