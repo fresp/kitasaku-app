@@ -24,8 +24,11 @@ import {
   useActiveCycle,
   useCategories,
   useCreateFinancingLoan,
+  useHouseholdMembers,
   useQuickAdd,
+  useShareTransactions,
 } from '../lib/queries';
+import { KabariCard, useKabariState } from '../components/collaboration/KabariCard';
 import {
   longDateFullLabel,
   REPAYMENT_MODES,
@@ -71,13 +74,18 @@ export default function QuickAddScreen() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
 
-  const { household } = useAuth();
+  const { household, session } = useAuth();
   const householdId = household?.id;
+  const myUserId = session?.user.id;
   const cycleQ = useActiveCycle(householdId);
   const catsQ = useCategories(householdId);
   const accsQ = useAccounts(householdId);
   const quickAdd = useQuickAdd();
   const createLoan = useCreateFinancingLoan();
+  const share = useShareTransactions();
+  const membersQ = useHouseholdMembers(householdId);
+  const members = useMemo(() => membersQ.data?.members ?? [], [membersQ.data]);
+  const kabari = useKabariState(members, myUserId);
 
   const [name, setName] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -139,7 +147,7 @@ export default function QuickAddScreen() {
   const previewTotal = scheduleTotal(preview);
   const previewInterest = scheduleInterest(preview);
 
-  const isSubmitting = quickAdd.isPending || createLoan.isPending;
+  const isSubmitting = quickAdd.isPending || createLoan.isPending || share.isPending;
 
   async function save() {
     setErr(null);
@@ -203,8 +211,9 @@ export default function QuickAddScreen() {
       return;
     }
 
+    let savedId: string;
     try {
-      await quickAdd.mutateAsync({
+      const saved = await quickAdd.mutateAsync({
         householdId,
         cycleId: auditMode ? null : cycleQ.data!.id,
         name: name.trim(),
@@ -216,10 +225,26 @@ export default function QuickAddScreen() {
         releaseDate: saveAsPending ? null : releaseDate,
         status: saveAsPending ? 'PENDING' : 'PAID',
       });
-      router.back();
+      savedId = saved.id;
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
+      return;
     }
+    // Saved. The kabar is optional and separate: a failure here must not read
+    // as a failed transaction, and there is nothing to undo.
+    if (kabari.activeRecipients.length > 0) {
+      try {
+        await share.mutateAsync({
+          householdId,
+          transactionIds: [savedId],
+          recipientIds: kabari.activeRecipients,
+          note: kabari.state.note,
+        });
+      } catch {
+        // Recorded, just not announced.
+      }
+    }
+    router.back();
   }
 
   return (
@@ -561,6 +586,18 @@ export default function QuickAddScreen() {
                 Pemasukan menambah kas riil &amp; alokasi siklus tanpa kewajiban utang.
               </Text>
             </View>
+          )}
+
+          {/* A loan creates a tanggungan, which notifies the household by itself. */}
+          {!isLoan && (
+            <KabariCard
+              title="Kabari anggota ruang"
+              subtitle="Dikirim setelah transaksi tersimpan"
+              members={members}
+              myUserId={myUserId}
+              state={kabari.state}
+              onChange={kabari.setState}
+            />
           )}
 
           {err && (

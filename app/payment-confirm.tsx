@@ -6,13 +6,23 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { CANCELLATION_REASONS, useAccounts, useActiveCycle, useCancelPendingTransaction, useMarkAsPaid, useTransactions } from '../lib/queries';
+import {
+  CANCELLATION_REASONS,
+  useAccounts,
+  useActiveCycle,
+  useCancelPendingTransaction,
+  useHouseholdMembers,
+  useMarkAsPaid,
+  useShareTransactions,
+  useTransactions,
+} from '../lib/queries';
 import { accountSubline, isZeroBasedCashAccount } from '../lib/account';
 import { canMarkAsPaid } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { BrandIcon } from '../components/ui/BrandIcon';
 import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
+import { KabariCard, useKabariState } from '../components/collaboration/KabariCard';
 
 function parseAmount(text: string): number {
   const digits = text.replace(/[^0-9]/g, '');
@@ -22,14 +32,19 @@ function parseAmount(text: string): number {
 export default function PaymentConfirmScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { household } = useAuth();
+  const { household, session } = useAuth();
   const householdId = household?.id;
+  const myUserId = session?.user.id;
 
   const cycleQ = useActiveCycle(householdId);
   const txnsQ = useTransactions(householdId, cycleQ.data?.id);
   const accsQ = useAccounts(householdId);
   const markPaid = useMarkAsPaid();
   const cancelTxn = useCancelPendingTransaction();
+  const share = useShareTransactions();
+  const membersQ = useHouseholdMembers(householdId);
+  const members = useMemo(() => membersQ.data?.members ?? [], [membersQ.data]);
+  const kabari = useKabariState(members, myUserId);
 
   const liveTxn = useMemo(
     () => (txnsQ.data ?? []).find((t) => t.id === id),
@@ -102,10 +117,25 @@ export default function PaymentConfirmScreen() {
         isFinal,
         releaseDate,
       });
-      router.back();
     } catch (e: any) {
       setErr(e?.message ?? 'Gagal menyimpan. Coba lagi.');
+      return;
     }
+    // The payment is saved; the kabar is a separate, optional step and its
+    // failure must not read as a failed payment.
+    if (kabari.activeRecipients.length > 0) {
+      try {
+        await share.mutateAsync({
+          householdId,
+          transactionIds: [liveTxn.id],
+          recipientIds: kabari.activeRecipients,
+          note: kabari.state.note,
+        });
+      } catch {
+        // Paid, just not announced. Nothing to undo.
+      }
+    }
+    router.back();
   }
 
   async function cancel() {
@@ -330,6 +360,15 @@ export default function PaymentConfirmScreen() {
           </View>
         )}
 
+        <KabariCard
+          title="Kabari anggota ruang"
+          subtitle={isIncome ? 'Dikirim setelah penerimaan tersimpan' : 'Dikirim setelah pembayaran tersimpan'}
+          members={members}
+          myUserId={myUserId}
+          state={kabari.state}
+          onChange={kabari.setState}
+        />
+
         {err && (
           <View style={styles.errBox}>
             <Text style={styles.errText}>{err}</Text>
@@ -339,7 +378,7 @@ export default function PaymentConfirmScreen() {
         <View style={styles.ctaRow}>
           <View style={{ flex: 2 }}>
             <PrimaryButton
-              label={markPaid.isPending ? 'Menyimpan…' : isIncome ? 'Konfirmasi & Terima' : 'Konfirmasi & Bayar'}
+              label={markPaid.isPending || share.isPending ? 'Menyimpan…' : isIncome ? 'Konfirmasi & Terima' : 'Konfirmasi & Bayar'}
               onPress={confirm}
             />
           </View>

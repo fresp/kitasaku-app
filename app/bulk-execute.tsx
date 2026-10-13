@@ -7,10 +7,18 @@ import Share2 from 'lucide-react-native/icons/share-2';
 import { Colors, FontSize, Radius } from '../constants/theme';
 import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
-import { useActiveCycle, useMarkAsPaid, useTransactionLedger } from '../lib/queries';
+import {
+  useActiveCycle,
+  useBulkExecute,
+  useBulkExecutePreview,
+  useHouseholdMembers,
+  useTransactionLedger,
+} from '../lib/queries';
 import type { LedgerRow } from '../lib/queries';
 import { PrimaryButton, SecondaryButton, TextButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
+import { KabariCard, useKabariState } from '../components/collaboration/KabariCard';
+import { recipientsSentence, summarizeBulkPreview } from '../lib/collaboration';
 
 function previewText(rows: LedgerRow[]): string {
   const totalIn = rows.filter((r) => r.direction === 'INCOME').reduce((sum, r) => sum + r.planned_amount, 0);
@@ -38,11 +46,15 @@ function previewSummary(rows: LedgerRow[]): string {
 
 export default function BulkExecuteScreen() {
   const router = useRouter();
-  const { household } = useAuth();
+  const { household, session } = useAuth();
   const householdId = household?.id;
+  const myUserId = session?.user.id;
   const cycleQ = useActiveCycle(householdId);
   const ledgerQ = useTransactionLedger(householdId, cycleQ.data?.id, 'actual');
-  const markPaid = useMarkAsPaid();
+  const bulk = useBulkExecute();
+  const membersQ = useHouseholdMembers(householdId);
+  const members = useMemo(() => membersQ.data?.members ?? [], [membersQ.data]);
+  const kabari = useKabariState(members, myUserId);
   const pending = useMemo(() => (ledgerQ.data ?? []).filter((r) => r.status === 'PENDING'), [ledgerQ.data]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showPreview, setShowPreview] = useState(false);
@@ -50,6 +62,13 @@ export default function BulkExecuteScreen() {
 
   const selectedRows = pending.filter((r) => selected.has(r.id));
   const allSelected = pending.length > 0 && selectedRows.length === pending.length;
+  const selectedIds = selectedRows.map((r) => r.id);
+  // Step 1 of 2: the server checks every selected row before anything is written.
+  const previewQ = useBulkExecutePreview(householdId, selectedIds);
+  const verdict = summarizeBulkPreview(selectedIds, previewQ.data ?? []);
+  const checking = selectedIds.length > 0 && (previewQ.isLoading || previewQ.isFetching);
+  const problemCount = Object.keys(verdict.problems).length;
+  const recipientsLine = recipientsSentence(members, kabari.activeRecipients);
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -60,20 +79,21 @@ export default function BulkExecuteScreen() {
   }
 
   async function execute() {
-    if (selectedRows.length === 0) return;
+    if (selectedRows.length === 0 || !householdId) return;
+    if (checking || !verdict.allOk) return;
     setErr(null);
     try {
-      for (const row of selectedRows) {
-        await markPaid.mutateAsync({
-          txn: row,
-          actualAmount: row.planned_amount,
-          accountId: row.account_id,
-          isFinal: false,
-        });
-      }
+      // Step 2 of 2: one all-or-nothing write; the kabar is written with it.
+      await bulk.mutateAsync({
+        householdId,
+        transactionIds: selectedIds,
+        recipientIds: kabari.activeRecipients,
+        note: kabari.state.note,
+      });
       router.back();
     } catch (e: any) {
-      setErr(e?.message ?? 'Sebagian transaksi gagal dieksekusi. Coba lagi.');
+      setErr(e?.message ?? 'Eksekusi gagal. Tidak ada transaksi yang dicatat — coba lagi.');
+      void previewQ.refetch();
     }
   }
 
@@ -113,6 +133,9 @@ export default function BulkExecuteScreen() {
                 <View style={styles.rowMain}>
                   <Text style={styles.rowName} numberOfLines={1}>{row.name}</Text>
                   <Text style={styles.rowMeta}>{row.direction === 'INCOME' ? 'Pemasukan' : 'Pengeluaran'} · {row.accounts?.name ?? 'Tanpa akun'}</Text>
+                  {active && verdict.problems[row.id] && (
+                    <Text style={styles.rowProblem}>{verdict.problems[row.id]}</Text>
+                  )}
                 </View>
                 <Text style={[styles.amount, row.direction === 'INCOME' && styles.income]}>{row.direction === 'INCOME' ? '+' : '−'}{formatRupiah(row.planned_amount)}</Text>
               </Pressable>
@@ -122,18 +145,27 @@ export default function BulkExecuteScreen() {
         </View>
 
         {selectedRows.length > 0 && (
-          <View style={styles.previewCard}>
-            <View style={styles.previewMain}>
-              <Text style={styles.previewTitle}>Ringkasan untuk keluarga</Text>
-              <Text style={styles.previewBody}>{previewSummary(selectedRows)}</Text>
-            </View>
-            <Pressable onPress={() => setShowPreview(true)} style={styles.shareButton}>
-              <Share2 size={15} color={Colors.textPrimary} />
-              <Text style={styles.shareText}>Bagikan</Text>
-            </Pressable>
-          </View>
+          <KabariCard
+            title="Kabari di Kitasaku"
+            subtitle={`${previewSummary(selectedRows)} · dikirim setelah berhasil`}
+            members={members}
+            myUserId={myUserId}
+            state={kabari.state}
+            onChange={kabari.setState}
+            footer={
+              <Pressable onPress={() => setShowPreview(true)} style={styles.shareLink} accessibilityRole="button">
+                <Share2 size={15} color={Colors.textSecondary} />
+                <Text style={styles.shareLinkText}>Atau bagikan ke WhatsApp / aplikasi lain</Text>
+              </Pressable>
+            }
+          />
         )}
-
+        {selectedRows.length > 0 && !kabari.hasOthers && (
+          <Pressable onPress={() => setShowPreview(true)} style={styles.shareLink} accessibilityRole="button">
+            <Share2 size={15} color={Colors.textSecondary} />
+            <Text style={styles.shareLinkText}>Bagikan ringkasan ke WhatsApp / aplikasi lain</Text>
+          </Pressable>
+        )}
         <Modal visible={showPreview && selectedRows.length > 0} transparent animationType="fade" onRequestClose={() => setShowPreview(false)}>
           <View style={styles.modalBackdrop}>
             <View style={styles.modalCard}>
@@ -151,8 +183,27 @@ export default function BulkExecuteScreen() {
           </View>
         </Modal>
 
+        {previewQ.isError && (
+          <QueryError onRetry={() => void previewQ.refetch()} retrying={previewQ.isFetching} message="Pemeriksaan transaksi gagal. Coba lagi." />
+        )}
         {err && <Text style={styles.error}>{err}</Text>}
-        <PrimaryButton label={markPaid.isPending ? 'Mengeksekusi…' : `Eksekusi ${selectedRows.length} transaksi`} onPress={execute} />
+        {selectedRows.length > 0 && recipientsLine && verdict.allOk && !checking && (
+          <Text style={styles.note}>{recipientsLine} setelah eksekusi berhasil.</Text>
+        )}
+        <PrimaryButton
+          label={
+            bulk.isPending
+              ? 'Mengeksekusi…'
+              : selectedRows.length === 0
+                ? 'Pilih transaksi dulu'
+                : checking
+                  ? 'Memeriksa transaksi…'
+                  : problemCount > 0
+                    ? `Lepas atau perbaiki ${problemCount} transaksi dulu`
+                    : `Eksekusi ${selectedRows.length} transaksi`
+          }
+          onPress={execute}
+        />
         <TextButton label="Kembali" onPress={() => router.back()} />
       </ScrollView>
     </SafeAreaView>
@@ -178,17 +229,14 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, gap: 2 },
   rowName: { color: Colors.textPrimary, fontWeight: '700' },
   rowMeta: { color: Colors.textMuted, fontSize: FontSize.caption },
+  rowProblem: { color: Colors.pendingText, fontSize: FontSize.caption, fontWeight: '600' },
+  shareLink: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, alignSelf: 'flex-start' },
+  shareLinkText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
   amount: { color: Colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
   income: { color: Colors.paidText },
-  previewCard: { backgroundColor: Colors.subtle, borderRadius: Radius.md, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  previewMain: { flex: 1, gap: 3 },
   previewTitle: { color: Colors.textPrimary, fontWeight: '700', fontSize: FontSize.body },
-  previewBody: { color: Colors.textSecondary, fontSize: FontSize.caption, lineHeight: 17 },
   fullPreview: { color: Colors.textPrimary, fontSize: FontSize.body, lineHeight: 21 },
   previewActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  // Secondary on the screen itself: sharing is never the reason this screen is open.
-  shareButton: { height: 44, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.borderStrong, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 14 },
-  shareText: { color: Colors.textPrimary, fontWeight: '700', fontSize: 13 },
   // Primary inside the share modal, where sharing IS the reason it is open.
   sharePrimary: { flex: 1, height: 48, borderRadius: Radius.md, backgroundColor: Colors.brandPrimary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 10 },
   sharePrimaryText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
