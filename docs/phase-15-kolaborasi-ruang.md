@@ -1,6 +1,6 @@
 # Phase 15 — Kolaborasi Ruang (pengaju, jejak aktivitas, kabar transaksi)
 
-Ruang keluarga tidak cuma tempat input bersama. Setiap tanggungan tercatat siapa yang mengajukan, setiap aksi atasnya punya jejak, pengaju dikabari saat tanggungannya diproses, dan siapa pun bisa mengabari anggota lain saat mencatat atau membayar transaksi. Mockup: canvas "Kitasaku — Reimburse Anggota" (baris 1–4). Rencana implementasi: migration `033_household_collaboration.sql`, edge function `supabase/functions/send-push`, `lib/collaboration.ts` (pure), `lib/notifications.ts`, hook di `lib/queries.ts`. Belum diterapkan di Supabase remote; terapkan 033 **sebelum** merilis build yang membacanya.
+Ruang keluarga tidak cuma tempat input bersama. Setiap tanggungan tercatat siapa yang mengajukan, setiap aksi atasnya punya jejak, pengaju dikabari saat tanggungannya diproses, dan siapa pun bisa mengabari anggota lain saat mencatat atau membayar transaksi. Mockup: canvas "Kitasaku — Reimburse Anggota" (baris 1–4). Implementasi (branch `feat/kolaborasi-ruang`): migration `033_household_collaboration.sql`, edge function `supabase/functions/send-push`, `lib/collaboration.ts` + `lib/notifications.ts` (pure, dengan tes), `lib/push.ts`, `components/collaboration/KabariCard.tsx`, layar `app/shared-transactions.tsx`, hook di `lib/queries.ts`. Belum diterapkan di Supabase remote; terapkan 033 **sebelum** merilis build yang membacanya.
 
 ## A. Pengaju tanggungan
 
@@ -55,3 +55,18 @@ Ruang keluarga tidak cuma tempat input bersama. Setiap tanggungan tercatat siapa
 - Kredensial FCM V1 diunggah ke EAS.
 - Database Webhook dan secret edge function dikonfigurasi manual.
 - Migration 033 di-apply di SQL Editor.
+
+## Catatan implementasi
+
+- **Nomor 033.** Nomor 032 dipakai `032_special_budgets` di `feat/special-budgets`, yang belum masuk `main`. 033 tidak bergantung pada 032.
+- **Diuji di Postgres 16** dengan stub Supabase: 001–031 lalu 033, dan 033 diulang (idempoten). Yang diuji:
+  - jejak untuk dua jalur bayar; pelunasan tercatat satu baris PAYMENT, tanpa STATUS_CHANGED;
+  - pembatalan dan update status langsung;
+  - fan-out ke pengaju/anggota;
+  - bulk all-or-nothing, termasuk rollback saat ada baris bermasalah;
+  - validasi `share_transactions`, RLS `notifications`, dan penolakan insert langsung ke `obligation_events`.
+- **Temuan dari 029:** `execute_planned_transaction` menolak rencana DEBT_PAYMENT pada tanggungan **tanpa** jadwal cicilan ("tidak dapat dipetakan"). Perilaku ini sudah ada sebelumnya dan tidak diubah. Preview bulk menandai baris seperti itu lebih dulu.
+- **Kabari di Quick Add** ikut default nyala, sama dengan layar bayar. Kalau terasa ramai, cukup ubah default di `useKabariState`.
+- **Bagikan ke WhatsApp** di Eksekusi Bersama tetap memakai ringkasan rencana. Isinya sama dengan yang dieksekusi, karena bulk memakai nominal rencana.
+- `expo-device` tidak dipakai. Registrasi push gagal dengan aman di emulator atau tanpa izin.
+- `expo-notifications` dipasang dengan pin SDK 57 dari `bundledNativeModules.json` (~57.0.21), karena `npx expo install` diblokir proxy saat pengerjaan.
