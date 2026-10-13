@@ -270,9 +270,8 @@ export default function HomeScreen() {
             >
               <Text style={styles.balanceAccountText} numberOfLines={1}>
                 {selectedAccount
-                  ? `${selectedAccount.name} · ${selectedAccount.type}${
-                      selectedAccount.id === primaryAccount?.id ? ' · acuan rekonsiliasi' : ''
-                    }`
+                  ? `${selectedAccount.name} · ${selectedAccount.type}${selectedAccount.id === primaryAccount?.id ? ' · acuan rekonsiliasi' : ''
+                  }`
                   : 'Pilih akun kas'}
               </Text>
               <ChevronDown size={14} color={Colors.textOnDarkMuted} />
@@ -569,6 +568,10 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.surface,
     paddingBottom: 110,
+    // The safe area behind the scroll view is navy so the hero bleeds into the
+    // status bar. Without filling the viewport, a short Home (an empty cycle)
+    // ends halfway down and that navy shows below the content.
+    flexGrow: 1,
   },
 
   /* Dark Overview Card */
