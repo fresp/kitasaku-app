@@ -110,8 +110,9 @@ Details in `docs/phase-12-rekonsiliasi-tutup-siklus.md`.
 
 ## Migrations
 
-Applied manually in the Supabase SQL Editor, in filename order, latest `031`.
-Release 1.0.0 expects `001`–`031` to be applied.
+Applied manually in the Supabase SQL Editor, in filename order, latest `033`.
+Release 1.1.0 expects `001`–`031` and `033` to be applied (`032` belongs to the unreleased
+Anggaran Khusus work).
 Each file is idempotent and safe to re-run. Conventions: next number after the highest
 existing one, a header comment stating the prerequisite range, `set search_path = public`
 plus an explicit grant for every function, user-facing exception messages in Indonesian,

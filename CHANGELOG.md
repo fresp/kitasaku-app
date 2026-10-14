@@ -4,6 +4,59 @@ All notable changes to Kitasaku are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-10-14
+
+Ruang Keluarga becomes a place to work together, not just a shared ledger. Every
+tanggungan now records who submitted it and everything that happened to it, the person who
+submitted it hears when it is paid or cancelled, and anyone can tell the household about a
+payment from inside the app instead of forwarding a summary to WhatsApp.
+
+### Added
+
+- **Who submitted a tanggungan.** Every new tanggungan records its requester. Detail
+  Tanggungan shows "Diajukan oleh", and the list reads "Reimburse · dari Rani". Tanggungan
+  created before this release show "Tidak tercatat".
+- **Activity trail (Aktivitas).** The Riwayat tab on a tanggungan becomes Aktivitas: submitted,
+  paid in part or in full (by whom, from which account, what is left), schedule changed,
+  cancelled with its reason. Payments made before this release are folded in.
+- **Submit a reimburse from the app.** Tambah Tanggungan has a Jenis toggle (Tagihan |
+  Reimburse); a reimburse hides Frekuensi, since it is paid back once.
+- **Push notifications for tanggungan.** A new submission notifies the other members; a
+  payment, payoff, cancellation or schedule change notifies the requester, never the person
+  who did it.
+- **Kabari anggota ruang.** Quick Add, Konfirmasi Pembayaran and Eksekusi Bersama have a card
+  to tell the household about what was just recorded or paid, with an optional note. It is
+  on by default with every other member selected, and is sent only after the money is saved.
+- **Kabar Pembayaran.** Tapping a kabar opens who paid what, when, from which account, the
+  note and the total, read live from the transactions.
+
+### Changed
+
+- **Eksekusi Bersama checks before it writes.** Selected rows are verified first and any
+  problem is shown on its row; the batch is then recorded in one step, all or nothing,
+  instead of one payment at a time that could stop halfway. Sharing to WhatsApp stays as a
+  secondary link.
+- **One notification setting.** "Notifikasi Pengeluaran" in Profile and Ruang Keluarga becomes
+  "Notifikasi Ruang Keluarga". Turning it off stops pushes; activity is still recorded.
+
+### Fixed
+
+- Home no longer shows a navy band below the content when the cycle is still empty.
+
+### Upgrade notes
+
+- Apply migration `033_household_collaboration.sql` in the Supabase SQL Editor (after
+  `001`–`031`; `032` is not part of this release). It leaves `realtime_health()` untouched;
+  verify with the `pg_publication_tables` query at the end of the file.
+- Deploy the `send-push` Edge Function with **Verify JWT off**, set the secret
+  `PUSH_WEBHOOK_SECRET`, and create a Database Webhook on `notifications` INSERT that calls it
+  with the header `x-webhook-secret` set to the same value.
+- Android push needs `google-services.json` (now in the repo) and the FCM V1 service-account
+  key uploaded to EAS.
+- **A new native build is required** (`expo-notifications` and Firebase config). Push does not
+  work in Expo Go; the app runs there without it.
+- Details in [`docs/phase-15-kolaborasi-ruang.md`](docs/phase-15-kolaborasi-ruang.md).
+
 ## [1.0.0] — 2026-10-13
 
 First stable release. Since 0.9.0 the work has gone into three things: making every

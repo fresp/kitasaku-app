@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Bell from 'lucide-react-native/icons/bell';
@@ -34,6 +35,9 @@ import { useHouseholdMembers, useUpdateMyMemberProfile } from '../../lib/queries
 import { memberDisplayName, memberInitials, roleLabel } from '../../lib/profile';
 import { Badge } from '../../components/ui/Badge';
 import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
+
+// Read from app.json so the About text never lags behind a version bump.
+const APP_VERSION = Constants.expoConfig?.version ?? '';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -398,7 +402,7 @@ export default function ProfileScreen() {
             {activeModal === 'about' && (
               <View style={{ gap: 8 }}>
                 <Text style={styles.infoText}>
-                  Kitasaku v1.0.0 — Aplikasi Pengeluaran & Anggaran Keluarga.
+                  Kitasaku v{APP_VERSION} — Aplikasi Pengeluaran & Anggaran Keluarga.
                 </Text>
                 <Text style={[styles.infoText, { color: Colors.textMuted }]}>
                   Dibuat untuk memudahkan transparansi dan keteraturan finansial rumah tangga.
