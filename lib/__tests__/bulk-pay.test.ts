@@ -3,7 +3,9 @@ import {
   batchItemLabel,
   bulkPayNotification,
   bulkPayRecipients,
+  decodeDraft,
   defaultDraftItem,
+  encodeDraft,
   deriveFee,
   draftItemAmount,
   draftItemProblem,
@@ -82,6 +84,27 @@ describe('fee', () => {
       { obligationId: 'a', kind: 'amount', amount: 5 },
       { obligationId: 'b', kind: 'installments', installmentCount: 2 },
     ])).toEqual([{ obligation_id: 'a', amount: 5 }, { obligation_id: 'b', installment_count: 2 }]);
+  });
+});
+
+describe('draft param', () => {
+  const draft = {
+    accountId: 'acc', paidAt: '2026-10-18', totalDebited: 3_021_500, feeCategoryId: null, note: 'hai',
+    notifyIds: ['u2'],
+    items: [
+      { obligationId: 'a', kind: 'amount' as const, amount: 115_000 },
+      { obligationId: 'd', kind: 'installments' as const, installmentCount: 2 },
+    ],
+  };
+  it('round-trips', () => {
+    expect(decodeDraft(encodeDraft(draft))).toEqual(draft);
+  });
+  it('rejects junk and malformed items', () => {
+    expect(decodeDraft(undefined)).toBeNull();
+    expect(decodeDraft('{')).toBeNull();
+    expect(decodeDraft(JSON.stringify({ ...draft, items: [] }))).toBeNull();
+    expect(decodeDraft(JSON.stringify({ ...draft, items: [{ obligationId: 'a', kind: 'amount', amount: '5' }] }))).toBeNull();
+    expect(decodeDraft(JSON.stringify({ ...draft, totalDebited: 1.5 }))).toBeNull();
   });
 });
 

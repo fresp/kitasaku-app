@@ -6,6 +6,8 @@ import { isRepaymentMode } from './obligation';
 import { normalizeShareNote } from './collaboration';
 import type { BulkPreviewRow, ObligationEvent } from './collaboration';
 import type { NotificationRow } from './notifications';
+import { toRpcItems } from './bulk-pay';
+import type { BulkPayDraftItem, BulkPayPreview } from './bulk-pay';
 import { calcCashflow as calculateHomeCashflow, homeCashBalances } from './cashflow';
 import type { CashflowTxn } from './cashflow';
 import type { RepaymentMode } from './obligation';
@@ -144,6 +146,8 @@ export interface Txn {
   cancellation_reason?: CancellationReason | null; cancellation_note?: string | null;
   created_by: string | null; executed_by: string | null;
   recipient: string | null; is_final_payment: boolean; created_at: string;
+  /** One bank debit paying several rows (Phase 16, migration 034). */
+  payment_batch_id?: string | null;
   // joined
   categories?: { name: string; icon?: string | null } | null;
   accounts?: { name: string; type?: string | null } | null;
@@ -226,6 +230,8 @@ function invalidateMoneyKeys(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['cycle-sweep'] });
   // Payments write the tanggungan activity trail (migration 033).
   qc.invalidateQueries({ queryKey: ['obl-events'] });
+  // Bayar tanggungan sekaligus (migration 034).
+  qc.invalidateQueries({ queryKey: ['payment-batch'] });
 }
 
 export function useActiveCycle(householdId: string | undefined) {
@@ -2956,3 +2962,133 @@ export function useTransactionsByIds(householdId: string | undefined, ids: strin
   });
 }
 
+// ---------------------------------------------------------------------------
+// Bayar tanggungan sekaligus (Phase 16, migration 034)
+
+export interface OpenInstallment {
+  id: string; obligation_id: string; planned_amount: number; paid_amount: number;
+  due_date: string | null; created_at: string; status: ObligationInstallment['status'];
+}
+
+/** Every installment still owed in the household, for the cicilan stepper. */
+export function useOpenInstallments(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['installments', householdId, 'open'],
+    enabled: !!householdId,
+    queryFn: async (): Promise<OpenInstallment[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligation_installments')
+        .select('id, obligation_id, planned_amount, paid_amount, due_date, created_at, status')
+        .eq('household_id', householdId!)
+        .not('status', 'in', '(SETTLED,CANCELLED)');
+      if (error) throw error;
+      return (data ?? []) as OpenInstallment[];
+    },
+  });
+}
+
+export interface BulkPayArgs {
+  householdId: string;
+  accountId: string;
+  paidAt: string;
+  items: BulkPayDraftItem[];
+  totalDebited: number;
+  feeCategoryId: string | null;
+}
+
+/** Step 1 of 2: the server's verdict, recomputed from scratch. Writes nothing. */
+export function useBulkPayPreview(args: BulkPayArgs | null) {
+  const rpcItems = args ? toRpcItems(args.items) : [];
+  return useQuery({
+    queryKey: ['txns', 'bulk-pay-preview', args?.householdId, args?.accountId, args?.paidAt,
+      JSON.stringify(rpcItems), args?.totalDebited, args?.feeCategoryId ?? null],
+    enabled: !!args && rpcItems.length > 0,
+    staleTime: 0,
+    queryFn: async (): Promise<BulkPayPreview> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('preview_pay_obligations_bulk', {
+        p_household_id: args!.householdId,
+        p_account_id: args!.accountId,
+        p_paid_at: args!.paidAt,
+        p_items: rpcItems,
+        p_total_debited: args!.totalDebited,
+        p_fee_category_id: args!.feeCategoryId,
+      });
+      if (error) throw error;
+      return data as BulkPayPreview;
+    },
+  });
+}
+
+/**
+ * Step 2 of 2: one all-or-nothing write. The server re-validates and
+ * recomputes every amount; the notification is written in the same
+ * transaction. Returns the payment batch id.
+ */
+export function usePayObligationsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: BulkPayArgs & { note?: string | null; notifyIds: string[] }): Promise<string> => {
+      if (args.items.length === 0) throw new Error('Pilih minimal satu tanggungan.');
+      const sb = requireSupabase();
+      const { data, error } = await sb.rpc('pay_obligations_bulk', {
+        p_household_id: args.householdId,
+        p_account_id: args.accountId,
+        p_paid_at: args.paidAt,
+        p_items: toRpcItems(args.items),
+        p_total_debited: args.totalDebited,
+        p_fee_category_id: args.feeCategoryId,
+        p_note: normalizeShareNote(args.note),
+        p_notify_member_ids: args.notifyIds,
+      });
+      if (error) throw error;
+      return String(data);
+    },
+    onSuccess: () => {
+      invalidateMoneyKeys(qc);
+      qc.invalidateQueries({ queryKey: ['installments'] });
+      // The fee category may have been created by the RPC.
+      qc.invalidateQueries({ queryKey: ['cats'] });
+    },
+  });
+}
+
+export interface PaymentBatch {
+  id: string; household_id: string; cycle_id: string | null; account_id: string | null;
+  paid_at: string; subtotal: number; total_debited: number; fee_amount: number;
+  fee_transaction_id: string | null; item_count: number; items: unknown;
+  note: string | null; recipient_ids: string[]; created_by: string | null; created_at: string;
+  accounts?: { name: string } | null;
+}
+
+export function usePaymentBatch(householdId: string | undefined, batchId: string | undefined) {
+  return useQuery({
+    queryKey: ['payment-batch', householdId, batchId],
+    enabled: !!householdId && !!batchId,
+    queryFn: async (): Promise<PaymentBatch | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('payment_batches')
+        .select('*, accounts(name)')
+        .eq('household_id', householdId!).eq('id', batchId!).maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as PaymentBatch | null;
+    },
+  });
+}
+
+/** The rows of one batch, read live so a later correction shows truthfully. */
+export function useBatchTransactions(householdId: string | undefined, batchId: string | undefined) {
+  return useQuery({
+    queryKey: ['txns', 'batch', householdId, batchId],
+    enabled: !!householdId && !!batchId,
+    queryFn: async (): Promise<Txn[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('transactions')
+        .select('*, categories(name, icon), accounts!transactions_account_id_fkey(name, type)')
+        .eq('household_id', householdId!).eq('payment_batch_id', batchId!)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Txn[];
+    },
+  });
+}

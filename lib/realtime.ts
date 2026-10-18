@@ -144,6 +144,13 @@ export function useHouseholdRealtime(householdId: string | undefined, userId?: s
         () => {
           qc.invalidateQueries({ queryKey: ['obl-events'] });
         }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payment_batches', filter: `household_id=eq.${householdId}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ['payment-batch'] });
+        }
       );
 
     // Notifications are per recipient, not per household: RLS only lets this

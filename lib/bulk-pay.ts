@@ -105,6 +105,58 @@ export function deriveFee(itemAmounts: number[], totalDebited: number): FeeDeriv
   return { subtotal, fee: totalDebited - subtotal, error: null };
 }
 
+/** Everything the review screen needs, passed as one route param. */
+export interface BulkPayDraft {
+  accountId: string;
+  paidAt: string;
+  items: BulkPayDraftItem[];
+  totalDebited: number;
+  feeCategoryId: string | null;
+  note: string;
+  notifyIds: string[];
+}
+
+export function encodeDraft(draft: BulkPayDraft): string {
+  return JSON.stringify(draft);
+}
+
+/** Null for anything that is not a well-formed draft (stale link, junk). */
+export function decodeDraft(raw: unknown): BulkPayDraft | null {
+  if (typeof raw !== 'string' || !raw) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const d = v as Record<string, unknown>;
+  const str = (x: unknown) => typeof x === 'string' && x.length > 0;
+  if (!str(d.accountId) || !str(d.paidAt) || !Number.isInteger(d.totalDebited) || !Array.isArray(d.items)) return null;
+  const items: BulkPayDraftItem[] = [];
+  for (const raw of d.items) {
+    const it = raw as Record<string, unknown>;
+    if (!it || !str(it.obligationId)) return null;
+    if (it.kind === 'amount' && Number.isInteger(it.amount)) {
+      items.push({ obligationId: it.obligationId as string, kind: 'amount', amount: it.amount as number });
+    } else if (it.kind === 'installments' && Number.isInteger(it.installmentCount)) {
+      items.push({ obligationId: it.obligationId as string, kind: 'installments', installmentCount: it.installmentCount as number });
+    } else {
+      return null;
+    }
+  }
+  if (items.length === 0 || items.length > BULK_PAY_MAX_ITEMS) return null;
+  return {
+    accountId: d.accountId as string,
+    paidAt: d.paidAt as string,
+    items,
+    totalDebited: d.totalDebited as number,
+    feeCategoryId: str(d.feeCategoryId) ? (d.feeCategoryId as string) : null,
+    note: typeof d.note === 'string' ? d.note.slice(0, BULK_PAY_NOTE_MAX) : '',
+    notifyIds: Array.isArray(d.notifyIds) ? d.notifyIds.filter(str) as string[] : [],
+  };
+}
+
 /** Payload for preview_pay_obligations_bulk / pay_obligations_bulk. */
 export function toRpcItems(items: BulkPayDraftItem[]): { obligation_id: string; amount?: number; installment_count?: number }[] {
   return items.map((item) =>
