@@ -21,12 +21,14 @@ Ruang keluarga tidak cuma tempat input bersama. Setiap tanggungan tercatat siapa
 ## C. Notifikasi tanggungan (otomatis)
 
 6. `CREATED` dikirim ke semua anggota kecuali aktor. `PAYMENT`, `CANCELLED`, `SCHEDULE_CHANGED`, dan `STATUS_CHANGED` dikirim ke pengaju, kecuali aktor = pengaju atau `created_by` null.
+   - **Revisi Phase 16 (034):** `PAYMENT` di dalam batch bayar tanggungan yang berisi >1 item atau punya biaya **tidak** dipush per tanggungan. Pengaju otomatis menerima satu ringkasan `OBLIGATIONS_BULK_PAID` per batch. `obligation_events` tetap ditulis seperti biasa. Lihat `docs/phase-16-bulk-bayar-tanggungan.md` bagian D.
 
 ## D. Kabar transaksi (opt-in per aksi)
 
 7. Tidak ada push otomatis untuk transaksi biasa. Kartu "Kabari anggota ruang" ada di Quick Add, Konfirmasi Pembayaran, dan Eksekusi Bersama: switch (default **nyala**, semua anggota lain terpilih), pilihan penerima, catatan opsional. Bagikan lewat share sheet OS (WhatsApp) tetap ada sebagai jalur sekunder di Eksekusi Bersama.
 8. Kabar hanya dikirim untuk transaksi yang **sudah tersimpan**. Untuk jalur tunggal (Quick Add, Konfirmasi Pembayaran), panggil RPC `share_transactions` setelah tulis berhasil. RPC itu memvalidasi bahwa transaksi milik household dan dicatat/dieksekusi oleh pemanggil; gagal share tidak memengaruhi uang. Untuk bulk, kabar ditulis di RPC eksekusinya (E).
 9. Tanggungan yang dibayar sekaligus dikabari membuat pengaju menerima dua push (otomatis + kabar). Ini diterima.
+   - Revisi Phase 16: untuk bayar tanggungan sekaligus, pengaju hanya menerima satu ringkasan per batch, bukan dua push.
 
 ## E. Eksekusi Bersama (bulk paid) dua langkah
 
@@ -66,6 +68,7 @@ Ruang keluarga tidak cuma tempat input bersama. Setiap tanggungan tercatat siapa
   - bulk all-or-nothing, termasuk rollback saat ada baris bermasalah;
   - validasi `share_transactions`, RLS `notifications`, dan penolakan insert langsung ke `obligation_events`.
 - **Temuan dari 029:** `execute_planned_transaction` menolak rencana DEBT_PAYMENT pada tanggungan **tanpa** jadwal cicilan ("tidak dapat dipetakan"). Perilaku ini sudah ada sebelumnya dan tidak diubah. Preview bulk menandai baris seperti itu lebih dulu.
+  - Diperbaiki di 034: penolakan itu sekarang hanya berlaku untuk tanggungan yang punya jadwal.
 - **Kabari di Quick Add** ikut default nyala, sama dengan layar bayar. Kalau terasa ramai, cukup ubah default di `useKabariState`.
 - **Bagikan ke WhatsApp** di Eksekusi Bersama tetap memakai ringkasan rencana. Isinya sama dengan yang dieksekusi, karena bulk memakai nominal rencana.
 - `expo-device` tidak dipakai. Registrasi push gagal dengan aman di emulator atau tanpa izin.
