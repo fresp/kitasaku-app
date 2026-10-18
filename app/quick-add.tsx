@@ -25,9 +25,12 @@ import {
   useCategories,
   useCreateFinancingLoan,
   useHouseholdMembers,
+  useObligations,
+  useOpenInstallments,
   useQuickAdd,
   useShareTransactions,
 } from '../lib/queries';
+import { BulkPayForm } from '../components/bulk-pay/BulkPayForm';
 import { KabariCard, useKabariState } from '../components/collaboration/KabariCard';
 import {
   longDateFullLabel,
@@ -65,12 +68,14 @@ function isKind(value: unknown): value is Kind {
 
 export default function QuickAddScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ kind?: string; scope?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; scope?: string; mode?: string }>();
   const initialKind: Kind = isKind(params.kind) ? params.kind : 'out';
   const initialAudit = params.scope === 'audit';
 
   const [auditMode, setAuditMode] = useState(initialAudit);
   const [kind, setKind] = useState<Kind>(initialKind);
+  // Pengeluaran > Biasa | Bayar tanggungan (Phase 16).
+  const [outMode, setOutMode] = useState<'normal' | 'bulk'>(params.mode === 'bulk' ? 'bulk' : 'normal');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
 
@@ -86,6 +91,8 @@ export default function QuickAddScreen() {
   const membersQ = useHouseholdMembers(householdId);
   const members = useMemo(() => membersQ.data?.members ?? [], [membersQ.data]);
   const kabari = useKabariState(members, myUserId);
+  const obligQ = useObligations(householdId);
+  const openInstQ = useOpenInstallments(householdId);
 
   const [name, setName] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -110,6 +117,7 @@ export default function QuickAddScreen() {
   const isLoan = kind === 'loan';
   const cycleAvailable = !!cycleQ.data?.id;
   const isAuditEntry = auditMode && !isLoan;
+  const isBulk = kind === 'out' && outMode === 'bulk';
 
   const visibleCategories = useMemo(
     () =>
@@ -313,6 +321,42 @@ export default function QuickAddScreen() {
             </Pressable>
           </View>
 
+          {kind === 'out' && (
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Jenis pengeluaran</Text>
+              <View style={styles.outModeRow}>
+                {([['normal', 'Biasa'], ['bulk', 'Bayar tanggungan']] as const).map(([mode, label]) => (
+                  <Pressable
+                    key={mode}
+                    onPress={() => {
+                      setOutMode(mode);
+                      if (mode === 'bulk') setAuditMode(false);
+                    }}
+                    style={[styles.outModeOpt, outMode === mode && styles.outModeOptActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: outMode === mode }}
+                  >
+                    <Text style={[styles.outModeText, outMode === mode && styles.outModeTextActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {isBulk ? (
+            <BulkPayForm
+              obligations={obligQ.data ?? []}
+              obligationsError={obligQ.isError || openInstQ.isError}
+              onRetryObligations={() => { void obligQ.refetch(); void openInstQ.refetch(); }}
+              installments={openInstQ.data ?? []}
+              accounts={accounts}
+              categories={categories}
+              members={members}
+              myUserId={myUserId}
+              cycleAvailable={cycleAvailable}
+            />
+          ) : (
+          <>
           {/* Audit Toggle Option */}
           <Pressable
             onPress={() => {
@@ -620,6 +664,8 @@ export default function QuickAddScreen() {
                 : 'Simpan'}
             </Text>
           </Pressable>
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
 
@@ -800,6 +846,36 @@ const styles = StyleSheet.create({
   },
   toggleTextActive: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  /* Pengeluaran mode */
+  outModeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  outModeOpt: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outModeOptActive: {
+    borderWidth: 1.5,
+    borderColor: Colors.navy,
+    backgroundColor: Colors.canvas,
+  },
+  outModeText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  outModeTextActive: {
+    color: Colors.textPrimary,
     fontWeight: '700',
   },
 

@@ -19,6 +19,7 @@ import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Clock from 'lucide-react-native/icons/clock';
 import X from 'lucide-react-native/icons/x';
+import Layers from 'lucide-react-native/icons/layers';
 import { Colors, Radius } from '../../constants/theme';
 import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
@@ -41,6 +42,7 @@ import {
   ledgerDayLabel,
 } from '../../lib/zero-based';
 import type { FlowType } from '../../lib/zero-based';
+import { groupCountLabel, groupLedgerByBatch } from '../../lib/bulk-pay';
 
 const FLOW_LABELS: Record<FlowType, string> = {
   OPERATING_INCOME: 'Income Operasional',
@@ -464,36 +466,51 @@ export default function HistoryScreen() {
         )}
 
         {/* Grouped Ledger by Date */}
-        {groups.map((g) => (
+        {groups.map((g) => {
+          // One bank debit is one activity (Phase 16): rows of a payment batch
+          // collapse into a single entry that opens Detail Pembayaran.
+          const entries = groupLedgerByBatch(g.rows);
+          return (
           <View key={g.key} style={styles.groupContainer}>
             <View style={styles.groupHeader}>
               <Text style={styles.groupDate}>{g.label}</Text>
-              <Text style={styles.groupCount}>{g.rows.length} transaksi</Text>
+              <Text style={styles.groupCount}>{groupCountLabel(entries)}</Text>
             </View>
 
             <View style={styles.ledgerList}>
-              {g.rows.map((r, i) => (
+              {entries.map((e, i) =>
+                e.type === 'batch' ? (
+                  <BatchLedgerCard
+                    key={`batch-${e.batchId}`}
+                    rows={e.rows}
+                    total={e.total}
+                    isLast={i === entries.length - 1}
+                    onPress={() => router.push({ pathname: '/payment-batch', params: { id: e.batchId } })}
+                  />
+                ) : (
                 <LedgerCard
-                  key={r.id}
-                  row={r}
-                  isLast={i === g.rows.length - 1}
+                  key={e.row.id}
+                  row={e.row}
+                  isLast={i === entries.length - 1}
                   onPress={
                     viewingCancelled
                       ? undefined
                       : () =>
                           router.push({
                             pathname:
-                              r.status === 'PENDING'
+                              e.row.status === 'PENDING'
                                 ? '/payment-confirm'
                                 : '/transaction-edit',
-                            params: { id: r.id },
+                            params: { id: e.row.id },
                           })
                   }
                 />
-              ))}
+                )
+              )}
             </View>
           </View>
-        ))}
+          );
+        })}
 
         {remaining > 0 && (
           <Pressable
@@ -714,7 +731,67 @@ function LedgerCard({
   );
 }
 
+function BatchLedgerCard({
+  rows,
+  total,
+  isLast,
+  onPress,
+}: {
+  rows: LedgerRow[];
+  total: number;
+  isLast: boolean;
+  onPress: () => void;
+}) {
+  const debts = rows.filter((r) => r.flowType === 'DEBT_PAYMENT').length;
+  const hasFee = rows.length > debts;
+  const account = rows[0]?.accounts?.name ?? 'Tanpa akun';
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.txnCard, styles.batchCard, !isLast && styles.txnCardBorder]}
+      accessibilityRole="button"
+      accessibilityLabel={`Bayar ${debts} tanggungan, ${formatRupiah(total)}`}
+    >
+      <View style={[styles.txnIconWrap, { backgroundColor: FLOW_TONES.DEBT_PAYMENT.bg }]}>
+        <Layers size={18} color={FLOW_TONES.DEBT_PAYMENT.text} />
+      </View>
+      <View style={styles.txnCenter}>
+        <Text style={styles.txnTitle} numberOfLines={1}>
+          Bayar {debts} tanggungan
+        </Text>
+        <Text style={styles.txnMeta} numberOfLines={1}>
+          {account} · {debts} tanggungan{hasFee ? ' + biaya transfer' : ''}
+        </Text>
+      </View>
+      <View style={styles.txnRight}>
+        <Text style={[styles.txnAmount, styles.txnAmountOut]}>− {formatRupiah(total)}</Text>
+        <View style={styles.batchTag}>
+          <Text style={styles.batchTagText}>{rows.length} baris</Text>
+          <ChevronRight size={12} color={Colors.textSecondary} />
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  batchCard: {
+    backgroundColor: Colors.canvas,
+  },
+  batchTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: Colors.subtle,
+    borderRadius: Radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  batchTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
   safe: {
     flex: 1,
     backgroundColor: '#F8FAFC',

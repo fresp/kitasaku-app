@@ -107,6 +107,8 @@ function Gate() {
         <Stack.Screen name="budget-health" options={{ presentation: 'card' }} />
         <Stack.Screen name="loan-detail" options={{ presentation: 'card' }} />
         <Stack.Screen name="shared-transactions" options={{ presentation: 'card' }} />
+        <Stack.Screen name="payment-batch" options={{ presentation: 'card' }} />
+        <Stack.Screen name="bulk-pay-review" options={{ presentation: 'card' }} />
         <Stack.Screen name="funding-gap" options={{ presentation: 'card' }} />
         <Stack.Screen name="reconciliation" options={{ presentation: 'card' }} />
         {/* Three decisions, so it rises as a sheet over whatever called it —
