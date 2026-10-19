@@ -928,7 +928,8 @@ begin
 
   create temporary table if not exists pg_temp.bulk_pay_items on commit drop as
     select * from public.bulk_pay_plan(p_household_id, v_cycle_id, p_items) limit 0;
-  delete from pg_temp.bulk_pay_items;
+  -- pg-safeupdate (on for API calls in Supabase) rejects an unqualified DELETE.
+  delete from pg_temp.bulk_pay_items where true;
   insert into pg_temp.bulk_pay_items select * from public.bulk_pay_plan(p_household_id, v_cycle_id, p_items);
 
   select * into v_bad from pg_temp.bulk_pay_items where not ok order by idx limit 1;
