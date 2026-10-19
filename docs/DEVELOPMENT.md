@@ -7,7 +7,11 @@ Design: `../../design/design.pen` · Spec: `../../.claude/MVP.md` · pen.dev pro
 
 Package id `id.my.fresp.kitasaku`. The app version is set in `app.json` and `package.json`
 (keep them equal); EAS manages the Android `versionCode` remotely. Release notes go in
-[`CHANGELOG.md`](../CHANGELOG.md).
+[`CHANGELOG.md`](../CHANGELOG.md). JS-only changes ship as OTA with
+`eas update --channel production` (`runtimeVersion` uses the `fingerprint` policy, so only
+builds with the same native layer receive them). A new APK is announced through the
+`app_releases` row (migration `035`): set `latest_version_code`, `apk_url` and `notes` after
+uploading it, and raise `min_version_code` only before a change older builds must not use.
 
 ## Stack
 
@@ -110,9 +114,9 @@ Details in `docs/phase-12-rekonsiliasi-tutup-siklus.md`.
 
 ## Migrations
 
-Applied manually in the Supabase SQL Editor, in filename order, latest `033`.
-Release 1.1.0 expects `001`–`031` and `033` to be applied (`032` belongs to the unreleased
-Anggaran Khusus work).
+Applied manually in the Supabase SQL Editor, in filename order, latest `035`.
+Release 1.2.0 expects `001`–`031` and `033`–`035` to be applied (`032` belongs to the
+unreleased Anggaran Khusus work).
 Each file is idempotent and safe to re-run. Conventions: next number after the highest
 existing one, a header comment stating the prerequisite range, `set search_path = public`
 plus an explicit grant for every function, user-facing exception messages in Indonesian,

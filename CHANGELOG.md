@@ -4,6 +4,47 @@ All notable changes to Kitasaku are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-19
+
+One bank transfer can now settle several tanggungan at once, and the app finally knows when
+it is out of date: a fix that only touches the app's code arrives on its own, and a new APK
+is announced inside the app instead of through a WhatsApp link.
+
+### Added
+
+- **Bayar tanggungan sekaligus.** Quick Add > Pengeluaran has a "Biasa / Bayar tanggungan"
+  choice: pick several active tanggungan, pay each in full, in part, or by N open cicilan,
+  from one account on one date. A transfer fee above the subtotal is recorded as one
+  separate "Biaya Transfer" expense. A review screen checks every row first; the batch is
+  then saved in one step, all or nothing.
+- **Detail Pembayaran.** A batch shows as one activity in Riwayat ("Bayar n tanggungan ·
+  akun") and opens to its rows. Each member gets one summary push per batch instead of one
+  per tanggungan.
+- **Update notices.** A downloaded update shows a "Versi baru siap dipakai" banner on Home
+  with Muat ulang. A newer APK opens a "Kitasaku x.y.z tersedia" sheet that can be postponed;
+  a build below the minimum version is blocked with "Perlu update dulu" until it is updated.
+
+### Fixed
+
+- Konfirmasi Pembayaran for a Reimburse or Tagihan without a cicilan schedule no longer
+  fails with "tidak dapat dipetakan ke jadwal cicilan".
+- Terbayar lists tanggungan that are already lunas, and a lunas tanggungan opens in Detail
+  Tanggungan instead of an empty screen.
+
+### Upgrade notes
+
+- Apply in the Supabase SQL Editor, in order: `034_bulk_pay_obligations.sql`, then
+  `035_app_releases.sql` (after `001`–`031` and `033`; `032` is still not part of this
+  release). Apply 034 **before** installing this build. Run each file's verification block.
+- **A new native build is required** (`expo-updates`, `expo-application`). `runtimeVersion`
+  uses the `fingerprint` policy, so OTA updates (`eas update --channel production`) reach only
+  builds with the same native fingerprint; builds up to 1.1.0 receive none and must be
+  updated by hand once.
+- After uploading the APK to a public https URL, set `latest_version_code`,
+  `latest_version_name`, `apk_url` and `notes` in `app_releases`. Raise `min_version_code`
+  only when an older build must stop writing.
+- Details in [`docs/phase-16-bulk-bayar-tanggungan.md`](docs/phase-16-bulk-bayar-tanggungan.md).
+
 ## [1.1.0] — 2026-10-14
 
 Ruang Keluarga becomes a place to work together, not just a shared ledger. Every
