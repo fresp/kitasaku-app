@@ -15,7 +15,7 @@ import Plus from 'lucide-react-native/icons/plus';
 import { Colors } from '../../constants/theme';
 import { formatRupiah } from '../../lib/format';
 import { useAuth } from '../../lib/auth-context';
-import { useHouseholdMembers, useObligations } from '../../lib/queries';
+import { useHouseholdMembers, useObligations, useSettledObligations } from '../../lib/queries';
 import { obligationListSubtitle } from '../../lib/collaboration';
 import {
   daysBetween,
@@ -59,6 +59,8 @@ export default function ObligationsScreen() {
   const membersQ = useHouseholdMembers(householdId);
   const members = membersQ.data?.members ?? [];
   const obligQ = useObligations(householdId);
+  // useObligations only returns what is still owed, so Terbayar reads its own list.
+  const settledQ = useSettledObligations(householdId);
 
   const [activeTab, setActiveTab] = useState<ObligationTab>('upcoming');
   const [showForm, setShowForm] = useState(false);
@@ -71,10 +73,7 @@ export default function ObligationsScreen() {
     () => obligations.filter((o) => !isSettled(o.status)),
     [obligations]
   );
-  const paidList = useMemo(
-    () => obligations.filter((o) => isSettled(o.status)),
-    [obligations]
-  );
+  const paidList = useMemo(() => settledQ.data ?? [], [settledQ.data]);
 
   // What the cycle pill used to imply but never delivered. An obligation is
   // not owned by a cycle — only its payments are — so the honest cut is by
@@ -106,8 +105,11 @@ export default function ObligationsScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={obligQ.isFetching}
-            onRefresh={() => void obligQ.refetch()}
+            refreshing={obligQ.isFetching || settledQ.isFetching}
+            onRefresh={() => {
+              void obligQ.refetch();
+              void settledQ.refetch();
+            }}
           />
         }
       >
@@ -199,7 +201,7 @@ export default function ObligationsScreen() {
           </View>
         )}
 
-        {!obligQ.isLoading && !obligQ.isError && obligations.length === 0 && (
+        {!obligQ.isLoading && !obligQ.isError && !settledQ.isLoading && obligations.length === 0 && paidList.length === 0 && (
           <View style={styles.emptyBox}>
             <BrandIcon name="empty-tidak-ada-tagihan" size={64} label="" />
             <Text style={styles.emptyText}>
@@ -271,6 +273,15 @@ export default function ObligationsScreen() {
                 );
               })}
             </View>
+          </View>
+        )}
+
+        {activeTab === 'paid' && settledQ.isError && (
+          <QueryError onRetry={() => void settledQ.refetch()} retrying={settledQ.isFetching} />
+        )}
+        {activeTab === 'paid' && !settledQ.isLoading && !settledQ.isError && paidList.length === 0 && (obligations.length > 0) && (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyText}>Belum ada tanggungan yang lunas.</Text>
           </View>
         )}
 

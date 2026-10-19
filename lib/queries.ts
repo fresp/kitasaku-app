@@ -454,6 +454,38 @@ export function useObligations(householdId: string | undefined) {
   });
 }
 
+/** Lunas tanggungan for the Terbayar tab; useObligations lists open ones only. */
+export function useSettledObligations(householdId: string | undefined) {
+  return useQuery({
+    queryKey: ['oblig', householdId, 'settled'], enabled: !!householdId,
+    queryFn: async (): Promise<Obligation[]> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligations')
+        .select('*, beneficiary:beneficiaries(*)')
+        .eq('household_id', householdId!).eq('status', 'SETTLED')
+        .order('created_at', { ascending: false }).limit(100);
+      if (error) throw error;
+      return (data ?? []) as Obligation[];
+    },
+  });
+}
+
+/** One tanggungan by id, whatever its status (Detail Tanggungan, push taps). */
+export function useObligation(householdId: string | undefined, obligationId: string | undefined) {
+  return useQuery({
+    queryKey: ['oblig', householdId, 'one', obligationId],
+    enabled: !!householdId && !!obligationId,
+    queryFn: async (): Promise<Obligation | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('obligations')
+        .select('*, beneficiary:beneficiaries(*)')
+        .eq('household_id', householdId!).eq('id', obligationId!).maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as Obligation | null;
+    },
+  });
+}
+
 export function useTemplates(householdId: string | undefined) {
   return useQuery({
     queryKey: ['tmpl', householdId], enabled: !!householdId,

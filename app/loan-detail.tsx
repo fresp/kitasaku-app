@@ -45,7 +45,7 @@ import {
   useObligationEvents,
   useObligationInstallments,
   useObligationPayments,
-  useObligations,
+  useObligation,
   useTransactionById,
 } from '../lib/queries';
 import { activityTimeline, memberName, requesterLabel, type TimelineTone } from '../lib/collaboration';
@@ -96,7 +96,8 @@ export default function LoanDetailScreen() {
 
   const cycleQ = useActiveCycle(householdId);
   const cycleId = cycleQ.data?.id;
-  const obligQ = useObligations(householdId);
+  // By id, not from the open list: a lunas tanggungan must still open.
+  const obligQ = useObligation(householdId, id);
   const instQ = useObligationInstallments(householdId, id);
   const payQ = useObligationPayments(householdId, id);
   const accsQ = useAccounts(householdId);
@@ -130,8 +131,8 @@ export default function LoanDetailScreen() {
   const todayISO = new Date().toISOString().slice(0, 10);
 
   const obligation = useMemo(
-    () => (obligQ.data ?? []).find((o) => o.id === id) ?? null,
-    [obligQ.data, id]
+    () => obligQ.data ?? null,
+    [obligQ.data]
   );
   const installments = useMemo(() => instQ.data ?? [], [instQ.data]);
   const payments = useMemo(() => payQ.data ?? [], [payQ.data]);
