@@ -46,3 +46,4 @@ yarn-error.*
 /.claude
 /revamp_screens
 /docs/mockups
+/releases
