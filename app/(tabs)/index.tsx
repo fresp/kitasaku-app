@@ -33,6 +33,7 @@ import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { BrandIcon } from '../../components/ui/BrandIcon';
 import { QueryError } from '../../components/ui/QueryError';
+import { OtaUpdateBanner } from '../../components/ui/UpdateNotice';
 import type { Txn } from '../../lib/queries';
 import type { RowItem } from '../../components/ui/TransactionRow';
 
@@ -198,6 +199,8 @@ export default function HomeScreen() {
       >
         {/* Dark Overview Card (01_home composition) */}
         <View style={styles.overview}>
+          {/* JS-only update already downloaded; renders nothing otherwise. */}
+          <OtaUpdateBanner />
           {/* Topline: Avatar & Greeting */}
           <View style={styles.topline}>
             <Pressable

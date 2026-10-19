@@ -7,6 +7,8 @@ import { normalizeShareNote } from './collaboration';
 import type { BulkPreviewRow, ObligationEvent } from './collaboration';
 import type { NotificationRow } from './notifications';
 import { toRpcItems } from './bulk-pay';
+import { releaseFromRow } from './app-version';
+import type { AppRelease, AppReleaseRow } from './app-version';
 import type { BulkPayDraftItem, BulkPayPreview } from './bulk-pay';
 import { calcCashflow as calculateHomeCashflow, homeCashBalances } from './cashflow';
 import type { CashflowTxn } from './cashflow';
@@ -3121,6 +3123,28 @@ export function useBatchTransactions(householdId: string | undefined, batchId: s
         .order('created_at', { ascending: true });
       if (error) throw error;
       return (data ?? []) as Txn[];
+    },
+  });
+}
+
+/**
+ * The published APK release (migration 035). Not household data, so it is read
+ * before sign-in too. A failed read resolves to no gate rather than an error:
+ * the version check must never block the family from their own ledger.
+ */
+export function useAppRelease(enabled = true) {
+  return useQuery({
+    queryKey: ['app-release', 'android'],
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: 0,
+    queryFn: async (): Promise<AppRelease | null> => {
+      const sb = requireSupabase();
+      const { data, error } = await sb.from('app_releases')
+        .select('latest_version_code, latest_version_name, min_version_code, apk_url, notes')
+        .eq('platform', 'android').maybeSingle();
+      if (error) return null;
+      return releaseFromRow(data as AppReleaseRow | null);
     },
   });
 }

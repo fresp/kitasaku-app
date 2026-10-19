@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../lib/auth-context';
 import { hasSeenWelcome } from '../lib/onboarding';
 import { AppSplash } from '../components/ui/AppSplash';
+import { ApkUpdateGate } from '../components/ui/UpdateNotice';
 
 // Hold the OS splash until AppSplash has painted, then hand off to it — see the
 // comment on `hideNativeSplash` below. Without the hold, the cold start flashes
@@ -136,6 +137,8 @@ function Gate() {
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
       </Stack>
+      {/* New APK notice / blocking gate. Held until the splash is gone. */}
+      <ApkUpdateGate ready={!splashVisible} />
       {/* Sits over the navigator rather than in it, so it is not a route the
           Gate can navigate away from mid-fade. */}
       <AppSplash visible={splashVisible} onFirstLayout={hideNativeSplash} />
