@@ -47,3 +47,6 @@ yarn-error.*
 /revamp_screens
 /docs/mockups
 /releases
+
+# Local APK downloads; published in fresp/kitasaku-releases
+releases/
