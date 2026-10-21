@@ -4,6 +4,37 @@ All notable changes to Kitasaku are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-10-21
+
+When a tanggungan grows, for example borrowing again from the same person, the extra amount
+is now recorded as its own event instead of by rewriting the principal in "Atur Tenor &
+Cicilan", and the money that came in lands in the right account.
+
+### Added
+
+- **Tambah pokok.** Detail Tanggungan has a "Tambah pokok" button next to "Tandai sudah
+  dibayar" for tanggungan that are not finished yet. Enter the extra amount, date and an
+  optional note; with "Uang masuk ke rekening" on, the money is recorded as incoming funds in
+  a bank or e-wallet account in the active cycle, so it shows up as unallocated. Turn it off
+  to record only the larger debt, e.g. a talangan. Total and sisa rise together in one step.
+- Aktivitas shows "Pokok ditambah oleh <nama>" with the amount, account, new sisa and note,
+  and the person who submitted the tanggungan gets a push. The Detail hero shows "Sisa dari
+  total Rp X" once sisa and total differ.
+
+### Changed
+
+- Tanggungan with open cicilan cannot be topped up yet; the sheet points to "Atur cicilan"
+  instead.
+
+### Upgrade notes
+
+- Apply `036_obligation_topup.sql` in the Supabase SQL Editor (after `001`–`031` and
+  `033`–`035`) **before** this version reaches any phone, then run its verification block.
+- No new native module. If the native fingerprint still matches the 1.2.0 build, this can ship
+  as an OTA update (`eas update --channel production`); otherwise build and publish a new APK
+  and update `app_releases`.
+- Details in [`docs/phase-17-tambah-pokok.md`](docs/phase-17-tambah-pokok.md).
+
 ## [1.2.0] — 2026-10-19
 
 One bank transfer can now settle several tanggungan at once, and the app finally knows when
