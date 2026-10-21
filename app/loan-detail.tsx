@@ -7,6 +7,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -21,6 +22,7 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import Copy from 'lucide-react-native/icons/copy';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import Pencil from 'lucide-react-native/icons/pencil';
+import Plus from 'lucide-react-native/icons/plus';
 import ReceiptText from 'lucide-react-native/icons/receipt-text';
 import Trash2 from 'lucide-react-native/icons/trash';
 import X from 'lucide-react-native/icons/x';
@@ -46,8 +48,17 @@ import {
   useObligationInstallments,
   useObligationPayments,
   useObligation,
+  useTopupObligation,
   useTransactionById,
 } from '../lib/queries';
+import { defaultAccountId, isZeroBasedCashAccount } from '../lib/account';
+import {
+  topupBlockMessage,
+  topupBlockReason,
+  topupInflowHint,
+  topupPreview,
+  topupSubmitLabel,
+} from '../lib/obligation-topup';
 import { activityTimeline, memberName, requesterLabel, type TimelineTone } from '../lib/collaboration';
 import {
   installmentProgressLabel,
@@ -107,6 +118,7 @@ export default function LoanDetailScreen() {
   const configureInstallments = useConfigureObligationInstallments();
   const pay = useAllocateDebtPayment();
   const cancelObligation = useCancelObligation();
+  const topup = useTopupObligation();
 
   const [activeTab, setActiveTab] = useState<DetailTab>('detail');
   const [err, setErr] = useState<string | null>(null);
@@ -128,6 +140,14 @@ export default function LoanDetailScreen() {
   const [scheduleFeeText, setScheduleFeeText] = useState('');
   const [scheduleStartDate, setScheduleStartDate] = useState('');
   const [copied, setCopied] = useState(false);
+  // Tambah pokok (Phase 17, migration 036).
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [topupText, setTopupText] = useState('');
+  const [topupDate, setTopupDate] = useState('');
+  const [topupNote, setTopupNote] = useState('');
+  const [topupInflow, setTopupInflow] = useState(true);
+  const [topupAccountId, setTopupAccountId] = useState<string | null>(null);
+  const [topupErr, setTopupErr] = useState<string | null>(null);
   const todayISO = new Date().toISOString().slice(0, 10);
 
   const obligation = useMemo(
@@ -294,6 +314,55 @@ export default function LoanDetailScreen() {
     }
   }
 
+  const inflowAccounts = (accsQ.data ?? []).filter(isZeroBasedCashAccount);
+  const topupBlock = topupBlockReason(obligation, openInstallmentCount);
+  const topupAmount = Number(topupText.replace(/[^0-9]/g, '') || 0);
+  const topupFigures = topupPreview(obligation, topupAmount);
+  const topupAccount = inflowAccounts.find((a) => a.id === topupAccountId) ?? null;
+
+  function openTopup() {
+    setTopupErr(null);
+    setTopupText('');
+    setTopupNote('');
+    setTopupDate(todayISO);
+    setTopupInflow(true);
+    setTopupAccountId(defaultAccountId(inflowAccounts) ?? inflowAccounts[0]?.id ?? null);
+    setTopupOpen(true);
+  }
+
+  async function saveTopup() {
+    setTopupErr(null);
+    if (!householdId) {
+      setTopupErr('Login dulu untuk menambah pokok.');
+      return;
+    }
+    if (!(topupAmount > 0)) {
+      setTopupErr('Nominal tambahan harus lebih dari Rp 0.');
+      return;
+    }
+    if (topupInflow && !topupAccountId) {
+      setTopupErr('Pilih rekening tujuan uang masuk.');
+      return;
+    }
+    if (topupInflow && !cycleId) {
+      setTopupErr('Buka siklus aktif dulu untuk mencatat uang masuk.');
+      return;
+    }
+    try {
+      await topup.mutateAsync({
+        householdId,
+        obligationId: ob.id,
+        amount: topupAmount,
+        occurredOn: topupDate || todayISO,
+        accountId: topupInflow ? topupAccountId : null,
+        note: topupNote,
+      });
+      setTopupOpen(false);
+    } catch (e: any) {
+      setTopupErr(e?.message ?? 'Gagal menambah pokok.');
+    }
+  }
+
   async function cancel() {
     setErr(null);
     if (!householdId) return;
@@ -361,6 +430,9 @@ export default function LoanDetailScreen() {
             <Text style={styles.heroAmount}>
               {formatRupiah(obligation.remaining_amount || obligation.total_amount)}
             </Text>
+            {obligation.remaining_amount > 0 && obligation.remaining_amount !== obligation.total_amount && (
+              <Text style={styles.heroSub}>Sisa dari total {formatRupiah(obligation.total_amount)}</Text>
+            )}
           </View>
         </View>
 
@@ -626,12 +698,22 @@ export default function LoanDetailScreen() {
                 <TextButton label="Batal" onPress={() => { setPayOpen(false); setPayText(''); }} />
               </View>
             ) : (
-              <Pressable
-                onPress={() => { setPayText(String(suggestedAmount)); setPayOpen(true); }}
-                style={styles.markPaidBtn}
-              >
-                <Text style={styles.markPaidBtnText}>Tandai sudah dibayar</Text>
-              </Pressable>
+              <View style={styles.dualActionRow}>
+                <Pressable
+                  onPress={openTopup}
+                  style={[styles.markPaidBtn, styles.topupBtn]}
+                  accessibilityLabel="Tambah pokok tanggungan"
+                >
+                  <Plus size={16} color={Colors.textPrimary} />
+                  <Text style={styles.markPaidBtnText}>Tambah pokok</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setPayText(String(suggestedAmount)); setPayOpen(true); }}
+                  style={[styles.markPaidBtn, { flex: 1 }]}
+                >
+                  <Text style={styles.markPaidBtnText}>Tandai sudah dibayar</Text>
+                </Pressable>
+              </View>
             )}
           </View>
         )}
@@ -797,6 +879,161 @@ export default function LoanDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Tambah pokok — Phase 17 */}
+      <Modal
+        visible={topupOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTopupOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.scheduleCard}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.scheduleHeader}>
+              <Text style={styles.modalTitle}>Tambah pokok</Text>
+              <Pressable onPress={() => setTopupOpen(false)} hitSlop={10} accessibilityLabel="Tutup">
+                <X size={20} color={Colors.textPrimary} />
+              </Pressable>
+            </View>
+            {topupBlock ? (
+              <View style={{ gap: 16, paddingBottom: 24 }}>
+                <View style={styles.topupBlockBox}>
+                  <Text style={styles.topupBlockTitle}>
+                    {topupBlock === 'SCHEDULED' ? 'Tanggungan ini punya jadwal cicilan' : 'Tanggungan sudah selesai'}
+                  </Text>
+                  <Text style={styles.topupBlockBody}>
+                    {topupBlockMessage(topupBlock, openInstallmentCount)}
+                  </Text>
+                </View>
+                <View style={styles.modalActions}>
+                  <View style={{ flex: 1 }}>
+                    <TextButton label="Tutup" onPress={() => setTopupOpen(false)} />
+                  </View>
+                  {topupBlock === 'SCHEDULED' && (
+                    <View style={{ flex: 1 }}>
+                      <PrimaryButton
+                        label="Atur cicilan"
+                        onPress={() => { setTopupOpen(false); openSchedule(); }}
+                      />
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : (
+              <ScrollView
+                contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={styles.fieldLabel}>NOMINAL TAMBAHAN</Text>
+                <TextInput
+                  value={topupText}
+                  onChangeText={setTopupText}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.payAmountInput}
+                />
+                <Text style={styles.fieldLabel}>TANGGAL</Text>
+                <TextInput
+                  value={topupDate}
+                  onChangeText={setTopupDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.inputBox}
+                />
+                <Text style={styles.fieldLabel}>CATATAN (OPSIONAL)</Text>
+                <TextInput
+                  value={topupNote}
+                  onChangeText={setTopupNote}
+                  maxLength={280}
+                  placeholder="mis. pinjam lagi untuk biaya sekolah"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.inputBox}
+                />
+
+                <View style={styles.topupInflowCard}>
+                  <View style={styles.topupInflowRow}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.topupInflowTitle}>Uang masuk ke rekening</Text>
+                      <Text style={styles.topupInflowSub}>Matikan kalau cuma mencatat talangan</Text>
+                    </View>
+                    <Switch
+                      value={topupInflow}
+                      onValueChange={setTopupInflow}
+                      trackColor={{ false: Colors.borderStrong, true: Colors.navy }}
+                      thumbColor={Colors.white}
+                      accessibilityLabel="Uang masuk ke rekening"
+                    />
+                  </View>
+                  {topupInflow && (
+                    inflowAccounts.length === 0 ? (
+                      <Text style={styles.topupInflowSub}>Belum ada rekening bank atau e-wallet aktif.</Text>
+                    ) : (
+                      <View style={styles.reasonList}>
+                        {inflowAccounts.map((a) => (
+                          <Pressable
+                            key={a.id}
+                            onPress={() => setTopupAccountId(a.id)}
+                            style={[styles.reason, topupAccountId === a.id && styles.reasonActive]}
+                          >
+                            <Text style={[styles.reasonText, topupAccountId === a.id && styles.reasonTextActive]}>
+                              Masuk ke {a.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )
+                  )}
+                </View>
+
+                <View style={styles.previewBox}>
+                  <View style={styles.topupPreviewRow}>
+                    <Text style={styles.previewLine}>Total tanggungan</Text>
+                    <Text style={styles.previewTitle}>
+                      {formatRupiah(topupFigures.totalBefore)} → {formatRupiah(topupFigures.totalAfter)}
+                    </Text>
+                  </View>
+                  <View style={styles.topupPreviewRow}>
+                    <Text style={styles.previewLine}>Sisa tanggungan</Text>
+                    <Text style={styles.previewTitle}>
+                      {formatRupiah(topupFigures.remainingBefore)} → {formatRupiah(topupFigures.remainingAfter)}
+                    </Text>
+                  </View>
+                  {topupInflow && topupAccount && topupFigures.amount > 0 && (
+                    <View style={styles.topupPreviewRow}>
+                      <Text style={styles.previewLine}>Saldo {topupAccount.name}</Text>
+                      <Text style={[styles.previewTitle, { color: Colors.financingText }]}>
+                        +{formatRupiah(topupFigures.amount)}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={styles.previewLine}>{topupInflowHint(topupInflow)}</Text>
+                </View>
+
+                {obligation.created_by && obligation.created_by !== myUserId && (
+                  <View style={styles.notifyRow}>
+                    <Bell size={14} color={Colors.accentStrong} />
+                    <Text style={styles.notifyText}>
+                      {memberName(members, obligation.created_by) ?? 'Pengaju'} (pengaju) akan diberi tahu.
+                    </Text>
+                  </View>
+                )}
+
+                {topupErr && <Text style={styles.errBanner}>{topupErr}</Text>}
+
+                <PrimaryButton
+                  label={topupSubmitLabel(topupFigures.amount, topup.isPending)}
+                  onPress={saveTopup}
+                />
+              </ScrollView>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -870,6 +1107,10 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.5,
+  },
+  heroSub: {
+    fontSize: 12.5,
+    color: Colors.textSecondary,
   },
 
   /* Segmented Control */
@@ -1091,6 +1332,54 @@ const styles = StyleSheet.create({
   dualActionRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  topupBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: Colors.surface,
+  },
+  topupBlockBox: {
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: Colors.loanBg,
+    gap: 4,
+  },
+  topupBlockTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.loanText,
+  },
+  topupBlockBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.loanText,
+  },
+  topupInflowCard: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+    gap: 10,
+  },
+  topupInflowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  topupInflowTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  topupInflowSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  topupPreviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   editBtn: {
     flex: 1,

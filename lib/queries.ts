@@ -39,6 +39,7 @@ import {
   defaultFlowType,
   ledgerDisplayAmount,
   reconciliationPreview,
+  normalizeAmount,
   resolveModeAmount,
 } from './zero-based';
 import type {
@@ -2271,6 +2272,38 @@ export function useConfigureObligationInstallments() {
       qc.invalidateQueries({ queryKey: ['installments'] });
       qc.invalidateQueries({ queryKey: ['oblig'] });
     },
+  });
+}
+
+/**
+ * Tambah pokok (migration 036): raises what the tanggungan still owes, and with
+ * an account also records the money that came in, in one RPC.
+ */
+export function useTopupObligation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      householdId: string;
+      obligationId: string;
+      amount: number;
+      occurredOn: string;
+      accountId: string | null;
+      note?: string | null;
+    }) => {
+      const amount = normalizeAmount(args.amount);
+      if (!(amount > 0)) throw new Error('Nominal tambahan harus lebih dari Rp 0.');
+      const sb = requireSupabase();
+      const { error } = await sb.rpc('topup_obligation', {
+        p_household_id: args.householdId,
+        p_obligation_id: args.obligationId,
+        p_amount: amount,
+        p_occurred_on: args.occurredOn,
+        p_account_id: args.accountId,
+        p_note: args.note?.trim() ? args.note.trim() : null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => invalidateMoneyKeys(qc),
   });
 }
 

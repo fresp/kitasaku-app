@@ -18,7 +18,8 @@ export type ObligationEventKind =
   | 'PAYMENT'
   | 'SCHEDULE_CHANGED'
   | 'CANCELLED'
-  | 'STATUS_CHANGED';
+  | 'STATUS_CHANGED'
+  | 'TOPUP';
 
 export interface ObligationEvent {
   id: string;
@@ -134,6 +135,22 @@ export function timelineItem(event: ObligationEvent, members: MemberRef[]): Time
         title: `Dibayar sebagian oleh ${who}`,
         subtitle: `${amount}${from} · sisa ${formatRupiah(event.remaining_after ?? 0)}`,
         tone: 'paid',
+      };
+    }
+    case 'TOPUP': {
+      // Migration 036: more debt on the same tanggungan, with or without money in.
+      const account = payloadString(event.payload, 'account_name');
+      const note = payloadString(event.payload, 'note');
+      const parts = [
+        `+${formatRupiah(event.amount ?? 0)}`,
+        account ? `masuk ke ${account}` : null,
+        `sisa ${formatRupiah(event.remaining_after ?? 0)}`,
+      ].filter(Boolean);
+      return {
+        ...base,
+        title: `Pokok ditambah oleh ${who}`,
+        subtitle: parts.join(' · ') + (note ? ` — ${note}` : ''),
+        tone: 'info',
       };
     }
     case 'SCHEDULE_CHANGED':
