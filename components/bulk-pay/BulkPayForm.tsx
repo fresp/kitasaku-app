@@ -11,7 +11,7 @@ import Receipt from 'lucide-react-native/icons/receipt';
 import Wallet from 'lucide-react-native/icons/wallet';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../../constants/theme';
-import { formatRupiah, parseRupiahInput } from '../../lib/format';
+import { formatRupiah, formatRupiahInput, parseRupiahInput } from '../../lib/format';
 import { longDateFullLabel, normalizeObligationType, shortDateLabel } from '../../lib/obligation';
 import { memberName, obligationListSubtitle } from '../../lib/collaboration';
 import { isZeroBasedCashAccount } from '../../lib/account';
@@ -271,7 +271,7 @@ export function BulkPayForm({
                     <View style={[styles.input, partial && styles.inputOn]}>
                       <Text style={styles.prefix}>Rp</Text>
                       <TextInput
-                        value={amountTexts[ob.id] ?? formatRupiah(draft.amount, { withPrefix: false })}
+                        value={amountTexts[ob.id] !== undefined ? formatRupiahInput(amountTexts[ob.id]) : formatRupiah(draft.amount, { withPrefix: false })}
                         onChangeText={(t) => {
                           setAmountTexts((m) => ({ ...m, [ob.id]: t }));
                           setDraft(ob.id, { obligationId: ob.id, kind: 'amount', amount: parseRupiahInput(t) });
@@ -327,7 +327,7 @@ export function BulkPayForm({
             <View style={styles.bigInput}>
               <Text style={styles.bigPrefix}>Rp</Text>
               <TextInput
-                value={totalText ?? formatRupiah(subtotal, { withPrefix: false })}
+                value={totalText !== null ? formatRupiahInput(totalText) : formatRupiah(subtotal, { withPrefix: false })}
                 onChangeText={setTotalText}
                 onBlur={() => {
                   if (totalText !== null && parseRupiahInput(totalText) === subtotal) setTotalText(null);

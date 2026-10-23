@@ -157,3 +157,30 @@ export function nonCashSpend(txns: CashflowTxn[]): number {
   }
   return total;
 }
+
+export interface PendingPlanTotals {
+  count: number;
+  amount: number;
+}
+
+/**
+ * The ledger banner's two figures: plans still to pay and income still to
+ * arrive. They used to be one sum, so two pending salaries were reported as
+ * Rp 20 jt of unpaid bills. Each side is summed on its own and never netted.
+ *
+ * Outgoing is split by `direction`, the same rule Home's unpaid count uses,
+ * so the two screens report the same bills.
+ */
+export function splitPendingPlans(
+  rows: readonly { status: string; direction: 'INCOME' | 'EXPENSE'; displayAmount: number }[]
+): { outgoing: PendingPlanTotals; incoming: PendingPlanTotals } {
+  const outgoing = { count: 0, amount: 0 };
+  const incoming = { count: 0, amount: 0 };
+  for (const r of rows) {
+    if (r.status !== 'PENDING') continue;
+    const side = r.direction === 'INCOME' ? incoming : outgoing;
+    side.count += 1;
+    side.amount += r.displayAmount;
+  }
+  return { outgoing, incoming };
+}

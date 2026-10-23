@@ -42,6 +42,27 @@ export function unpaidPlansLabel(count: number, amount: number): string {
 }
 
 /**
+ * The ledger banner's second line: planned income that has not arrived yet.
+ * Kept apart from unpaidPlansLabel so money coming in is never added to the
+ * bills going out.
+ */
+export function pendingIncomeLabel(count: number, amount: number): string {
+  return `${count} pemasukan belum diterima · ${formatRupiah(amount)}`;
+}
+
+/**
+ * The integer-rupiah digits of a typed or pasted money string.
+ *
+ * A pasted id-ID figure can carry sen ("600.000,00", "Rp 1.250.000,50").
+ * Stripping every non-digit from that would turn Rp 600.000 into
+ * Rp 60.000.000, so a trailing comma with one or two digits is cut first.
+ * Amounts are whole rupiah, so the fraction is dropped, not rounded.
+ */
+function rupiahDigits(text: string): string {
+  return text.trim().replace(/,\d{1,2}$/, '').replace(/[^0-9]/g, '');
+}
+
+/**
  * Digits of a typed money field, as an integer.
  *
  * Everything that is not a digit is dropped, so a value already carrying its
@@ -49,7 +70,7 @@ export function unpaidPlansLabel(count: number, amount: number): string {
  * with spaces or a stray "Rp".
  */
 export function parseRupiahInput(text: string): number {
-  const digits = text.replace(/[^0-9]/g, '');
+  const digits = rupiahDigits(text);
   if (!digits) return 0;
   const value = Number(digits);
   return Number.isSafeInteger(value) ? value : 0;
@@ -65,7 +86,7 @@ export function parseRupiahInput(text: string): number {
  * still show.
  */
 export function formatRupiahInput(text: string): string {
-  const digits = text.replace(/[^0-9]/g, '');
+  const digits = rupiahDigits(text);
   if (!digits) return '';
   return formatRupiah(parseRupiahInput(digits), { withPrefix: false });
 }

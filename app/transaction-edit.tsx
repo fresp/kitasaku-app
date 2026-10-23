@@ -19,7 +19,7 @@ import Trash2 from 'lucide-react-native/icons/trash';
 import Wallet from 'lucide-react-native/icons/wallet';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../constants/theme';
-import { formatRupiah } from '../lib/format';
+import { formatRupiah, formatRupiahInput, parseRupiahInput } from '../lib/format';
 import { longDateFullLabel } from '../lib/obligation';
 import {
   useAccounts,
@@ -36,8 +36,7 @@ import { PrimaryButton } from '../components/ui/Button';
 import { QueryError } from '../components/ui/QueryError';
 
 function parseAmount(text: string): number {
-  const digits = text.replace(/[^0-9]/g, '');
-  return digits ? parseInt(digits, 10) : 0;
+  return parseRupiahInput(text);
 }
 
 function todayISO(): string {
@@ -233,8 +232,9 @@ export default function TransactionEditScreen() {
                   <Text style={styles.nominalPrefix}>Rp</Text>
                   <TextInput
                     value={
-                      amountText ??
-                      formatRupiah(currentAmount, { withPrefix: false })
+                      amountText !== null
+                        ? formatRupiahInput(amountText)
+                        : formatRupiah(currentAmount, { withPrefix: false })
                     }
                     onChangeText={setAmountText}
                     style={styles.nominalInput}

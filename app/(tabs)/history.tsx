@@ -21,7 +21,7 @@ import Clock from 'lucide-react-native/icons/clock';
 import X from 'lucide-react-native/icons/x';
 import Layers from 'lucide-react-native/icons/layers';
 import { Colors, Radius } from '../../constants/theme';
-import { formatRupiah, unpaidPlansLabel } from '../../lib/format';
+import { formatRupiah, pendingIncomeLabel, unpaidPlansLabel } from '../../lib/format';
 import { categoryIconName } from '../../lib/category-icon';
 import { selectHistoryCycle } from '../../lib/cycle-history';
 import { BrandIcon } from '../../components/ui/BrandIcon';
@@ -43,6 +43,7 @@ import {
 } from '../../lib/zero-based';
 import type { FlowType } from '../../lib/zero-based';
 import { groupCountLabel, groupLedgerByBatch } from '../../lib/bulk-pay';
+import { splitPendingPlans } from '../../lib/cashflow';
 
 const FLOW_LABELS: Record<FlowType, string> = {
   OPERATING_INCOME: 'Income Operasional',
@@ -163,18 +164,11 @@ export default function HistoryScreen() {
     [narrowed, status]
   );
 
-  const pendingCount = useMemo(
-    () => allRows.filter((r) => r.status === 'PENDING').length,
-    [allRows]
-  );
   // The banner carries the amount too, so it ties back to Home's "setelah N
-  // tagihan dibayar" instead of being a bare count.
-  const pendingAmount = useMemo(
-    () => allRows
-      .filter((r) => r.status === 'PENDING')
-      .reduce((sum, r) => sum + r.displayAmount, 0),
-    [allRows]
-  );
+  // tagihan dibayar" instead of being a bare count. Pending income is its own
+  // line: summed with the bills it read as money owed.
+  const pendingTotals = useMemo(() => splitPendingPlans(allRows), [allRows]);
+  const pendingCount = pendingTotals.outgoing.count + pendingTotals.incoming.count;
 
   // "Belum dieksekusi" is a checklist, not a page: it always shows every pending
   // row, so it can never disagree with the banner above it. Paging applies to the
@@ -415,9 +409,20 @@ export default function HistoryScreen() {
               <Clock size={16} color={Colors.warning} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.bulkBannerTitle}>
-                {unpaidPlansLabel(pendingCount, pendingAmount)}
-              </Text>
+              {pendingTotals.outgoing.count > 0 && (
+                <Text style={styles.bulkBannerTitle}>
+                  {unpaidPlansLabel(pendingTotals.outgoing.count, pendingTotals.outgoing.amount)}
+                </Text>
+              )}
+              {pendingTotals.incoming.count > 0 && (
+                <Text
+                  style={
+                    pendingTotals.outgoing.count > 0 ? styles.bulkBannerIncome : styles.bulkBannerTitle
+                  }
+                >
+                  {pendingIncomeLabel(pendingTotals.incoming.count, pendingTotals.incoming.amount)}
+                </Text>
+              )}
               <Text style={styles.bulkBannerSub}>Tap untuk checklist &amp; eksekusi</Text>
             </View>
             <ChevronRight size={16} color={Colors.textMuted} />
@@ -718,7 +723,9 @@ function LedgerCard({
         </Text>
         {isPending && (
           <View style={styles.statusBadgeRow}>
-            <Text style={styles.statusPending}>Belum lunas</Text>
+            <Text style={isIncome ? styles.statusPendingIncome : styles.statusPending}>
+              {isIncome ? 'Belum diterima' : 'Belum lunas'}
+            </Text>
           </View>
         )}
         {isCancelled && (
@@ -1028,6 +1035,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
   },
+  bulkBannerIncome: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
   bulkBannerSub: {
     fontSize: 10.5,
     color: Colors.textSecondary,
@@ -1123,6 +1136,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: Colors.alertText,
+  },
+  statusPendingIncome: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.chartIncome,
   },
   statusBatal: {
     fontSize: 10,

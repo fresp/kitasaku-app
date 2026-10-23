@@ -4,7 +4,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Radius } from '../constants/theme';
-import { formatRupiah } from '../lib/format';
+import { formatRupiah, formatRupiahInput, parseRupiahInput } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import {
   CANCELLATION_REASONS,
@@ -25,8 +25,7 @@ import { QueryError } from '../components/ui/QueryError';
 import { KabariCard, useKabariState } from '../components/collaboration/KabariCard';
 
 function parseAmount(text: string): number {
-  const digits = text.replace(/[^0-9]/g, '');
-  return digits ? parseInt(digits, 10) : 0;
+  return parseRupiahInput(text);
 }
 
 export default function PaymentConfirmScreen() {
@@ -278,7 +277,7 @@ export default function PaymentConfirmScreen() {
           <Text style={styles.amountLabel}>{isIncome ? 'Nominal diterima' : 'Nominal pembayaran'}</Text>
           <Text style={styles.amountValue}>{formatRupiah(actualAmount)}</Text>
           <TextInput
-            value={amountText}
+            value={formatRupiahInput(amountText)}
             onChangeText={setAmountText}
             placeholder={`Rencana ${formatRupiah(planned)}`}
             placeholderTextColor={Colors.textMuted}

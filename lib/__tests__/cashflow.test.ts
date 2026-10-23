@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcCashflow, nonCashSpend, homeCashBalances } from '../cashflow';
+import { calcCashflow, nonCashSpend, homeCashBalances, splitPendingPlans } from '../cashflow';
 import type { Txn } from '../queries';
 
 function txn(overrides: Partial<Txn>): Txn {
@@ -130,5 +130,38 @@ describe('calcCashflow pendingOutflowCount', () => {
     expect(flow.pendingCount).toBe(2);
     expect(flow.pendingOutflowCount).toBe(1);
     expect(flow.pendingExpense).toBe(300_000);
+  });
+});
+
+describe('splitPendingPlans', () => {
+  const row = (status: string, direction: 'INCOME' | 'EXPENSE', displayAmount: number) =>
+    ({ status, direction, displayAmount });
+
+  it('keeps pending income out of the unpaid bills', () => {
+    const { outgoing, incoming } = splitPendingPlans([
+      row('PENDING', 'EXPENSE', 40_000),
+      row('PENDING', 'EXPENSE', 2_314_440),
+      row('PENDING', 'INCOME', 10_047_995),
+      row('PENDING', 'INCOME', 10_834_000),
+    ]);
+    expect(outgoing).toEqual({ count: 2, amount: 2_354_440 });
+    expect(incoming).toEqual({ count: 2, amount: 20_881_995 });
+  });
+
+  it('ignores executed and cancelled rows', () => {
+    const { outgoing, incoming } = splitPendingPlans([
+      row('PAID', 'EXPENSE', 500_000),
+      row('CANCELLED', 'INCOME', 1_000_000),
+      row('PENDING', 'EXPENSE', 50_000),
+    ]);
+    expect(outgoing).toEqual({ count: 1, amount: 50_000 });
+    expect(incoming).toEqual({ count: 0, amount: 0 });
+  });
+
+  it('returns zeros for an empty cycle', () => {
+    expect(splitPendingPlans([])).toEqual({
+      outgoing: { count: 0, amount: 0 },
+      incoming: { count: 0, amount: 0 },
+    });
   });
 });

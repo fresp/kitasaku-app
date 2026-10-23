@@ -16,7 +16,7 @@ import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Info from 'lucide-react-native/icons/info';
 import X from 'lucide-react-native/icons/x';
 import { Colors, Radius } from '../constants/theme';
-import { formatRupiah, formatRupiahShort } from '../lib/format';
+import { formatRupiah, formatRupiahInput, formatRupiahShort, parseRupiahInput } from '../lib/format';
 import { defaultAccountId } from '../lib/account';
 import { useAuth } from '../lib/auth-context';
 import {
@@ -48,8 +48,7 @@ import { BrandIcon } from '../components/ui/BrandIcon';
 import { LinkedEffectCard } from '../components/quick-add/LinkedEffectCard';
 
 function parseAmount(text: string): number {
-  const digits = text.replace(/[^0-9]/g, '');
-  return digits ? parseInt(digits, 10) : 0;
+  return parseRupiahInput(text);
 }
 
 function todayISO(): string {
@@ -401,7 +400,7 @@ export default function QuickAddScreen() {
             <View style={styles.nominalBox}>
               <Text style={styles.nominalPrefix}>Rp</Text>
               <TextInput
-                value={amountText}
+                value={formatRupiahInput(amountText)}
                 onChangeText={setAmountText}
                 placeholder="0"
                 placeholderTextColor={Colors.textMuted}
