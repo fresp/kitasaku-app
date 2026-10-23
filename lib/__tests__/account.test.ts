@@ -7,6 +7,7 @@ import {
   normalizeAccountNumber,
   resolveAccountIcon,
   splitPlannedExpense,
+  cashPlannedAmount,
   sortAccounts,
   validateAccountNumber,
   defaultAccountId,
@@ -100,5 +101,18 @@ describe('splitPlannedExpense', () => {
     const rows = [{ amount: 250_000, account_id: 'bank-1', accounts: { type: 'BANK' } }];
     const split = splitPlannedExpense(rows, null, amountOf);
     expect(split.amounts).toEqual({ primary: 0, otherCash: 250_000, card: 0 });
+  });
+});
+
+describe('cashPlannedAmount', () => {
+  it('excludes card rows so the opening gate matches the live cash view', () => {
+    const rows = [
+      { amount: 19_754_383, account_id: 'bank-1', accounts: { type: 'BANK' } },
+      { amount: 1_000_000, account_id: 'cc', accounts: { type: 'CREDIT_CARD' } },
+      { amount: 50_000, account_id: 'wallet', accounts: { type: 'E_WALLET' } },
+    ];
+    const split = splitPlannedExpense(rows, 'bank-1', (r) => r.amount);
+    expect(cashPlannedAmount(split)).toBe(19_804_383);
+    expect(cashPlannedAmount(split) + split.amounts.card).toBe(split.total);
   });
 });

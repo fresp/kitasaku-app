@@ -8,7 +8,7 @@ import { formatRupiah } from '../lib/format';
 import { useAuth } from '../lib/auth-context';
 import { cycleWindowFrom } from '../lib/profile';
 import { useAccounts, useActiveCycle, useCategories, useCreateCycle, useObligations, useTemplates } from '../lib/queries';
-import { cyclePrimaryAccountId, defaultAccountId, splitPlannedExpense } from '../lib/account';
+import { cashPlannedAmount, cyclePrimaryAccountId, defaultAccountId, splitPlannedExpense } from '../lib/account';
 import { cycleReadiness } from '../lib/zero-based';
 import { Badge } from '../components/ui/Badge';
 import { PrimaryButton, TextButton } from '../components/ui/Button';
@@ -102,10 +102,6 @@ export default function NewCycleScreen() {
   // did before: the EXPENSE side is what gets written to `cycle_allocations`
   // when the cycle opens, so the gate and the stored plan have to agree.
   const selectedExpense = selected.filter((t) => t.direction === 'EXPENSE');
-  const recurringExpense = selectedExpense.reduce(
-    (s, t) => s + amountFor(t.id, t.default_amount),
-    0
-  );
 
   // Where each routine position takes its money from. The rule itself lives in
   // lib/account.ts so the gate and the breakdown can never disagree about what
@@ -119,9 +115,19 @@ export default function NewCycleScreen() {
   const primaryAccountName =
     accsQ.data?.find((a) => a.id === activePrimaryId)?.name ?? 'akun primer';
   const nonCashPlanned = expenseSplit.amounts.card;
-  const recurringIncome = selected
-    .filter((t) => t.direction === 'INCOME')
-    .reduce((s, t) => s + amountFor(t.id, t.default_amount), 0);
+  // Only cash-account rows feed the gate. A card position is still cloned (its
+  // allocation is written against the card), but the live zero-based view
+  // ignores non-cash allocations and sources, so counting it here blocked a
+  // plan the opened cycle would report as funded. The card's bill reaches the
+  // cycle later as a DEBT_PAYMENT.
+  const recurringExpense = cashPlannedAmount(expenseSplit);
+  const recurringIncome = cashPlannedAmount(
+    splitPlannedExpense(
+      selected.filter((t) => t.direction === 'INCOME'),
+      activePrimaryId,
+      (t) => amountFor(t.id, t.default_amount)
+    )
+  );
 
   const openObligations = useMemo(
     () => (obligQ.data ?? []).filter((o) => o.remaining_amount > 0 && o.status !== 'SETTLED' && o.status !== 'CANCELLED'),
@@ -469,7 +475,7 @@ export default function NewCycleScreen() {
           }}
           allocations={{
             expense: recurringExpense,
-            expenseCount: selectedExpense.length,
+            expenseCount: expenseSplit.counts.primary + expenseSplit.counts.otherCash,
             expenseLines: [
               {
                 label: primaryAccountName,
@@ -481,11 +487,6 @@ export default function NewCycleScreen() {
                 value: expenseSplit.amounts.otherCash,
                 count: expenseSplit.counts.otherCash,
               },
-              {
-                label: 'Kartu kredit · ditagih siklus berikutnya',
-                value: expenseSplit.amounts.card,
-                count: expenseSplit.counts.card,
-              },
             ],
             debtPayment: totalDebtPayment,
             debtCount: selectedObligations.length,
@@ -496,11 +497,12 @@ export default function NewCycleScreen() {
           }}
           readiness={readiness}
           note={
-            fundingGap > 0
+            (fundingGap > 0
               ? `Kebutuhan ${formatRupiah(requiredAllocation)} melebihi sumber dana ${formatRupiah(sourceFunds)}. Tutup gap dengan menambah pemasukan, melepas pos rutin yang tidak dipakai, atau menunda kewajiban ke siklus berikutnya.`
-              : nonCashPlanned > 0
-                ? `${unallocatedLabel} Catatan: ${formatRupiah(nonCashPlanned)} dari rencana di atas ada di kartu kredit dan masih ikut dihitung sebagai kebutuhan siklus ini, padahal kasnya baru keluar saat tagihannya dibayar.`
-                : unallocatedLabel
+              : unallocatedLabel) +
+            (nonCashPlanned > 0
+              ? ` ${expenseSplit.counts.card} pos kartu kredit (${formatRupiah(nonCashPlanned)}) tetap di-clone tapi tidak dihitung di sini; kasnya keluar saat tagihannya dibayar di siklus berikutnya.`
+              : '')
           }
           strategies={
             fundingGap > 0 ? (

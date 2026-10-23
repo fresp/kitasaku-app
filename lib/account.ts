@@ -205,3 +205,14 @@ export function splitPlannedExpense<T extends PlannedExpenseRow>(
   }
   return { amounts, counts, total };
 }
+
+/**
+ * The part of a split that this cycle's cash actually carries. Card rows are
+ * left out: the live zero-based view only counts allocations and sources on
+ * BANK/E_WALLET (`aggregateCashAllocations`, `aggregateCashSourceFunds`), so
+ * the opening gate must use the same base or it blocks a plan the live cycle
+ * would call funded.
+ */
+export function cashPlannedAmount(split: PlannedExpenseSplit): number {
+  return split.amounts.primary + split.amounts.otherCash;
+}
