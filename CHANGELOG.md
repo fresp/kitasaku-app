@@ -4,6 +4,35 @@ All notable changes to Kitasaku are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] — 2026-10-24
+
+A fix release: closing a cycle works again, opening one no longer trips on card positions,
+and the Transaksi tab stops counting incoming salary as unpaid bills.
+
+### Fixed
+
+- **Tutup siklus.** Closing a cycle failed before writing anything with a "record is not
+  assigned yet" error. It now completes, and the result card with "Buka Siklus Baru" and "Ke
+  Beranda" stays on screen after the active cycle clears.
+- **Buka siklus.** Routine positions charged to a credit card no longer count toward the
+  opening funding gate, so a plan the opened cycle reports as funded is no longer blocked.
+  The card's bill still reaches the cycle later as a debt payment.
+- **Banner Transaksi.** "N tagihan belum dibayar" now counts only money going out. Pending
+  income gets its own line ("N pemasukan belum diterima"), and those rows read "Belum
+  diterima" instead of "Belum lunas".
+- **Input nominal.** Amounts in Quick Add (including Bayar tanggungan), Edit Transaksi and
+  Konfirmasi Pembayaran show thousands separators while typing. A pasted figure with sen,
+  such as "600.000,00", is read as Rp 600.000 instead of Rp 60.000.000.
+
+### Upgrade notes
+
+- Apply `037_fix_close_cycle_record_alias.sql` in the Supabase SQL Editor (after
+  `001`–`031` and `033`–`036`) and run its verification block. Until it is applied, closing
+  a cycle keeps failing on every build.
+- No new native module. If the native fingerprint still matches the 1.3.0 build, this can ship
+  as an OTA update (`eas update --channel production`); otherwise build and publish a new APK
+  and update `app_releases`.
+
 ## [1.3.0] — 2026-10-21
 
 When a tanggungan grows, for example borrowing again from the same person, the extra amount
