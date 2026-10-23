@@ -130,7 +130,30 @@ export default function ReconciliationScreen() {
         {previewQ.isError && <QueryError onRetry={() => previewQ.refetch()} retrying={previewQ.isFetching} message="Proyeksi rekonsiliasi belum bisa dibaca. Datamu tidak hilang." />}
         {cycleQ.isError && <QueryError onRetry={() => cycleQ.refetch()} retrying={cycleQ.isFetching} message="Siklus aktif belum bisa dibaca." />}
 
-        {!cycle && !cycleQ.isLoading && <Text style={styles.muted}>Belum ada siklus aktif.</Text>}
+        {/* Closing deactivates the cycle and the mutation invalidates ['cycle'],
+            so `cycle` turns null right after success and everything gated on
+            it unmounts. The outcome is kept in local state and rendered here,
+            outside that gate, so the family sees the result and a way on. */}
+        {closeResult && (
+          <>
+            <View style={styles.successCard}>
+              <CircleCheckBig size={21} color={Colors.paidText} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.successTitle}>Siklus berhasil ditutup</Text>
+                <Text style={styles.body}>
+                  {closeResult.sweptAccountCount > 0
+                    ? `${closeResult.sweptAccountCount} akun disapu · ${formatRupiah(closeResult.sweptAmount)}`
+                    : closeResult.sweepSkipped
+                      ? 'Sapu akun dilewati sesuai pilihan.'
+                      : 'Tidak ada saldo akun lain yang perlu disapu.'}
+                </Text>
+              </View>
+            </View>
+            <PrimaryButton label="Buka Siklus Baru" onPress={() => router.replace('/new-cycle')} />
+            <SecondaryButton label="Ke Beranda" onPress={() => router.replace('/(tabs)')} />
+          </>
+        )}
+        {!cycle && !closeResult && !cycleQ.isLoading && <Text style={styles.muted}>Belum ada siklus aktif.</Text>}
         {cycle && !cycle.primary_account_id && (
           <View style={styles.warningCard}>
             <TriangleAlert size={20} color={Colors.alertText} />
@@ -210,19 +233,6 @@ export default function ReconciliationScreen() {
                     )}
                   </View>
                 )}
-              </View>
-            )}
-            {closeResult && (
-              <View style={styles.successCard}>
-                <CircleCheckBig size={21} color={Colors.paidText} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.successTitle}>Siklus berhasil ditutup</Text>
-                  <Text style={styles.body}>
-                    {closeResult.sweepSkipped
-                      ? 'Sapu akun dilewati sesuai pilihan.'
-                      : `${closeResult.sweptAccountCount} akun disapu · ${formatRupiah(closeResult.sweptAmount)}`}
-                  </Text>
-                </View>
               </View>
             )}
 
